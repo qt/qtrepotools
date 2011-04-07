@@ -1,0 +1,138 @@
+#!/usr/bin/perl -w
+####################################################################################################
+#
+# git-qt-grafts
+#
+# Sets up the proper grafts for a Qt repository
+#
+# Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+# Contact: Nokia Corporation (qt-info@nokia.com)
+#
+####################################################################################################
+
+use File::Basename;
+use Cwd 'abs_path';
+use strict;
+
+my $history_location;
+
+# Syntax:  fileContents(filename)
+# Returns: String with contents of the file, or empty string if file
+#          doens't exist.
+sub fileContents {
+    my ($filename) = @_;
+    my $filecontents = "";
+    if (-e $filename) {
+        open(I, "< $filename") || die "Could not open $filename for reading, read block?";
+        local $/;
+        binmode I;
+        $filecontents = <I>;
+        close I;
+    }
+    return $filecontents;
+}
+
+sub fileContains {
+    my ($filename, $text) = @_;
+    # purposely not using perl grep here
+    foreach my $line (split /\n/, fileContents("$filename")) {
+        return 1 if ("$line" eq "$text");
+    }
+    return 0;
+}
+
+sub showUsage {
+    my $prg = basename($0);
+    print "Usage: $prg <path to Qt history>:\n";
+}
+
+while ( @ARGV ) {
+    my $arg = shift @ARGV;
+    if ($arg eq "-?" || $arg eq "-h" || $arg eq "-help" || $arg eq "?") {
+        showUsage();
+        exit 0;
+    } elsif (!$history_location) {
+        $history_location = $arg;
+    } else {
+        print "Unknown option: $arg\n\n";
+        showUsage();
+        exit 1;
+    }
+}
+
+# Get current git-dir
+my $git_dir = `git rev-parse --git-dir`;
+chomp $git_dir;
+if (!$git_dir) {
+    print "Cannot find any Git dir!\n";
+    exit 1;
+}
+
+# validate path for history repo
+if (!$history_location || !-e $history_location) {
+    print "You need to provide a path to the monolithic Qt repo!\n";
+    exit 1;
+}
+my $history_alternates_objects = `cd $history_location && git rev-parse --git-dir`;
+chomp $history_alternates_objects ;
+if (!$history_alternates_objects  || !-e "$history_alternates_objects/objects") {
+    print "Monolithic Qt repo path is not a valid Git repo!\n";
+    exit 1;
+}
+$history_alternates_objects = abs_path("$history_location/$history_alternates_objects/objects");;
+
+# check if we already point to this alternate object store
+my $git_alternates_file = "$git_dir/objects/info/alternates";
+my $found_alternate = fileContains($git_alternates_file, $history_alternates_objects);
+
+# get first commit SHA1 of this repo which mentions branching from a commit
+my $GIT_REVLIST;
+my $git_pid = open(GIT_REVLIST, "git rev-list --reverse --grep='Branched from .*at commit' HEAD |");
+my $first_commit = <GIT_REVLIST>;
+chomp $first_commit;
+close(GIT_REVLIST);
+
+# find the graft point which the first commit mentions
+my $first_commit_msg = `git show -s --format=%B $first_commit`;
+my $graft_to_commit = $first_commit_msg;
+$graft_to_commit =~ s/^.+Branched from .+at commit\n([a-f0-9]+)\n.*/$1/s;
+if (!$graft_to_commit || $graft_to_commit eq $first_commit_msg) {
+    $first_commit_msg =~ s/\n([^\n])/\n    $1/g; #indent msg
+    print "This repo does not refer to a graft point, so no grafts added!\n";
+    print "\nFirst commit message of this repo:".
+          "\n----------------------------------\n    ".
+          $first_commit_msg;
+    exit 0;
+}
+
+# check that we don't already have this graft already setup
+my $graft_file = "$git_dir/info/grafts";
+my $graft_line = "$first_commit $graft_to_commit";
+my $found_graft = fileContains($graft_file, $graft_line);
+if ($found_graft) {
+    print "This repo already grafts to the proper commit\n";
+    exit 0;
+}
+
+# verify that alternate object store contains the commit we want to graft to
+my $validated_object = `cd $history_location && git rev-parse --verify $graft_to_commit`;
+chomp $validated_object;
+if ("$validated_object" ne "$graft_to_commit") {
+    print "History repo ($history_location) does not contain commit $graft_to_commit!\n";
+    exit 1;
+}
+
+# if our alternates file didn't contain the "history repo" path already
+# add its path now
+if (!$found_alternate) {
+    open(I, ">> $git_alternates_file") || die "Could not open $git_alternates_file for writing, wrong permissions?";
+    print I "$history_alternates_objects\n";
+    close(I);
+}
+
+# add graft
+open(I, ">> $graft_file") || die "Could not open $graft_file for writing, wrong permissions?";
+print I "$graft_line\n";
+close(I);
+
+print "Grafted $first_commit -> $graft_to_commit\n";
