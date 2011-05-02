@@ -1,0 +1,66 @@
+#!/usr/bin/env perl
+# Copyright (c) 2011 Nokia Corporation and/or its subsidiary(-ies).
+# All rights reserved.
+#
+# Contact:  Nokia Corporation <info@qt.nokia.com>
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use strict;
+use WWW::Mechanize;
+use Config;
+
+unless (scalar @ARGV) {
+    print "Usage: git pasteapply [options] <number> [<number>...]\n" .
+        "Fetches the paste from pastebin.ca numbered <number> and applies\n" .
+        "Options are passed directly to git am\n" .
+        "\n" .
+        "Useful options:\n" .
+        " -s, --signoff         Add Signed-off-by: line to the commit message\n" .
+        " -3, --3way            When the patch does not apply cleanly, fall back on 3-way merge\n" .
+        " -p<n>                 Strip <n> elements of the paths (default 1)\n" .
+        " --whitespace=<nowarn,warn,fix,error,error-all>\n";
+    exit 0;
+}
+my @pastes;
+my @args;
+
+for (@ARGV) {
+    if (m/^-/) {
+        push @args, $_;
+    } else {
+        push @pastes, $_;
+    }
+}
+
+open GIT_AM, "|-", "git", "am", @args, "-"
+    or die "Cannot start git-am: $!";
+
+my $www = WWW::Mechanize->new();
+foreach my $paste (@pastes) {
+    my $url = pastebin_url($paste);
+    print "Applying $url\n";
+    $www->get($url);
+    my $content = $www->content();
+    $content =~ s/\r\n/\n/g;
+    print GIT_AM $content;
+}
+
+close GIT_AM;
+exit $?;
+
+sub pastebin_url($) {
+    my $arg = $_[0];
+    return "http://pastebin.ca/raw/$3"
+        if ($arg =~ m,^(https?://)?(.*\.)?pastebin\.ca/([0-9]+),);
+    return "http://pastebin.com/download.php?i=$3"
+        if ($arg =~ m,^(https?://)?(.*\.)?pastebin.com/([a-zA-Z0-9]+)$,);
+
+    return $arg if ($arg =~ m,^http://,); # Assume it's plain text...
+
+    # No http:// prefix
+    return "http://pastebin.ca/raw/$arg" if ($ENV{PASTEBIN} =~ /pastebin\.ca/);
+    return "http://pastebin.com/download.php?i=$arg"; # Fallback, assume pastebin.com
+}

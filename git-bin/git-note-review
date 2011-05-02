@@ -1,0 +1,115 @@
+#! /bin/sh
+# Copyright (c) 2011 Nokia Corporation and/or its subsidiary(-ies).
+# All rights reserved.
+#
+# Contact:  Nokia Corporation <info@qt.nokia.com>
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+if test -z "$2"; then
+    cat >&2 <<EOF
+Usage: $0 <user> <sha-1>...
+
+git-note-review adds Reviewed-by: lines to the log messages of the
+named commits. Commits can be specified as either as a single sha1 or
+as a sha1_excl..sha1_incl range (see git rev-list).
+If any <whatever>-by: tag with the specified <user> is found to be
+already present in a given commit, the commit is skipped.
+EOF
+    exit 1
+fi
+
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+if [ -z "$GIT_DIR" ]; then
+    echo >&2 "Not a git repository."
+    exit 1
+fi
+cd "$GIT_DIR/.."
+
+REF=$(git symbolic-ref HEAD 2>/dev/null)
+if [ -z "$REF" ]; then
+    echo >&2 "Not on a branch."
+    exit 1
+fi
+
+if test -n "`git diff HEAD`" ; then
+    echo "You have uncommited changes. Please commit or stash them first." >&2
+    exit 1
+fi
+
+who=$1
+shift
+SHA1s=
+firstSHA1=
+fail=false
+for j in "$@"; do
+    if test -z "${j##*..*}"; then
+        if ! jj=`git rev-list $j 2> /dev/null`; then
+            echo "Cannot parse commit range $j." >&2
+            fail=true
+            continue
+        fi
+        j=$jj
+    fi
+    for ii in $j; do
+        if ! i=`git rev-parse --short $ii 2> /dev/null`; then
+            echo "Cannot parse commit id $ii." >&2
+            fail=true
+            continue
+        fi
+        if test -n "`git rev-list -1 $i ^HEAD`"; then
+            echo "Commit $i is not on current branch. Did you rebase it meanwhile?" >&2
+            fail=true
+            continue
+        fi
+        if git log -1 --pretty=%b $i | egrep -q -i "^[-[:alpha:]]+-by: *$who\$"; then
+            echo "Commit $i already noted as reviewed by $who."
+        else
+            if test -z "$firstSHA1"; then
+                firstSHA1=`git rev-parse $i`
+                SHA1s=$i
+            else
+                firstSHA1=`git merge-base $firstSHA1 $i`
+                SHA1s="$SHA1s|$i"
+            fi
+        fi
+    done
+done
+if $fail; then
+    echo "Exiting due to fatal errors." >&2
+    exit 1
+fi
+if test -z "$SHA1s"; then
+    echo "No commits to change." >&2
+    exit 0
+fi
+
+# This would be pretty much bullet-proof, but also a lot slower.
+#if test -z "$(git rev-list -1 $firstSHA1 --not $(git for-each-ref --format='%(objectname)' refs/remotes/))"; then
+#    echo "$firstSHA1 has already been pushed - cannot edit it." >&2
+#    exit 1
+#fi
+# This should be Good Enough (TM), and it is rather fast.
+if test -n "$(git rev-list -1 $firstSHA1^..@{upstream})"; then
+    echo "Commit `git rev-parse --short $firstSHA1` has already been pushed - cannot edit it." >&2
+    exit 1
+fi
+
+git filter-branch --force --original refs/note-review-backup --msg-filter '
+    if echo $GIT_COMMIT | egrep -q "^('"$SHA1s"')"; then
+        sed "s/^\\(Reviewed-by:\\) *\\(pending\\|tbd\\|TBD\\)\$/\\1 '"$who"'/;t nx
+\${
+/^[-[:alpha:]]\+:/!a\\
+
+a\\
+Reviewed-by: '"$who"'
+}
+b
+:nx;n;b nx"
+    else
+        cat
+    fi
+' $firstSHA1^..$REF || exit 1
+rm -rf $GIT_DIR/refs/note-review-backup # we have the reflog, so what

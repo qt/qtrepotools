@@ -1,0 +1,385 @@
+#! /usr/bin/perl -w
+# Copyright (c) 2011 Nokia Corporation and/or its subsidiary(-ies).
+# All rights reserved.
+#
+# Contact:  Nokia Corporation <info@qt.nokia.com>
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use strict;
+
+if ($#ARGV < 0 or $#ARGV > 1 || ($#ARGV == 1 && $ARGV[1] ne "strict")) {
+    print STDERR "Usage: $0 <sha1> [strict]\n";
+    exit 2;
+}
+my $sha1 = $ARGV[0];
+my $strict = ($#ARGV == 1);
+
+my %cfg = ();
+if (defined $ENV{GIT_PUSH}) {
+    foreach my $c (split ",", $ENV{GIT_PUSH}) {
+        $cfg{$c} = 1;
+    }
+}
+my $fail = 0;
+my $printed = 0;
+my $file = "";
+my $fail_file = "-";
+my $summary;
+
+sub complain()
+{
+    my ($msg, $key) = @_;
+    my $pfx;
+
+    if (!$printed) {
+        $summary =~ s/^(.{50}).{5,}$/$1\[...]/;
+        print "***\n*** Suspicious changes in commit ".$sha1." (".$summary."):\n";
+        $printed = 1;
+    }
+    if (length($file)) {
+        if ($file ne $fail_file) {
+            print "***\n***   ".$file.":\n";
+            $fail_file = $file;
+        }
+        $pfx = "***     - ";
+    } else {
+        if ($file ne $fail_file) {
+            print "***\n";
+            $fail_file = "";
+        }
+        $pfx = "***   - ";
+    }
+    if (length($key)) {
+        print $pfx.$msg." (key \"".$key."\")\n";
+        $fail = 1;
+    } else {
+        # Hints need no overrides ...
+        print $pfx.$msg."\n";
+    }
+}
+
+my $ln = 0;
+my $iswip = defined($cfg{wip});
+my $badlog = defined($cfg{log});
+open MSG, "git log -1 --pretty=raw ".$sha1." |" or die;
+while (<MSG>) {
+    chomp;
+    s/^    // or next;
+    if ($ln == 0) {
+        $summary = $_;
+        if (!$iswip && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
+            &complain("Apparently pushing a Work In Progress", "wip");
+            $iswip = 1;
+        } elsif (!$iswip && !$badlog && length($_) < 7) {
+            &complain("Log message summary is too short", "log");
+            $badlog = 1;
+        } elsif (!$badlog && length($_) > 120) {
+            &complain("Log message summary is excessively long", "log");
+            $badlog = 1;
+        } elsif (length($_) > 70 && !/^Merge ((remote )?branch '[^ ]+'|branch '[^ ]+' of [^ ]+( into [^ ]+)?)$/) {
+            &complain("Hint: Aim for shorter log message summaries", "");
+        }
+    } elsif ($ln == 1) {
+        if (!$badlog && $_ ne "") {
+            &complain("2nd line of log message is not empty", "log");
+            $badlog = 1;
+        }
+    } else {
+        if (!$iswip && /^Reviewed-by: *(pending|TBD)?$/i) {
+            &complain("Apparently pushing a Work In Progress", "wip");
+        }
+    }
+    $ln++;
+}
+close MSG;
+
+my $chunk = 0;
+my @addi = ();
+my @deli = ();
+my $nonws;
+my $ws;
+my $mixws_check = 0;
+my $lineno = 0;
+my @ws_files = ();
+my %ws_lines = (); # hash of lists
+my $braces = 0;
+my $open_key = qr/\s*#\s*if|.*{/;
+my $close_key = qr/\s*#\s*endif|.*}/;
+my $kill_all_ws = qr/\s+((?:\"(?:\\.|[^\"])*\"|\S)+)/; # Collapse all whitespace not inside strings.
+my $kill_nl_ws = qr/((?:\"(?:\\.|[^\"])*\"|\S)+)\s+/; # Collapse all non-leading whitespace not inside strings.
+
+sub flushChunk()
+{
+    my $loc_nonws = 0;
+    my $nlonly = 1;
+    my ($ai, $di) = (0, 0);
+    while (!$loc_nonws) {
+        my ($a, $d) = ("", "");
+        while ($ai < @addi) {
+            $a = $addi[$ai++];
+            $nlonly = 0 if ($a ne "\n" && $a ne "\r\n");
+            $a =~ s/\s+$//;
+            last if (length($a));
+        }
+        while ($di < @deli) {
+            $d = $deli[$di++];
+            $nlonly = 0 if ($d ne "\n" && $d ne "\r\n");
+            $d =~ s/\s+$//;
+            last if (length($d));
+        }
+        last if (!length($a) && !length($d));
+
+        $a =~ /^$close_key/o and $braces--;
+        $d =~ /^$close_key/o and $braces++;
+        if ($braces) {
+            $a =~ s/$kill_nl_ws/$1/go;
+            $d =~ s/$kill_nl_ws/$1/go;
+        } else {
+            $a =~ s/$kill_all_ws/$1/go;
+            $d =~ s/$kill_all_ws/$1/go;
+        }
+        $loc_nonws = 1 if ($a ne $d);
+        $a =~ /^$open_key/o and $braces++;
+        $d =~ /^$open_key/o and $braces--;
+    }
+    while ($ai < @addi) {
+        my $a = $addi[$ai++];
+        $a =~ /^$close_key/o and $braces--;
+        $a =~ /^$open_key/o and $braces++;
+    }
+    while ($di < @deli) {
+        my $d = $deli[$di++];
+        $d =~ /^$close_key/o and $braces++;
+        $d =~ /^$open_key/o and $braces--;
+    }
+    if ($loc_nonws) {
+        $nonws = 1;
+    } elsif (!$nlonly) {
+        $ws = 1;
+        push @ws_files, $file if (!defined($ws_lines{$file}));
+        push @{$ws_lines{$file}}, $lineno - $#addi;
+    }
+    @addi = @deli = ();
+    $chunk = 0;
+}
+
+sub formatSize($)
+{
+    my $sz = shift;
+    if ($sz >= 10 * 1024 * 1024) {
+        return int($sz / (1024 * 1024))."MeB";
+    } elsif ($sz >= 10 * 1024) {
+        return int($sz / 1024)."KiB";
+    } else {
+        return int($sz)."B";
+    }
+}
+
+my @style_fails = ();
+
+sub styleFail($)
+{
+    my $why = shift;
+    push @style_fails, $lineno.": ".$why;
+}
+
+sub flushFile()
+{
+    if (@style_fails) {
+        if ($strict) {
+            &complain("Style issues", "style");
+        } else {
+            &complain("Hint: Style issues", "");
+        }
+        for my $sf (@style_fails) {
+            print "***       ".$sf."\n";
+        }
+        @style_fails = ();
+    }
+}
+
+my $merge;
+my $new_file;
+my $maybe_bin;
+my $is_submodule;
+my $clike;
+my $size;
+my $line = 1000;
+my $crlf_fail;
+my $conflict_fail;
+my $tabs_check;
+my $ws_check;
+my $ctlkw_check;
+open DIFF, "git diff-tree --no-commit-id --diff-filter=ACMR --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -p --cc -M --root ".$sha1." |" or die;
+while (<DIFF>) {
+    if (/^\+/) {
+        if (/^\+\+\+ /) {
+            # This indicates a text file; binary files have "Binary files ... and ... differ" instead.
+            $maybe_bin = 0;
+            if ($new_file) {
+                $new_file = 0;
+                if (!defined($cfg{generated})) {
+                    if ($file =~ /\.(prl|la|pc|ilk)$/i) {
+                        &complain("Adding build artifact", "generated");
+                    } else {
+                        $line = 1;
+                    }
+                }
+            }
+            next;
+        }
+        $lineno++;
+        if ($merge) {
+            # Consider only lines which are new relative to both parents, i.e., were added during the merge.
+            s/^\+\+// or next;
+        } else {
+           $_ = substr($_, 1);
+            if ($mixws_check) {
+                push @addi, $_;
+                $chunk = 1;
+            }
+        }
+        if (!$crlf_fail && /\r\n$/) {
+            $crlf_fail = 1;
+            &complain("CRLF line endings", "crlf");
+        }
+        if ($line < 50) {
+            if (/All changes made in this file will be lost|This file is automatically generated|DO NOT EDIT|DO NOT delete this file|[Gg]enerated by|uicgenerated|produced by gperf/) {
+                &complain("Adding generated file", "generated");
+                $line = 1000;
+            }
+            $line++;
+        }
+        if (!$conflict_fail && /^(?:[<>=]){7}( |$)/) {
+            &complain("Unresolved merge conflict", "conflict");
+            $conflict_fail = 1;
+        }
+        if ($ws_check) {
+            styleFail("Space indent followed by a TAB character") if (/^ +\t/);
+            styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
+            styleFail("Trailing whitespace") if (/[ \t]\r?\n$/);
+            if ($tabs_check) {
+                styleFail("Leading tabs") if (/^\t+/);
+                if ($ctlkw_check) {
+                    styleFail("Flow control keywords must be followed by a single space")
+                       if (/\b(if|for|foreach|Q_FOREACH|while|do|switch)(|  +)\(/);
+                }
+            }
+        }
+    } elsif (/^-/) {
+        if ($mixws_check) {
+            /^--- / and next;
+            push @deli, substr($_, 1);
+            $chunk = 1;
+        }
+    } else {
+        flushChunk() if ($chunk);
+        if (/^ /) {
+            $lineno++ if (!$merge || !/^ -/);
+            next;
+        }
+        if ($merge ? /^\@\@\@ -\S+ -\S+ \+(\d+)/ : /^\@\@ -\S+ \+(\d+)/) {
+            $lineno = $1 - 1;
+            next;
+        }
+        if (/^diff /) {
+            flushFile();
+            if (/^diff --git \@old\@\/.+ \@new\@\/(.+)$/) {
+                $merge = 0;
+            } elsif (/^diff --cc (.+)$/) {
+                $merge = 1;
+            } else {
+                print STDERR "Warning: cannot parse diff header '".$_."'\n";
+                next;
+            }
+            $file = $1;
+            #print "*** got file ".$file.".\n";
+            $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
+            $new_file = 0;
+            $maybe_bin = 0;
+            $is_submodule = 0;
+            $crlf_fail = defined($cfg{crlf});
+            $mixws_check = !$merge && $clike && !defined($cfg{mixws});
+            $ws_check = !defined($cfg{style}) && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
+            $tabs_check = $ws_check && ($file !~ /((^|\/)Makefile\b|\.def$)/);
+            $ctlkw_check = $tabs_check && $clike;
+            $conflict_fail = defined($cfg{conflict});
+            $braces = 0;
+            $line = 1000;
+            next;
+        }
+        if ($maybe_bin && /^Binary files /) {
+            if ($new_file) {
+                if (!defined($cfg{generated}) && $file =~ /\.(obj|o|lib|a|dll|so|exe|exp|qm|pdb|idb|suo)$/i) {
+                    &complain("Adding build artifact", "generated");
+                }
+            } else {
+                if (!defined($cfg{giant}) && $size > (2<<20)) {
+                    &complain("Changing huge binary file (".formatSize($size)." > 2MeB)", "giant");
+                }
+            }
+            next;
+        }
+        if ($_ eq "new file mode 160000\n") {
+            $is_submodule = 1;
+            next;
+        }
+        if (!$is_submodule && /^index ([\w,]+)\.\.(\w+)(?! 160000)( |$)/) {
+            my ($old_trees, $new_tree) = ($1, $2);
+            #print "*** got index $old_trees $new_tree.\n";
+            $size = `git cat-file -s $new_tree`;
+            my $issrc = $clike || ($file =~ /\.(s|asm|pas|l|m4|bat|cmd|sh|py|qdoc(conf)?)$/i);
+            if ($old_trees =~ /^0{40}(,0{40})*$/) {
+            #print "*** adding ".$file.".\n";
+                if (!$conflict_fail && $file =~ /\.(BACKUP|BASE|LOCAL|REMOTE)\.[^\/]+$/) {
+                    &complain("Adding temporary file from merge conflict resolution", "conflict");
+                    $conflict_fail = 1;
+                }
+                if (!defined($cfg{alien}) && $file =~ /(\.(sln|vcproj|vcxproj|pro\.user)|(^|\/)(Makefile\.am|CMakeLists\.txt))$/i) {
+                    &complain("Warning: Adding alien build system file", "alien");
+                }
+                if ($size > (2<<20)) {
+                    if (!defined($cfg{giant})) {
+                        &complain("Adding huge file (".formatSize($size)." > 2MeB)", "giant");
+                    }
+                } elsif ($size > 50000 && !$issrc && !defined($cfg{size})) {
+                    &complain("Warning: Adding big file (".formatSize($size)." > 50kB)", "size");
+                }
+                $size = 0;
+                $new_file = 1;
+            } elsif ($size > 20000 && !$issrc && !defined($cfg{size})) {
+                my $old_size = 0;
+                for my $old_tree (split(/,/, $old_trees)) {
+                    my $osz = `git cat-file -s $old_tree`;
+                    $old_size = $osz if ($osz > $old_size);
+                }
+                if ($size > $old_size * 3 / 2) {
+                    &complain("Warning: Increasing file size by more than 50% (".
+                                formatSize($old_size)." => ".formatSize($size).")", "size");
+                }
+            }
+            $maybe_bin = 1;
+            next;
+        }
+    }
+}
+flushFile();
+if ($mixws_check) {
+    flushChunk() if ($chunk);
+    if ($nonws and $ws) {
+        $file = "";
+        if ($strict) {
+            &complain("Mixing whitespace-only changes with other changes", "mixws");
+        } else {
+            &complain("Hint: Mixing whitespace-only changes with other changes", "");
+        }
+        for my $fn (@ws_files) {
+            print "***     WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}})."\n";
+        }
+    }
+}
+
+exit $fail
