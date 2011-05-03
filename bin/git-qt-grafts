@@ -73,13 +73,14 @@ if (!$history_location || !-e $history_location) {
     print "You need to provide a path to the monolithic Qt repo!\n";
     exit 1;
 }
-my $history_alternates_objects = `cd $history_location && git rev-parse --git-dir`;
-chomp $history_alternates_objects ;
-if (!$history_alternates_objects  || !-e "$history_alternates_objects/objects") {
+my $history_git_dir = `cd $history_location && git rev-parse --git-dir`;
+chomp $history_git_dir;
+if (!$history_git_dir  || !-e "$history_location/$history_git_dir/objects") {
     print "Monolithic Qt repo path is not a valid Git repo!\n";
     exit 1;
 }
-$history_alternates_objects = abs_path("$history_location/$history_alternates_objects/objects");;
+$history_git_dir = abs_path("$history_location/$history_git_dir");
+my $history_alternates_objects = "$history_git_dir/objects";
 
 # check if we already point to this alternate object store
 my $git_alternates_file = "$git_dir/objects/info/alternates";
@@ -152,10 +153,20 @@ if (!$found_alternate) {
     close(I);
 }
 
+# Add graft lines from graft file in the history repo, in case it has additional grafts.
+my $HISTORY_GRAFT_FILE;
+if (open($HISTORY_GRAFT_FILE, "< $history_git_dir/info/grafts")) {
+    print("Reusing existing grafts in history repository\n");
+    while (<$HISTORY_GRAFT_FILE>) {
+        chomp;
+        push(@graft_lines, $_) if (!fileContains($graft_file, $_));
+    }
+    close($HISTORY_GRAFT_FILE);
+}
+
 # add graft
 if (@graft_lines) {
     open(I, ">> $graft_file") || die "Could not open $graft_file for writing, wrong permissions?";
     print I join("\n", @graft_lines) . "\n";
     close(I);
 }
-
