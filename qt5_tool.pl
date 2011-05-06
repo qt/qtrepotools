@@ -14,6 +14,9 @@
 #
 # Feel free to add useful options!
 #
+# The intention is that this works with the old Perl used for Symbian as well:
+# - Variables should not shadow others.
+# - Some functions are just broken  (abs_path()),etc.
 ############################################################################################
 
 use strict;
@@ -31,6 +34,8 @@ my $PULL=0;
 my $BUILD=0;
 my $RESET=0;
 my $DIFF=0;
+my $optStagingModule;
+my $optTeam = 'earth';
 
 my $USAGE=<<EOF;
 Usage: qt5_tool.pl [OPTIONS]
@@ -46,6 +51,8 @@ Options:
   -p  Pull
   -b  Build
   -o  [D]ocumentation
+  -s <module> Switch a module to a staging repository.
+  -t <team>   Team for use with -s (default: earth)
 
 Example use cases:
   qt5_tool.pl -c -p -b     Clean, pull and build for nightly builds
@@ -141,8 +148,8 @@ sub isAbsolute
 
 if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
      "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF,
-     "build" => \$BUILD)
-    || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF == 0)) {
+     "build" => \$BUILD, "staging=s" => \$optStagingModule, "team=s" => $optTeam)
+    || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF == 0 && ! defined $optStagingModule)) {
     print $USAGE;
     exit (1);
 }
@@ -183,6 +190,17 @@ if ( $RESET !=  0 ) {
   }
   system($git, ('reset','--hard'));
   system($git, ('submodule','foreach',$git,'reset','--hard'));
+}
+
+# --------------- Switch to branch (Untested)
+
+if (defined $optStagingModule) {
+    chdir($optStagingModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optStagingModule . '":' . $!);
+    my $strc = system($git, ('fetch', '--all'));
+    die 'fetch '. $optStagingModule . ' failed.' if $strc;
+    $strc = system($git, ('checkout', '-b',  $optTeam . '/master', $optStagingModule . '-' . $optTeam . '-staging/master'));
+    die 'checkout '. $optStagingModule .  ' failed.' if $strc;
+    chdir($rootDir);
 }
 
 # --------------- Clean if desired
