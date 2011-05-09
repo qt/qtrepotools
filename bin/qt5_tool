@@ -158,7 +158,7 @@ if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
 #     Note: Cwd::realpath is broken in the Symbian-perl-version.
 my $prog = $0;
 $prog = Cwd::realpath($0) unless isAbsolute($prog);
-$rootDir = dirname(dirname($prog));
+$rootDir = dirname(dirname(dirname($prog)));
 chdir($rootDir) or die ('Failed to chdir to' . $rootDir . '":' . $!);
 
 # ---- Determine modules by trying to find <module>/.git/config.
