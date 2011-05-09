@@ -23,11 +23,12 @@ sub fileContents {
     my ($filename) = @_;
     my $filecontents = "";
     if (-e $filename) {
-        open(I, "< $filename") || die "Could not open $filename for reading, read block?";
+        my $FD;
+        open($FD, "< $filename") || die "Could not open $filename for reading, read block?";
         local $/;
-        binmode I;
-        $filecontents = <I>;
-        close I;
+        binmode $FD;
+        $filecontents = <$FD>;
+        close $FD;
     }
     return $filecontents;
 }
@@ -129,11 +130,10 @@ foreach my $commit (@commits) {
     }
 
     # verify that alternate object store contains the commit we want to graft to
-    my $validated_object = `cd $history_location && git rev-parse --verify $graft_to_commit`;
-    chomp $validated_object;
-    if ("$validated_object" ne "$graft_to_commit") {
+    if (system("cd $history_location && git cat-file -e $graft_to_commit") != 0) {
         print "History repo ($history_location) does not contain commit $graft_to_commit!\n";
-        exit 1;
+        print "Skipping this graft...\n";
+        next;
     }
 
     print "Grafted $commit -> $graft_to_commit\n";
@@ -148,9 +148,20 @@ if (!$found_any_grafts) {
 # if our alternates file didn't contain the "history repo" path already
 # add its path now
 if (!$found_alternate) {
-    open(I, ">> $git_alternates_file") || die "Could not open $git_alternates_file for writing, wrong permissions?";
-    print I "$history_alternates_objects\n";
-    close(I);
+    my $ALTERNATES_FILE;
+    open($ALTERNATES_FILE, ">> $git_alternates_file") || die "Could not open $git_alternates_file for writing, wrong permissions?";
+    print $ALTERNATES_FILE "$history_alternates_objects\n";
+    # Add alternates from alternates file in the history repo, in case it has additional alternates.
+    my $HISTORY_ALTERNATES_FILE;
+    if (open($HISTORY_ALTERNATES_FILE, "< $history_git_dir/objects/info/alternates")) {
+        print("Reusing existing alternates in history repository\n");
+        while (<$HISTORY_ALTERNATES_FILE>) {
+            chomp;
+            print $ALTERNATES_FILE $_ if (!fileContains($git_alternates_file, $_));
+        }
+        close($HISTORY_ALTERNATES_FILE);
+    }
+    close($ALTERNATES_FILE);
 }
 
 # Add graft lines from graft file in the history repo, in case it has additional grafts.
@@ -166,7 +177,8 @@ if (open($HISTORY_GRAFT_FILE, "< $history_git_dir/info/grafts")) {
 
 # add graft
 if (@graft_lines) {
-    open(I, ">> $graft_file") || die "Could not open $graft_file for writing, wrong permissions?";
-    print I join("\n", @graft_lines) . "\n";
-    close(I);
+    my $GRAFT_FILE;
+    open($GRAFT_FILE, ">> $graft_file") || die "Could not open $graft_file for writing, wrong permissions?";
+    print $GRAFT_FILE join("\n", @graft_lines) . "\n";
+    close($GRAFT_FILE);
 }
