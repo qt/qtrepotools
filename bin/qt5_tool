@@ -38,7 +38,7 @@ my $optStagingModule;
 my $optTeam = 'earth';
 
 my $USAGE=<<EOF;
-Usage: qt5_tool.pl [OPTIONS]
+Usage: qt5_tool [OPTIONS]
 
 Utility script for working with Qt 5 modules.
 
@@ -55,9 +55,9 @@ Options:
   -t <team>   Team for use with -s (default: earth)
 
 Example use cases:
-  qt5_tool.pl -c -p -b     Clean, pull and build for nightly builds
-  qt5_tool.pl -d           Generate modules diff relative to root directory
-  qt5_tool.pl -r           Reset --hard of repo.
+  qt5_tool -c -p -b     Clean, pull and build for nightly builds
+  qt5_tool -d           Generate modules diff relative to root directory
+  qt5_tool -r           Reset --hard of repo.
 EOF
 
 my %preferredBranches = ( 'qtwebkit' , 'qt-modularization-base' );
@@ -72,7 +72,7 @@ if (index($^O, 'MSWin') >= 0) {
    $os = $OS_MAC;
 }
 
-my $make = $os == $OS_WINDOWS ? 'jom' : 'make';
+my $make = $os == $OS_WINDOWS ? 'nmake' : 'make';
 my @makeArgs = $os == $OS_WINDOWS ? () : ('-s');
 my $git = 'git'; # TODO: Mac, Windows special cases?
 
