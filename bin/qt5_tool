@@ -233,7 +233,7 @@ if (defined $optStagingModule) {
     chdir($optStagingModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optStagingModule . '":' . $!);
     my $strc = system($git, ('fetch', '--all'));
     die 'fetch '. $optStagingModule . ' failed.' if $strc;
-    my $branchName = $optTeam ne '' ? ($optTeam . '/master') : 'master';
+    my $branchName = $optTeam ne '' ? ($optTeam . '/master') :  'staging/master';
     my $stagingRemoteBranch =  $optStagingModule;
     $stagingRemoteBranch .= '-' . $optTeam if $optTeam ne '';
     $stagingRemoteBranch .= '-staging/master';
