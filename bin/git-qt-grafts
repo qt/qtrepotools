@@ -103,7 +103,7 @@ my $graft_file = "$git_dir/info/grafts";
 my @graft_lines;
 foreach my $commit (@commits) {
     # find the graft point which the commit mentions
-    my $commit_msg = `git show -s --format=%B $commit`;
+    my $commit_msg = `git show -s --format=%b $commit`;
     my $graft_to_commit = $commit_msg;
     $graft_to_commit =~ s/^.+Branched from .+at commit\n([a-f0-9]+)\n.*/$1/s;
     next if (!$graft_to_commit || $graft_to_commit eq $commit_msg);
