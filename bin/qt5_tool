@@ -37,6 +37,7 @@ my $DIFF=0;
 my $BOOTSTRAP=0;
 my $optStagingModule;
 my $optTeam = '';
+my $optCommitHook;
 
 my $USAGE=<<EOF;
 Usage: qt5_tool [OPTIONS]
@@ -56,6 +57,7 @@ Options:
 
   -s <module> Switch a module to a staging repository.
   -t <team>   Team for use with -s (default: '')
+  -h <hook>   Path to commit hook for -s.
 
 Example use cases:
   qt5_tool -c -p -b     Clean, pull and build for nightly builds
@@ -152,7 +154,7 @@ sub isAbsolute
 if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
      "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF,
      "build" => \$BUILD, "staging=s" => \$optStagingModule, "team=s" => \$optTeam,
-     "quick-bootstrap"  => \$BOOTSTRAP)
+     "hook=s" => \$optCommitHook, "quick-bootstrap"  => \$BOOTSTRAP)
     || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF + $BOOTSTRAP == 0 && ! defined $optStagingModule)) {
     print $USAGE;
     exit (1);
@@ -230,7 +232,7 @@ if ( $RESET !=  0 ) {
 if (defined $optStagingModule) {
     chdir($optStagingModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optStagingModule . '":' . $!);
     my $strc = system($git, ('fetch', '--all'));
-    die 'fetch '. $optStagingModule . ' failed.' if $strc;    
+    die 'fetch '. $optStagingModule . ' failed.' if $strc;
     my $branchName = $optTeam ne '' ? ($optTeam . '/master') : 'master';
     my $stagingRemoteBranch =  $optStagingModule;
     $stagingRemoteBranch .= '-' . $optTeam if $optTeam ne '';
@@ -238,6 +240,23 @@ if (defined $optStagingModule) {
     print 'Switching to ', $branchName, ' from ', $stagingRemoteBranch, "\n";
     $strc = system($git, ('checkout', '-b', $branchName, $stagingRemoteBranch));
     die 'checkout '. $optStagingModule .  ' failed.' if $strc;
+#   -- Copy/Link the commit hook: Try to autodetect standard setup.
+    if (!defined $optCommitHook && $os != $OS_WINDOWS) {
+       my $hook = $ENV{"HOME"} . '/dev/devtools/shell/git_post_commit_hook';
+       $optCommitHook = $hook if -f $hook;
+    }
+#   -- Link or copy the hook according to platform.
+    if (defined $optCommitHook) {
+        my $target =File::Spec->catfile('.git', 'hooks' ,'post-commit');
+        if (! -e $target) {
+            print 'Setting up commit hook: ', $optCommitHook, ' ', $target,"\n";
+            if ($os == $OS_WINDOWS) {
+               system('xcopy.exe', $optCommitHook, $target);
+            } else {
+                system('ln', '-s', $optCommitHook, $target);
+            }
+        }
+    }
     chdir($rootDir);
 }
 
