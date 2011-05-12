@@ -165,7 +165,7 @@ if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
 if ( $BOOTSTRAP != 0 ) {
     my $repoURL = 'git@scm.dev.nokia.troll.no:qt/qt5.git';
     my $targetFolder = 'qt-5';
-    my @initOptions = ('--no-webkit');
+    my @initOptions = ('-nokia-developer', '--no-webkit');
     my $toolsFolder = 'qtrepotools';
     # -- Clone
     my $cloneRc = system($git, ('clone', $repoURL, $targetFolder));
