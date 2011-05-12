@@ -34,6 +34,7 @@ my $PULL=0;
 my $BUILD=0;
 my $RESET=0;
 my $DIFF=0;
+my $BOOTSTRAP=0;
 my $optStagingModule;
 my $optTeam = 'earth';
 
@@ -51,6 +52,8 @@ Options:
   -p  Pull
   -b  Build
   -o  [D]ocumentation
+  -q  Quick bootstrap a new checkout under current folder (excluding webkit).
+
   -s <module> Switch a module to a staging repository.
   -t <team>   Team for use with -s (default: earth)
 
@@ -148,10 +151,40 @@ sub isAbsolute
 
 if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
      "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF,
-     "build" => \$BUILD, "staging=s" => \$optStagingModule, "team=s" => $optTeam)
-    || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF == 0 && ! defined $optStagingModule)) {
+     "build" => \$BUILD, "staging=s" => \$optStagingModule, "team=s" => $optTeam,
+     "quick-bootstrap"  => \$BOOTSTRAP)
+    || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF + $BOOTSTRAP == 0 && ! defined $optStagingModule)) {
     print $USAGE;
     exit (1);
+}
+
+# --------------- Bootstrap
+
+if ( $BOOTSTRAP != 0 ) {
+    my $repoURL = 'git@scm.dev.nokia.troll.no:qt/qt5.git';
+    my $targetFolder = 'qt-5';
+    my @initOptions = ('--no-webkit');
+    my $toolsFolder = 'qtrepotools';
+    # -- Clone
+    my $cloneRc = system($git, ('clone', $repoURL, $targetFolder));
+    die 'clone '. $$repoURL  . ' failed.' if $cloneRc;
+    chdir($targetFolder) or die ('Failed to chdir to "' . $targetFolder . '":' . $!);
+    # -- Run init
+    my $initRc = 0;
+    if ($os == $OS_WINDOWS) {
+        $initRc = system('perl', 'init-repository', @initOptions);
+    } else {
+        $initRc = system('./init-repository', @initOptions);
+    }
+    die 'init '. $$repoURL  . ' failed.' if $initRc;
+    # -- Checkout 'master' in repotools and run the qt5_tool there
+    # to pull such that the branches are initialized.
+    chdir($toolsFolder) or die ('Failed to chdir to tools folder:' . $!);
+    my $checkoutMasterRc = system($git, ('checkout', 'master'));
+    die 'checkout master in tools repository failed.' if $checkoutMasterRc;
+    chdir('..');
+    system(File::Spec->catfile($toolsFolder, 'bin', 'qt5_tool'), '-p');
+    exit 0;
 }
 
 # --- Change to root: Assume we live in qtrepotools below root.
