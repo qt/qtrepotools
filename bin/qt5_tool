@@ -36,7 +36,7 @@ my $RESET=0;
 my $DIFF=0;
 my $BOOTSTRAP=0;
 my $optStagingModule;
-my $optTeam = 'earth';
+my $optTeam = '';
 
 my $USAGE=<<EOF;
 Usage: qt5_tool [OPTIONS]
@@ -55,7 +55,7 @@ Options:
   -q  Quick bootstrap a new checkout under current folder (excluding webkit).
 
   -s <module> Switch a module to a staging repository.
-  -t <team>   Team for use with -s (default: earth)
+  -t <team>   Team for use with -s (default: '')
 
 Example use cases:
   qt5_tool -c -p -b     Clean, pull and build for nightly builds
@@ -151,7 +151,7 @@ sub isAbsolute
 
 if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
      "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF,
-     "build" => \$BUILD, "staging=s" => \$optStagingModule, "team=s" => $optTeam,
+     "build" => \$BUILD, "staging=s" => \$optStagingModule, "team=s" => \$optTeam,
      "quick-bootstrap"  => \$BOOTSTRAP)
     || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF + $BOOTSTRAP == 0 && ! defined $optStagingModule)) {
     print $USAGE;
@@ -230,8 +230,13 @@ if ( $RESET !=  0 ) {
 if (defined $optStagingModule) {
     chdir($optStagingModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optStagingModule . '":' . $!);
     my $strc = system($git, ('fetch', '--all'));
-    die 'fetch '. $optStagingModule . ' failed.' if $strc;
-    $strc = system($git, ('checkout', '-b',  $optTeam . '/master', $optStagingModule . '-' . $optTeam . '-staging/master'));
+    die 'fetch '. $optStagingModule . ' failed.' if $strc;    
+    my $branchName = $optTeam ne '' ? ($optTeam . '/master') : 'master';
+    my $stagingRemoteBranch =  $optStagingModule;
+    $stagingRemoteBranch .= '-' . $optTeam if $optTeam ne '';
+    $stagingRemoteBranch .= '-staging/master';
+    print 'Switching to ', $branchName, ' from ', $stagingRemoteBranch, "\n";
+    $strc = system($git, ('checkout', '-b', $branchName, $stagingRemoteBranch));
     die 'checkout '. $optStagingModule .  ' failed.' if $strc;
     chdir($rootDir);
 }
