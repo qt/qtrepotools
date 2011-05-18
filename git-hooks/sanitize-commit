@@ -31,6 +31,13 @@ my $fail_file = "-";
 my $summary;
 my ($lpfx, $elpfx) = ($gerrit ? ("", "\n") : ("***   ", "***\n"));
 
+sub printerr()
+{
+  die "cannot run git: ".$! if ($? < 0);
+  die "git crashed with signal ".$? if ($? & 127);
+  die "git exited with status ".($? >> 8) if ($?);
+}
+
 sub complain()
 {
     my ($msg, $key, $level) = @_;
@@ -66,7 +73,7 @@ sub complain()
 my $ln = 0;
 my $iswip = defined($cfg{wip});
 my $badlog = defined($cfg{log});
-open MSG, "git log -1 --pretty=raw ".$sha1." |" or die;
+open MSG, "git log -1 --pretty=raw ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     chomp;
     s/^    // or next;
@@ -97,6 +104,7 @@ while (<MSG>) {
     $ln++;
 }
 close MSG;
+printerr;
 
 my $chunk = 0;
 my @addi = ();
@@ -211,7 +219,7 @@ my $conflict_fail;
 my $tabs_check;
 my $ws_check;
 my $ctlkw_check;
-open DIFF, "git diff-tree --no-commit-id --diff-filter=ACMR --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -p --cc -M --root ".$sha1." |" or die;
+open DIFF, "git diff-tree --no-commit-id --diff-filter=ACMR --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -p --cc -M --root ".$sha1." |" or die "cannot run git: $!";
 while (<DIFF>) {
     if (/^\+/) {
         if (/^\+\+\+ /) {
@@ -364,6 +372,8 @@ while (<DIFF>) {
         }
     }
 }
+close DIFF;
+printerr;
 flushFile();
 if ($mixws_check) {
     flushChunk() if ($chunk);
