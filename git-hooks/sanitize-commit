@@ -10,12 +10,13 @@
 
 use strict;
 
-if ($#ARGV < 0 or $#ARGV > 1 || ($#ARGV == 1 && $ARGV[1] ne "strict")) {
+if ($#ARGV < 0 or $#ARGV > 1 || ($#ARGV == 1 && $ARGV[1] !~ /^(strict|gerrit)$/)) {
     print STDERR "Usage: $0 <sha1> [strict]\n";
     exit 2;
 }
 my $sha1 = $ARGV[0];
-my $strict = ($#ARGV == 1);
+my $gerrit = ($#ARGV == 1 && $ARGV[1] eq "gerrit");
+my $strict = $gerrit || ($#ARGV == 1 && $ARGV[1] eq "strict");
 
 my %cfg = ();
 if (defined $ENV{GIT_PUSH}) {
@@ -24,14 +25,15 @@ if (defined $ENV{GIT_PUSH}) {
     }
 }
 my $fail = 0;
-my $printed = 0;
+my $printed = $gerrit;
 my $file = "";
 my $fail_file = "-";
 my $summary;
+my ($lpfx, $elpfx) = ($gerrit ? ("", "\n") : ("***   ", "***\n"));
 
 sub complain()
 {
-    my ($msg, $key) = @_;
+    my ($msg, $key, $level) = @_;
     my $pfx;
 
     if (!$printed) {
@@ -41,23 +43,23 @@ sub complain()
     }
     if (length($file)) {
         if ($file ne $fail_file) {
-            print "***\n***   ".$file.":\n";
+            print $elpfx.$lpfx.$file.":\n";
             $fail_file = $file;
         }
-        $pfx = "***     - ";
+        $pfx = $lpfx."  - ";
     } else {
         if ($file ne $fail_file) {
-            print "***\n";
+            print $elpfx;
             $fail_file = "";
         }
-        $pfx = "***   - ";
+        $pfx = $lpfx."- ";
     }
-    if (length($key)) {
+    $level = 0 if (!defined($level) || ($level < 0 && $strict));
+    if ($level >= 0) {
+        $fail = $level + 1 if ($level >= $fail);
         print $pfx.$msg." (key \"".$key."\")\n";
-        $fail = 1;
     } else {
-        # Hints need no overrides ...
-        print $pfx.$msg."\n";
+        print $pfx."Hint: ".$msg."\n";
     }
 }
 
@@ -189,13 +191,9 @@ sub styleFail($)
 sub flushFile()
 {
     if (@style_fails) {
-        if ($strict) {
-            &complain("Style issues", "style");
-        } else {
-            &complain("Hint: Style issues", "");
-        }
+        &complain("Style issues", "style", -1);
         for my $sf (@style_fails) {
-            print "***       ".$sf."\n";
+            print $lpfx."    ".$sf."\n";
         }
         @style_fails = ();
     }
@@ -318,7 +316,7 @@ while (<DIFF>) {
                 }
             } else {
                 if (!defined($cfg{giant}) && $size > (2<<20)) {
-                    &complain("Changing huge binary file (".formatSize($size)." > 2MeB)", "giant");
+                    &complain("Changing huge binary file (".formatSize($size)." > 2MeB)", "giant", 1);
                 }
             }
             next;
@@ -335,7 +333,7 @@ while (<DIFF>) {
             if ($old_trees =~ /^0{40}(,0{40})*$/) {
             #print "*** adding ".$file.".\n";
                 if (!$conflict_fail && $file =~ /\.(BACKUP|BASE|LOCAL|REMOTE)\.[^\/]+$/) {
-                    &complain("Adding temporary file from merge conflict resolution", "conflict");
+                    &complain("Adding temporary file from merge conflict resolution", "conflict", 1);
                     $conflict_fail = 1;
                 }
                 if (!defined($cfg{alien}) && $file =~ /(\.(sln|vcproj|vcxproj|pro\.user)|(^|\/)(Makefile\.am|CMakeLists\.txt))$/i) {
@@ -343,7 +341,7 @@ while (<DIFF>) {
                 }
                 if ($size > (2<<20)) {
                     if (!defined($cfg{giant})) {
-                        &complain("Adding huge file (".formatSize($size)." > 2MeB)", "giant");
+                        &complain("Adding huge file (".formatSize($size)." > 2MeB)", "giant", 1);
                     }
                 } elsif ($size > 50000 && !$issrc && !defined($cfg{size})) {
                     &complain("Warning: Adding big file (".formatSize($size)." > 50kB)", "size");
@@ -371,15 +369,11 @@ if ($mixws_check) {
     flushChunk() if ($chunk);
     if ($nonws and $ws) {
         $file = "";
-        if ($strict) {
-            &complain("Mixing whitespace-only changes with other changes", "mixws");
-        } else {
-            &complain("Hint: Mixing whitespace-only changes with other changes", "");
-        }
+        &complain("Mixing whitespace-only changes with other changes", "mixws", -1);
         for my $fn (@ws_files) {
-            print "***     WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}})."\n";
+            print $lpfx."  WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}})."\n";
         }
     }
 }
 
-exit $fail
+exit ($gerrit ? (!$fail ? 11 : (10 - $fail)) : $fail)
