@@ -66,12 +66,13 @@ Example use cases:
   qt5_tool -d           Generate modules diff relative to root directory
   qt5_tool -r           Reset --hard of repo.
 
-qt_tool can be configured by creating a configuration file \$HOME/$configFile in the
-format key=value. It is possible to use repository-specific values by adding a key
-postfixed by a dash and the repository folder base name.
+qt_tool can be configured by creating a configuration file \$HOME/$configFile in
+the format key=value. It is possible to use repository-specific values by adding
+a key postfixed by a dash and the repository folder base name.
 Supported keys:
 
-initArguments:      Arguments to init-repository for -q (should contain webkit mirror).
+initArguments:      Arguments to init-repository for -q (should contain
+                    webkit mirror).
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
 
@@ -80,8 +81,8 @@ Example:
 shadowBuildPostfix=-build
 shadowBuildPostfix-qt-5special=-special-build
 
-specifies that for a checkout in '/home/user/qt-5', shadow builds are to be done
-in '/home/user/qt-5-build'. It is overridden by a value for the checkout
+specifies that for a checkout in '/home/user/qt-5', shadow builds are to be
+done in '/home/user/qt-5-build'. It is overridden by a value for the checkout
 '/home/user/qt-5special', which would result in '/home/user/qt-5-special-build'
 EOF
 
