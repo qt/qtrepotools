@@ -27,6 +27,7 @@ use Cwd;
 use File::Spec;
 use POSIX;
 use IO::File;
+use File::Path;
 
 my $CLEAN=0;
 my $DOC=0;
@@ -38,6 +39,7 @@ my $BOOTSTRAP=0;
 my $optStagingModule;
 my $optTeam = '';
 my $optCommitHook;
+my $configFile = '.qt5_tool';
 
 my $USAGE=<<EOF;
 Usage: qt5_tool [OPTIONS]
@@ -63,6 +65,24 @@ Example use cases:
   qt5_tool -c -p -b     Clean, pull and build for nightly builds
   qt5_tool -d           Generate modules diff relative to root directory
   qt5_tool -r           Reset --hard of repo.
+
+qt_tool can be configured by creating a configuration file \$HOME/$configFile in the
+format key=value. It is possible to use repository-specific values by adding a key
+postfixed by a dash and the repository folder base name.
+Supported keys:
+
+initArguments:      Arguments to init-repository for -q (should contain webkit mirror).
+configureArguments: Arguments to configure
+shadowBuildPostfix: Postfix to use for shadow build directory.
+
+Example:
+
+shadowBuildPostfix=-build
+shadowBuildPostfix-qt-5special=-special-build
+
+specifies that for a checkout in '/home/user/qt-5', shadow builds are to be done
+in '/home/user/qt-5-build'. It is overridden by a value for the checkout
+'/home/user/qt-5special', which would result in '/home/user/qt-5-special-build'
 EOF
 
 my %preferredBranches = ( 'qtwebkit' , 'qt-modularization-base' );
@@ -82,6 +102,8 @@ my @makeArgs = $os == $OS_WINDOWS ? () : ('-s');
 my $git = 'git'; # TODO: Mac, Windows special cases?
 
 my $rootDir = '';
+my $baseDir = '';
+my $home = $os == $OS_WINDOWS ? ($ENV{'HOMEDRIVE'} . $ENV{'HOMEPATH'}) : $ENV{'HOME'};
 
 # --- Fix a diff line from a submodule such that it can be applied to
 #     the root Qt 5 directory, that is:
@@ -120,15 +142,14 @@ sub diff
   return $totalDiff;
 }
 
-# ---- Read a value from a git config line.
+# ---- Read a value from a configuration file of the form key=value.
 
-sub readConfig
+sub readConfigFile
 {
-    my ($module, $key) = @_;
+    my ($fileName, $key) = @_;
 
     my $configLine = '';
-    my $configFileName = File::Spec->catfile($rootDir, $module, '.git', 'config');
-    my $configFile = new IO::File('<' . $configFileName) or return $configLine;
+    my $configFile = new IO::File('<' . $fileName) or return $configLine;
     while (my $line = <$configFile>) {
         chomp($line);
         if ($line =~ /^\s*$key\s*=\s*(.*)$/) {
@@ -138,6 +159,28 @@ sub readConfig
     }
     $configFile->close();
     return $configLine;
+}
+
+# ---- Read a value from a git config line.
+
+sub readGitConfig
+{
+    my ($module, $key) = @_;
+    return readConfigFile(File::Spec->catfile($rootDir, $module, '.git', 'config'), $key);
+}
+
+# ---- Read a value from the '$HOME/.qt5_tool' configuration file
+#      When given a key 'key' for the repository directory '/foo/qt-5',
+#      check for the repo-specific value 'key-qt5' and then for the general
+#      'key'.
+
+sub readQt5ToolConfig
+{
+    my ($key) = @_;
+    my $repoKey = $key . '-' . $baseDir;
+    my $repoValue = readConfigFile(File::Spec->catfile($home, $configFile), $repoKey);
+    return $repoValue if $repoValue ne '';
+    return readConfigFile(File::Spec->catfile($home, $configFile), $key);
 }
 
 # ---- Check for absolute path names.
@@ -165,7 +208,14 @@ if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
 if ( $BOOTSTRAP != 0 ) {
     my $repoURL = 'git@scm.dev.nokia.troll.no:qt/qt5.git';
     my $targetFolder = 'qt-5';
-    my @initOptions = ('-nokia-developer', '--no-webkit');
+    my @initOptions = ('-nokia-developer');
+    my $initArgumentsFromConfig = readQt5ToolConfig('initArguments');
+#   -- Webkit is usually too slow to clone unless something is configured.
+    if ($initArgumentsFromConfig ne '') {
+        push(@initOptions, split(/ /, $initArgumentsFromConfig));
+    } else {
+        push(@initOptions, '--no-webkit');
+    }
     my $toolsFolder = 'qtrepotools';
     # -- Clone
     my $cloneRc = system($git, ('clone', $repoURL, $targetFolder));
@@ -194,6 +244,7 @@ if ( $BOOTSTRAP != 0 ) {
 my $prog = $0;
 $prog = Cwd::realpath($0) unless isAbsolute($prog);
 $rootDir = dirname(dirname(dirname($prog)));
+$baseDir = basename($rootDir);
 chdir($rootDir) or die ('Failed to chdir to' . $rootDir . '":' . $!);
 
 # ---- Determine modules by trying to find <module>/.git/config.
@@ -216,7 +267,6 @@ if ( $RESET !=  0 ) {
   print 'Resetting Qt 5 in ',$rootDir,"\n";
   my $changes = diff($rootDir, \@MODULES);
   if ($changes ne '') {
-     my $home = $os == $OS_WINDOWS ? ($ENV{'HOMEDRIVE'} . $ENV{'HOMEPATH'}) : $ENV{'HOME'};
      my $patch = File::Spec->catfile($home, POSIX::strftime('qt5_d%Y%m%d%H%M.patch',localtime));
      my $patchFile = new IO::File('>' . $patch) or die ('Unable to open for writing ' .  $patch . ' :' . $!);
      print $patchFile $changes;
@@ -276,7 +326,7 @@ if ( $PULL !=  0 ) {
   my $prc = system($git, ('pull'));
   die 'Pull failed'  if ($prc);
   foreach my $MOD (@MODULES) {
-     print 'Examining: ', $MOD, ' url: ',readConfig($MOD, 'url'), ' ';
+     print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
      chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
      my @branches = split("\n", `$git branch`);
      my @currentBranches = grep(/^\* /, @branches);
@@ -303,11 +353,26 @@ if ( $PULL !=  0 ) {
 # ---- Configure and build
 
 if ( $BUILD !=  0 ) {
-  print 'Building Qt 5 in ',$rootDir,"\n";
-  my $brc = system(File::Spec->catfile($rootDir, 'configure'),('-nokia-developer'));
-  die 'Configure failed'  if ($brc);
-  $brc = system($make, @makeArgs);
-  die ($make . ' failed')  if ($brc);
+    print 'Building Qt 5 in ',$rootDir,"\n";
+    my @configureArguments = ('-nokia-developer');
+    my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
+    push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
+#   --- Shadow builds: Remove and re-create directory
+    my $shadowBuildPostfix = readQt5ToolConfig('shadowBuildPostfix');
+    if ($shadowBuildPostfix ne '') {
+        my $shadowBuildDir = $rootDir . $shadowBuildPostfix;
+        print 'Shadow build: "', $shadowBuildDir,"\"\n";
+        if (-d $shadowBuildDir) {
+            File::Path::rmtree($shadowBuildDir) or die ('Unable to remove ' . $shadowBuildDir . ' :' . $!);
+        }
+        mkdir($shadowBuildDir) or die  ('Unable to create ' . $shadowBuildDir . ' :' . $!);
+        chdir($shadowBuildDir) or die  ('Unable to chdir ' . $shadowBuildDir . ' :' . $!);
+    }
+#   ---- Configure and build
+    my $brc = system(File::Spec->catfile($rootDir, 'configure'), @configureArguments);
+    die 'Configure failed'  if ($brc);
+    $brc = system($make, @makeArgs);
+    die ($make . ' failed')  if ($brc);
 }
 
 # ---- Untested: Build documentation.
