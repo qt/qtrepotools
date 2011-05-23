@@ -36,6 +36,7 @@ my $BUILD=0;
 my $RESET=0;
 my $DIFF=0;
 my $BOOTSTRAP=0;
+my $STATUS=0;
 my $optStagingModule;
 my $optTeam = '';
 my $optCommitHook;
@@ -50,6 +51,7 @@ Feel free to extend!
 
 Options:
   -d  Diff (over all modules, relative to root)
+  -u  Status
   -r  Reset hard
   -c  Clean
   -p  Pull
@@ -106,6 +108,11 @@ my $rootDir = '';
 my $baseDir = '';
 my $home = $os == $OS_WINDOWS ? ($ENV{'HOMEDRIVE'} . $ENV{'HOMEPATH'}) : $ENV{'HOME'};
 
+my @MODULES = ();
+
+# Move this to configuration file for general use?
+my $nokiaDeveloper = 1;
+
 # --- Fix a diff line from a submodule such that it can be applied to
 #     the root Qt 5 directory, that is:
 #     '--- a/foo...' -> '--- a/<module>/foo...'
@@ -141,6 +148,39 @@ sub diff
      chdir($rootDir);
   }
   return $totalDiff;
+}
+
+# ---- Run git in root and module folders.
+#      Do not use 'git submodules foreach' to be able to work on partially corrupt repositories
+
+sub runGit
+{
+    my ($argListRef, $keepGoing) = @_;
+    my $argString = join(' ', @$argListRef);
+    print 'Running ', $argString, "\n";
+    my $runRC = system($git, @$argListRef);
+    if ($runRC) {
+       if ($keepGoing) {
+          warn($argString . ' failed in root.');
+       } else {
+          die ($argString . ' failed in root.');
+       }
+    }
+    foreach my $MOD (@MODULES) {
+        chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
+        print 'Running ', @$argListRef, ' in ', $MOD,"\n";
+        my $modRunRC = system($git, @$argListRef);
+        if ($modRunRC) {
+            if ($keepGoing) {
+                warn($argString . ' failed in ' . $MOD);
+            } else {
+               die ($argString . ' failed in ' . $MOD);
+            }
+           $runRC = 1;
+        }
+        chdir($rootDir);
+    }
+    return $runRC;
 }
 
 # ---- Read a value from a configuration file of the form key=value.
@@ -196,10 +236,10 @@ sub isAbsolute
 # --------------- MAIN: Parse arguments
 
 if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
-     "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF,
+     "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF, "us" => \$STATUS,
      "build" => \$BUILD, "staging=s" => \$optStagingModule, "team=s" => \$optTeam,
      "hook=s" => \$optCommitHook, "quick-bootstrap"  => \$BOOTSTRAP)
-    || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF + $BOOTSTRAP == 0 && ! defined $optStagingModule)) {
+    || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF + $BOOTSTRAP + $STATUS== 0 && ! defined $optStagingModule)) {
     print $USAGE;
     exit (1);
 }
@@ -209,7 +249,8 @@ if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
 if ( $BOOTSTRAP != 0 ) {
     my $repoURL = 'git@scm.dev.nokia.troll.no:qt/qt5.git';
     my $targetFolder = 'qt-5';
-    my @initOptions = ('-nokia-developer');
+    my @initOptions;
+    push (@initOptions, '-nokia-developer') if $nokiaDeveloper;
     my $initArgumentsFromConfig = readQt5ToolConfig('initArguments');
 #   -- Webkit is usually too slow to clone unless something is configured.
     if ($initArgumentsFromConfig ne '') {
@@ -250,7 +291,6 @@ chdir($rootDir) or die ('Failed to chdir to' . $rootDir . '":' . $!);
 
 # ---- Determine modules by trying to find <module>/.git/config.
 
-my @MODULES = ();
 opendir (DIR, $rootDir) or die ('Cannot read ' . $rootDir . $!);
 while (my $e = readdir(DIR)) {
    if ($e ne '.' && $e ne '..') {
@@ -274,11 +314,17 @@ if ( $RESET !=  0 ) {
      $patchFile->close();
      print 'Saved ', $patch, "\n";
   }
-  system($git, ('reset','--hard'));
-  system($git, ('submodule','foreach',$git,'reset','--hard'));
+  my @resetArgs = ('reset','--hard');
+  runGit(\@resetArgs, 1);
 }
 
-# --------------- Switch to branch (Untested)
+# --------------- Status.
+if ( $STATUS !=  0 ) {
+    my @statusArgs = ('status');
+    runGit(\@statusArgs, 1);
+}
+
+# --------------- Switch to branch
 
 if (defined $optStagingModule) {
     chdir($optStagingModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optStagingModule . '":' . $!);
@@ -355,7 +401,8 @@ if ( $PULL !=  0 ) {
 
 if ( $BUILD !=  0 ) {
     print 'Building Qt 5 in ',$rootDir,"\n";
-    my @configureArguments = ('-nokia-developer');
+    my @configureArguments;
+    push (@configureArguments, '-nokia-developer') if $nokiaDeveloper;
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
 #   --- Shadow builds: Remove and re-create directory
