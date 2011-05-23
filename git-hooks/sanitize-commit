@@ -61,7 +61,7 @@ sub complain()
         }
         $pfx = $lpfx."- ";
     }
-    $level = 0 if (!defined($level) || ($level < 0 && $strict));
+    $level = 0 if (!defined($level) || ($level < 0 && $strict && length($key)));
     if ($level >= 0) {
         $fail = $level + 1 if ($level >= $fail);
         if ($gerrit) {
@@ -93,7 +93,7 @@ while (<MSG>) {
             &complain("Log message summary is excessively long", "log");
             $badlog = 1;
         } elsif (length($_) > 70 && !/^Merge ((remote )?branch '[^ ]+'|branch '[^ ]+' of [^ ]+( into [^ ]+)?)$/) {
-            &complain("Hint: Aim for shorter log message summaries", "");
+            &complain("Aim for shorter log message summaries", "", -1);
         }
     } elsif ($ln == 1) {
         if (!$badlog && $_ ne "") {
