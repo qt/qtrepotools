@@ -78,7 +78,7 @@ initArguments:      Arguments to init-repository for -q (should contain
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
 
-Example:
+Example: = ('-nokia-developer');
 
 shadowBuildPostfix=-build
 shadowBuildPostfix-qt-5special=-special-build
@@ -320,6 +320,8 @@ if ( $RESET !=  0 ) {
 
 # --------------- Status.
 if ( $STATUS !=  0 ) {
+    my @branchArgs = ('branch', '-v');
+    runGit(\@branchArgs, 1);
     my @statusArgs = ('status');
     runGit(\@statusArgs, 1);
 }
