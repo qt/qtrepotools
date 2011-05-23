@@ -64,7 +64,11 @@ sub complain()
     $level = 0 if (!defined($level) || ($level < 0 && $strict));
     if ($level >= 0) {
         $fail = $level + 1 if ($level >= $fail);
-        print $pfx.$msg." (key \"".$key."\")\n";
+        if ($gerrit) {
+            print $pfx.$msg."\n";
+        } else {
+            print $pfx.$msg." (key \"".$key."\")\n";
+        }
     } else {
         print $pfx."Hint: ".$msg."\n";
     }
