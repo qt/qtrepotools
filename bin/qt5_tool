@@ -405,6 +405,8 @@ if ( $BUILD !=  0 ) {
     print 'Building Qt 5 in ',$rootDir,"\n";
     my @configureArguments;
     push (@configureArguments, '-nokia-developer') if $nokiaDeveloper;
+#   -- detect X11
+    push (@configureArguments, '-xcb') if defined $ENV{'DISPLAY'};
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
 #   --- Shadow builds: Remove and re-create directory
