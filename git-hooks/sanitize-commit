@@ -327,7 +327,7 @@ while (<DIFF>) {
                     &complain("Adding build artifact", "generated");
                 }
             } else {
-                if (!defined($cfg{giant}) && $size > (2<<20)) {
+                if (!defined($cfg{giant}) && $size > (2 << 20)) {
                     &complain("Changing huge binary file (".formatSize($size)." > 2MeB)", "giant", 1);
                 }
             }
@@ -351,7 +351,7 @@ while (<DIFF>) {
                 if (!defined($cfg{alien}) && $file =~ /(\.(sln|vcproj|vcxproj|pro\.user)|(^|\/)(Makefile\.am|CMakeLists\.txt))$/i) {
                     &complain("Warning: Adding alien build system file", "alien");
                 }
-                if ($size > (2<<20)) {
+                if ($size > (2 << 20)) {
                     if (!defined($cfg{giant})) {
                         &complain("Adding huge file (".formatSize($size)." > 2MeB)", "giant", 1);
                     }
