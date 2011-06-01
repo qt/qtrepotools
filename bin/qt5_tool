@@ -71,7 +71,7 @@ Example use cases:
   qt5_tool -r           Reset --hard of repo.
 
 qt_tool can be configured by creating a configuration file \$HOME/$configFile in
-the format key=value. It is possible to use repository-specific values by 
+the format key=value. It is possible to use repository-specific values by
 adding a key postfixed by a dash and the repository folder base name.
 Supported keys:
 
