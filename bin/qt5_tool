@@ -33,6 +33,7 @@ my $CLEAN=0;
 my $DOC=0;
 my $PULL=0;
 my $BUILD=0;
+my $MAKE=0;
 my $RESET=0;
 my $DIFF=0;
 my $BOOTSTRAP=0;
@@ -55,7 +56,8 @@ Options:
   -r  Reset hard
   -c  Clean
   -p  Pull
-  -b  Build
+  -b  Build (configure + build)
+  -m  Make
   -o  [D]ocumentation
   -q  Quick bootstrap a new checkout under current folder (excluding webkit).
 
@@ -69,17 +71,18 @@ Example use cases:
   qt5_tool -r           Reset --hard of repo.
 
 qt_tool can be configured by creating a configuration file \$HOME/$configFile in
-the format key=value. It is possible to use repository-specific values by adding
-a key postfixed by a dash and the repository folder base name.
+the format key=value. It is possible to use repository-specific values by 
+adding a key postfixed by a dash and the repository folder base name.
 Supported keys:
 
 initArguments:      Arguments to init-repository for -q (should contain
                     webkit mirror).
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
+forceModules:       A list of modules (like "qtbase qtscript") that will be
+                    built using 'make -k' if the global 'make' fails.
 
-Example: = ('-nokia-developer');
-
+Example:
 shadowBuildPostfix=-build
 shadowBuildPostfix-qt-5special=-special-build
 
@@ -102,6 +105,7 @@ if (index($^O, 'MSWin') >= 0) {
 
 my $make = $os == $OS_WINDOWS ? 'nmake' : 'make';
 my @makeArgs = $os == $OS_WINDOWS ? () : ('-s');
+my $makeForceArg = $os == $OS_WINDOWS ? '/k' : '-k';
 my $git = 'git'; # TODO: Mac, Windows special cases?
 
 my $rootDir = '';
@@ -224,6 +228,19 @@ sub readQt5ToolConfig
     return readConfigFile(File::Spec->catfile($home, $configFile), $key);
 }
 
+sub shadowBuildFolder
+{
+    my $shadowBuildPostfix = readQt5ToolConfig('shadowBuildPostfix');
+    return $shadowBuildPostfix ne '' ? $rootDir . $shadowBuildPostfix : '';
+}
+
+# ---- Read a list of modules which will be built with -k if the global 'make' fails
+sub forceModules()
+{
+    my $forceModules = readQt5ToolConfig('forceModules');
+    return $forceModules ne '' ? split(/ /, $forceModules) : ();
+}
+
 # ---- Check for absolute path names.
 
 sub isAbsolute
@@ -237,9 +254,9 @@ sub isAbsolute
 
 if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
      "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF, "us" => \$STATUS,
-     "build" => \$BUILD, "staging=s" => \$optStagingModule, "team=s" => \$optTeam,
+     "build" => \$BUILD, "make" => \$MAKE, "staging=s" => \$optStagingModule, "team=s" => \$optTeam,
      "hook=s" => \$optCommitHook, "quick-bootstrap"  => \$BOOTSTRAP)
-    || ($CLEAN + $DOC + $PULL + $BUILD + $RESET + $DIFF + $BOOTSTRAP + $STATUS== 0 && ! defined $optStagingModule)) {
+    || ($CLEAN + $DOC + $PULL + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS== 0 && ! defined $optStagingModule)) {
     print $USAGE;
     exit (1);
 }
@@ -288,7 +305,7 @@ $prog = Cwd::realpath($0) unless isAbsolute($prog);
 $rootDir = dirname(dirname(dirname($prog)));
 $baseDir = basename($rootDir);
 chdir($rootDir) or die ('Failed to chdir to' . $rootDir . '":' . $!);
-
+my $exitCode = 0;
 # ---- Determine modules by trying to find <module>/.git/config.
 
 opendir (DIR, $rootDir) or die ('Cannot read ' . $rootDir . $!);
@@ -411,9 +428,8 @@ if ( $BUILD !=  0 ) {
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
 #   --- Shadow builds: Remove and re-create directory
-    my $shadowBuildPostfix = readQt5ToolConfig('shadowBuildPostfix');
-    if ($shadowBuildPostfix ne '') {
-        my $shadowBuildDir = $rootDir . $shadowBuildPostfix;
+    my $shadowBuildDir = shadowBuildFolder();
+    if ($shadowBuildDir ne '') {
         print 'Shadow build: "', $shadowBuildDir,"\"\n";
         if (-d $shadowBuildDir) {
             File::Path::rmtree($shadowBuildDir) or die ('Unable to remove ' . $shadowBuildDir . ' :' . $!);
@@ -424,8 +440,31 @@ if ( $BUILD !=  0 ) {
 #   ---- Configure and build
     my $brc = system(File::Spec->catfile($rootDir, 'configure'), @configureArguments);
     die 'Configure failed'  if ($brc);
-    $brc = system($make, @makeArgs);
-    die ($make . ' failed')  if ($brc);
+}
+
+if ( $BUILD + $MAKE !=  0) {
+    if ($BUILD == 0) { # Did not go through configure, cd
+        my $makeShadowBuildDir = shadowBuildFolder();
+        if ($makeShadowBuildDir ne '') {
+            print 'Shadow build: "', $makeShadowBuildDir,"\"\n";
+            chdir($makeShadowBuildDir) or die  ('Unable to chdir ' . $makeShadowBuildDir . ' :' . $!);
+        }
+    }
+#   Run a global make. If that fails, check if a list of 'force modules' is configured and build them with -k
+    my $makeRc = system($make, @makeArgs);
+    if ($makeRc) {
+        $exitCode = 1;
+        my @forcedModules = forceModules();
+        die ($make . ' failed')  if @forcedModules == 0;
+        warn ('######' . $make . ' failed, resorting to forcibly building ' . join(',', @forcedModules))  if ($makeRc);
+        push(@makeArgs, $makeForceArg);
+        foreach my $MOD (@forcedModules) {
+            chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
+            my $subMakeRc = system($make, @makeArgs);
+            warn ('######' . $make . ' failed in ' . $MOD . '.')  if ($subMakeRc);
+            chdir($rootDir);
+        }
+    }
 }
 
 # ---- Untested: Build documentation.
@@ -435,3 +474,5 @@ if ($DOC !=  0 ) {
    my $drc = system($make, (@makeArgs,'docs'));
    die ($make . ' docs failed')  if ($drc);
 }
+
+exit($exitCode);
