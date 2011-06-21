@@ -278,7 +278,7 @@ if ( $BOOTSTRAP != 0 ) {
     my $toolsFolder = 'qtrepotools';
     # -- Clone
     my $cloneRc = system($git, ('clone', $repoURL, $targetFolder));
-    die 'clone '. $$repoURL  . ' failed.' if $cloneRc;
+    die 'clone '. $repoURL  . ' failed.' if $cloneRc;
     chdir($targetFolder) or die ('Failed to chdir to "' . $targetFolder . '":' . $!);
     # -- Run init
     my $initRc = 0;
@@ -287,7 +287,7 @@ if ( $BOOTSTRAP != 0 ) {
     } else {
         $initRc = system('./init-repository', @initOptions);
     }
-    die 'init '. $$repoURL  . ' failed.' if $initRc;
+    die 'init '. $repoURL  . ' failed.' if $initRc;
     # -- Checkout 'master' in repotools and run the qt5_tool there
     # to pull such that the branches are initialized.
     chdir($toolsFolder) or die ('Failed to chdir to tools folder:' . $!);
