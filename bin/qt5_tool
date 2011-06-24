@@ -103,9 +103,13 @@ if (index($^O, 'MSWin') >= 0) {
    $os = $OS_MAC;
 }
 
-my $make = $os == $OS_WINDOWS ? 'nmake' : 'make';
-my @makeArgs = $os == $OS_WINDOWS ? () : ('-s');
-my $makeForceArg = $os == $OS_WINDOWS ? '/k' : '-k';
+my $qmakeSpec = $ENV{'QMAKESPEC'};
+my $minGW = $os == $OS_WINDOWS && defined($qmakeSpec) && index($qmakeSpec,'g++') > 0;
+my $make = 'make';
+$make = $minGW ?  'mingw32-make' : 'nmake' if ($os == $OS_WINDOWS);
+
+my @makeArgs = $os == $OS_WINDOWS && !$minGW ? () : ('-s');
+my $makeForceArg = $os == $OS_WINDOWS && !$minGW ? '/k' : '-k';
 my $git = 'git'; # TODO: Mac, Windows special cases?
 
 my $rootDir = '';
