@@ -39,7 +39,6 @@ my $DIFF=0;
 my $BOOTSTRAP=0;
 my $STATUS=0;
 my $optStagingModule;
-my $optTeam = '';
 my $optCommitHook;
 my $configFile = '.qt5_tool';
 
@@ -62,7 +61,6 @@ Options:
   -q  Quick bootstrap a new checkout under current folder (excluding webkit).
 
   -s <module> Switch a module to a staging repository.
-  -t <team>   Team for use with -s (default: '')
   -h <hook>   Path to commit hook for -s.
 
 Example use cases:
@@ -91,7 +89,9 @@ done in '/home/user/qt-5-build'. It is overridden by a value for the checkout
 '/home/user/qt-5special', which would result in '/home/user/qt-5-special-build'
 EOF
 
-my %preferredBranches = ( 'qtwebkit' , 'qt-modularization-base' );
+my %preferredBranches = (
+#    'qtwebkit' , 'qt-modularization-base'
+);
 
 # --------------- Detect OS
 
@@ -258,7 +258,7 @@ sub isAbsolute
 
 if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
      "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF, "us" => \$STATUS,
-     "build" => \$BUILD, "make" => \$MAKE, "staging=s" => \$optStagingModule, "team=s" => \$optTeam,
+     "build" => \$BUILD, "make" => \$MAKE, "staging=s" => \$optStagingModule,
      "hook=s" => \$optCommitHook, "quick-bootstrap"  => \$BOOTSTRAP)
     || ($CLEAN + $DOC + $PULL + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS== 0 && ! defined $optStagingModule)) {
     print $USAGE;
@@ -353,12 +353,13 @@ if (defined $optStagingModule) {
     chdir($optStagingModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optStagingModule . '":' . $!);
     my $strc = system($git, ('fetch', '--all'));
     die 'fetch '. $optStagingModule . ' failed.' if $strc;
-    my $branchName = $optTeam ne '' ? ($optTeam . '/master') :  'staging/master';
+    my $branchName = 'staging';
     my $stagingRemoteBranch =  $optStagingModule;
-    $stagingRemoteBranch .= '-' . $optTeam if $optTeam ne '';
-    $stagingRemoteBranch .= '-staging/master';
+    my $stagingRemoteBranch .= 'staging/master';
     print 'Switching to ', $branchName, ' from ', $stagingRemoteBranch, "\n";
-    $strc = system($git, ('checkout', '-b', $branchName, $stagingRemoteBranch));
+    $strc = system($git, ('branch', '--track', $branchName, $stagingRemoteBranch));
+    die 'branch'. $optStagingModule . ' ' . $branchName . ' ' . $stagingRemoteBranch . ' failed.' if $strc;
+    $strc = system($git, ('checkout', $branchName));
     die 'checkout '. $optStagingModule .  ' failed.' if $strc;
 #   -- Copy/Link the commit hook: Try to autodetect standard setup.
     if (!defined $optCommitHook && $os != $OS_WINDOWS) {
