@@ -218,6 +218,18 @@ sub readGitConfig
     return readConfigFile(File::Spec->catfile($rootDir, $module, '.git', 'config'), $key);
 }
 
+# ---- MinGW: Remove git from path (prevent sh.exe from throwing off mingw32-make).
+
+sub winRemoveGitFromPath
+{
+    my @path = split(/;/, $ENV{'PATH'});
+    my @cleanPath = grep(!/git/, @path);
+    if (@path != @cleanPath) {
+	print 'Removing git from path...';
+        $ENV{'PATH'} = join(';', @cleanPath);
+    }
+}
+
 # ---- Read a value from the '$HOME/.qt5_tool' configuration file
 #      When given a key 'key' for the repository directory '/foo/qt-5',
 #      check for the repo-specific value 'key-qt5' and then for the general
@@ -354,7 +366,6 @@ if (defined $optStagingModule) {
     my $strc = system($git, ('fetch', '--all'));
     die 'fetch '. $optStagingModule . ' failed.' if $strc;
     my $branchName = 'staging';
-    my $stagingRemoteBranch =  $optStagingModule;
     my $stagingRemoteBranch .= 'staging/master';
     print 'Switching to ', $branchName, ' from ', $stagingRemoteBranch, "\n";
     $strc = system($git, ('branch', '--track', $branchName, $stagingRemoteBranch));
@@ -425,6 +436,7 @@ if ( $PULL !=  0 ) {
 
 if ( $BUILD !=  0 ) {
     print 'Building Qt 5 in ',$rootDir,"\n";
+    winRemoveGitFromPath() if $minGW;
     my @configureArguments;
     push (@configureArguments, '-nokia-developer') if $nokiaDeveloper;
     push (@configureArguments, '-nomake', 'tests', '-nomake', 'demos', '-nomake examples');
