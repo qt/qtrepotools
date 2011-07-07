@@ -38,9 +38,12 @@ my $RESET=0;
 my $DIFF=0;
 my $BOOTSTRAP=0;
 my $STATUS=0;
-my $optStagingModule;
+my $optModuleBranchArgument;
+my $optGerritModule;
 my $optCommitHook;
 my $configFile = '.qt5_tool';
+my $codeReviewHost = 'codereview.qt.nokia.com';
+my $codeReviewPort = 29418;
 
 my $USAGE=<<EOF;
 Usage: qt5_tool [OPTIONS]
@@ -58,9 +61,15 @@ Options:
   -b  Build (configure + build)
   -m  Make
   -o  [D]ocumentation
-  -q  Quick bootstrap a new checkout under current folder (excluding webkit).
-
-  -s <module> Switch a module to a staging repository.
+  -q  Quick bootstrap a new checkout under current folder. Before doing that
+      for the first time, a configuration file \$HOME/$configFile
+      should be created containing the arguments to init-repository and
+      the user name for code review (see below).
+  -g <module> Set up gerrit for the module.
+  -s <module> Set up a tracking branch for the module. By default, this is
+              staging/master. It is possible the specify the branch by appending
+              :remote-branch to the module parameter, for example:
+              qtbase:origin/refactor
   -h <hook>   Path to commit hook for -s.
 
 Example use cases:
@@ -73,8 +82,9 @@ the format key=value. It is possible to use repository-specific values by
 adding a key postfixed by a dash and the repository folder base name.
 Supported keys:
 
-initArguments:      Arguments to init-repository for -q (should contain
-                    webkit mirror).
+initArguments:      Arguments to init-repository for -q. Example:
+                    [--berlin-|--brisbane-|--]nokia-developer
+codeReviewUser:     User name for code review (Gerrit)
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
 forceModules:       A list of modules (like "qtbase qtscript") that will be
@@ -109,6 +119,7 @@ my $make = 'make';
 $make = $minGW ?  'mingw32-make' : 'nmake' if ($os == $OS_WINDOWS);
 
 my @makeArgs = $os == $OS_WINDOWS && !$minGW ? () : ('-s');
+my $scp = $os == $OS_WINDOWS ? 'pscp' : 'scp';
 my $makeForceArg = $os == $OS_WINDOWS && !$minGW ? '/k' : '-k';
 my $git = 'git'; # TODO: Mac, Windows special cases?
 
@@ -230,6 +241,19 @@ sub winRemoveGitFromPath
     }
 }
 
+# ---- Set up a tracking branch
+sub initTrackingBranch
+{
+    my ($branchName, $remoteBranchName) = @_;
+    my $strc = system($git, ('fetch', '--all'));
+    die 'fetch failed.' if $strc;
+    print 'Switching to ', $branchName, ' from ', $remoteBranchName, "\n";
+    $strc = system($git, ('branch', '--track', $branchName, $remoteBranchName));
+    die 'branch ' . $branchName . ' ' . $remoteBranchName . ' failed.' if $strc;
+    $strc = system($git, ('checkout', $branchName));
+    die 'checkout failed.' if $strc;
+}
+
 # ---- Read a value from the '$HOME/.qt5_tool' configuration file
 #      When given a key 'key' for the repository directory '/foo/qt-5',
 #      check for the repo-specific value 'key-qt5' and then for the general
@@ -268,22 +292,27 @@ sub isAbsolute
 
 # --------------- MAIN: Parse arguments
 
-if (!GetOptions("clean" => \$CLEAN, "ocumentation" => \$DOC,
-     "pull" => \$PULL, "reset" => \$RESET, "diff" => \$DIFF, "us" => \$STATUS,
-     "build" => \$BUILD, "make" => \$MAKE, "staging=s" => \$optStagingModule,
-     "hook=s" => \$optCommitHook, "quick-bootstrap"  => \$BOOTSTRAP)
-    || ($CLEAN + $DOC + $PULL + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS== 0 && ! defined $optStagingModule)) {
+if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
+     'pull' => \$PULL, 'reset' => \$RESET, 'diff' => \$DIFF, 'us' => \$STATUS,
+     'build' => \$BUILD, 'make' => \$MAKE, 'staging=s' => \$optModuleBranchArgument,
+     'gerrit=s' => \$optGerritModule,
+     'hook=s' => \$optCommitHook, 'quick-bootstrap'  => \$BOOTSTRAP)
+    || ($CLEAN + $DOC + $PULL + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS == 0
+        && ! defined $optModuleBranchArgument && !defined $optGerritModule)) {
     print $USAGE;
     exit (1);
 }
 
+my $codeReviewUser = readQt5ToolConfig('codeReviewUser');
+
 # --------------- Bootstrap
 
 if ( $BOOTSTRAP != 0 ) {
-    my $repoURL = 'git@scm.dev.nokia.troll.no:qt/qt5.git';
+    my $repoURL = 'ssh://' . $codeReviewHost . ':' . $codeReviewPort .'/qt/qt5.git';
     my $targetFolder = 'qt-5';
     my @initOptions;
     push (@initOptions, '-nokia-developer') if $nokiaDeveloper;
+    push (@initOptions, '--codereview-username=' . $codeReviewUser) if $codeReviewUser ne '';
     my $initArgumentsFromConfig = readQt5ToolConfig('initArguments');
 #   -- Webkit is usually too slow to clone unless something is configured.
     if ($initArgumentsFromConfig ne '') {
@@ -361,17 +390,19 @@ if ( $STATUS !=  0 ) {
 
 # --------------- Switch to branch
 
-if (defined $optStagingModule) {
-    chdir($optStagingModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optStagingModule . '":' . $!);
-    my $strc = system($git, ('fetch', '--all'));
-    die 'fetch '. $optStagingModule . ' failed.' if $strc;
-    my $branchName = 'staging';
-    my $stagingRemoteBranch .= 'staging/master';
-    print 'Switching to ', $branchName, ' from ', $stagingRemoteBranch, "\n";
-    $strc = system($git, ('branch', '--track', $branchName, $stagingRemoteBranch));
-    die 'branch'. $optStagingModule . ' ' . $branchName . ' ' . $stagingRemoteBranch . ' failed.' if $strc;
-    $strc = system($git, ('checkout', $branchName));
-    die 'checkout '. $optStagingModule .  ' failed.' if $strc;
+if (defined $optModuleBranchArgument) {
+#   -- Split arguments of form module[:origin/refactor]
+    my ($branchName, $remoteBranchName ) = ('staging','staging/master');
+    my $bColon = index($optModuleBranchArgument, ':');
+    if ($bColon > 0) {
+        $remoteBranchName = substr($optModuleBranchArgument, $bColon + 1);
+        my $bSlash = index($remoteBranchName, '/');
+        die ('Invalid remote branch name' . $remoteBranchName) if ($bSlash < 1);
+        $branchName = substr($remoteBranchName, $bSlash + 1);
+        $optModuleBranchArgument = substr($optModuleBranchArgument, 0, $bColon);
+    }
+    chdir($optModuleBranchArgument) or die ('Failed to chdir from' . $rootDir . ' to "' . $optModuleBranchArgument . '":' . $!);
+    initTrackingBranch($branchName, $remoteBranchName);
 #   -- Copy/Link the commit hook: Try to autodetect standard setup.
     if (!defined $optCommitHook && $os != $OS_WINDOWS) {
        my $hook = $ENV{"HOME"} . '/dev/devtools/shell/git_post_commit_hook';
@@ -389,6 +420,23 @@ if (defined $optStagingModule) {
             }
         }
     }
+    chdir($rootDir);
+}
+
+# --------------- Init gerrit
+
+if (defined $optGerritModule) {
+    die ('This option requires a codereview-user name') if $codeReviewUser eq '';
+    chdir($optGerritModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optGerritModule);
+    my $remoteRepo = $codeReviewUser . '@' . $codeReviewHost . ':qt/' . $optGerritModule;
+    print 'Configuring ', $remoteRepo, "\n";
+    my $grc = system($git, ('config', 'remote.origin.url',  $remoteRepo));
+    die 'Config failed'  if ($grc);
+    print 'Initializing hooks', "\n";
+    $grc = system($scp, ('-p',  $codeReviewUser . '@' . $codeReviewHost . ':hooks/commit-msg', '.git/hooks'));
+    die 'Copying of commit hook failed'  if ($grc);
+    print 'Fetch all...', "\n";
+    $grc = system($git, ('fetch', '--all'));
     chdir($rootDir);
 }
 
