@@ -132,6 +132,15 @@ my @MODULES = ();
 # Move this to configuration file for general use?
 my $nokiaDeveloper = 1;
 
+# --- Execute a command and print to log.
+sub execute
+{
+    my @args = @_;
+    print '### [',basename(getcwd()),'] ', join(' ', @args),"\n";
+    my $rc = system(@args);
+    die ($args[0] . ' failed ' . $rc . ':' . $!) if $rc != 0;
+}
+
 # --- Fix a diff line from a submodule such that it can be applied to
 #     the root Qt 5 directory, that is:
 #     '--- a/foo...' -> '--- a/<module>/foo...'
@@ -177,7 +186,7 @@ sub runGit
     my ($argListRef, $keepGoing) = @_;
     my $argString = join(' ', @$argListRef);
     print 'Running ', $argString, "\n";
-    my $runRC = system($git, @$argListRef);
+    my $runRC = execute($git, @$argListRef);
     if ($runRC) {
        if ($keepGoing) {
           warn($argString . ' failed in root.');
@@ -187,8 +196,7 @@ sub runGit
     }
     foreach my $MOD (@MODULES) {
         chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
-        print 'Running ', @$argListRef, ' in ', $MOD,"\n";
-        my $modRunRC = system($git, @$argListRef);
+        my $modRunRC = execute($git, @$argListRef);
         if ($modRunRC) {
             if ($keepGoing) {
                 warn($argString . ' failed in ' . $MOD);
@@ -245,12 +253,12 @@ sub winRemoveGitFromPath
 sub initTrackingBranch
 {
     my ($branchName, $remoteBranchName) = @_;
-    my $strc = system($git, ('fetch', '--all'));
+    my $strc = execute($git, ('fetch', '--all'));
     die 'fetch failed.' if $strc;
     print 'Switching to ', $branchName, ' from ', $remoteBranchName, "\n";
-    $strc = system($git, ('branch', '--track', $branchName, $remoteBranchName));
+    $strc = execute($git, ('branch', '--track', $branchName, $remoteBranchName));
     die 'branch ' . $branchName . ' ' . $remoteBranchName . ' failed.' if $strc;
-    $strc = system($git, ('checkout', $branchName));
+    $strc = execute($git, ('checkout', $branchName));
     die 'checkout failed.' if $strc;
 }
 
@@ -322,24 +330,24 @@ if ( $BOOTSTRAP != 0 ) {
     }
     my $toolsFolder = 'qtrepotools';
     # -- Clone
-    my $cloneRc = system($git, ('clone', $repoURL, $targetFolder));
+    my $cloneRc = execute($git, ('clone', $repoURL, $targetFolder));
     die 'clone '. $repoURL  . ' failed.' if $cloneRc;
     chdir($targetFolder) or die ('Failed to chdir to "' . $targetFolder . '":' . $!);
     # -- Run init
     my $initRc = 0;
     if ($os == $OS_WINDOWS) {
-        $initRc = system('perl', 'init-repository', @initOptions);
+        $initRc = execute('perl', 'init-repository', @initOptions);
     } else {
-        $initRc = system('./init-repository', @initOptions);
+        $initRc = execute('./init-repository', @initOptions);
     }
     die 'init '. $repoURL  . ' failed.' if $initRc;
     # -- Checkout 'master' in repotools and run the qt5_tool there
     # to pull such that the branches are initialized.
     chdir($toolsFolder) or die ('Failed to chdir to tools folder:' . $!);
-    my $checkoutMasterRc = system($git, ('checkout', 'master'));
+    my $checkoutMasterRc = execute($git, ('checkout', 'master'));
     die 'checkout master in tools repository failed.' if $checkoutMasterRc;
     chdir('..');
-    system(File::Spec->catfile($toolsFolder, 'bin', 'qt5_tool'), '-p');
+    execute(File::Spec->catfile($toolsFolder, 'bin', 'qt5_tool'), '-p');
     exit 0;
 }
 
@@ -414,9 +422,9 @@ if (defined $optModuleBranchArgument) {
         if (! -e $target) {
             print 'Setting up commit hook: ', $optCommitHook, ' ', $target,"\n";
             if ($os == $OS_WINDOWS) {
-               system('xcopy.exe', $optCommitHook, $target);
+               execute('xcopy.exe', $optCommitHook, $target);
             } else {
-                system('ln', '-s', $optCommitHook, $target);
+                execute('ln', '-s', $optCommitHook, $target);
             }
         }
     }
@@ -430,13 +438,13 @@ if (defined $optGerritModule) {
     chdir($optGerritModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optGerritModule);
     my $remoteRepo = $codeReviewUser . '@' . $codeReviewHost . ':qt/' . $optGerritModule;
     print 'Configuring ', $remoteRepo, "\n";
-    my $grc = system($git, ('config', 'remote.origin.url',  $remoteRepo));
+    my $grc = execute($git, ('config', 'remote.origin.url',  $remoteRepo));
     die 'Config failed'  if ($grc);
     print 'Initializing hooks', "\n";
-    $grc = system($scp, ('-p',  $codeReviewUser . '@' . $codeReviewHost . ':hooks/commit-msg', '.git/hooks'));
+    $grc = execute($scp, ('-p',  $codeReviewUser . '@' . $codeReviewHost . ':hooks/commit-msg', '.git/hooks'));
     die 'Copying of commit hook failed'  if ($grc);
     print 'Fetch all...', "\n";
-    $grc = system($git, ('fetch', '--all'));
+    $grc = execute($git, ('fetch', '--all'));
     chdir($rootDir);
 }
 
@@ -444,8 +452,9 @@ if (defined $optGerritModule) {
 
 if ( $CLEAN !=  0 ) {
   print 'Cleaning Qt 5 in ',$rootDir,"\n";
-  system($git, ('clean','-dxf'));
-  system($git, ('submodule','foreach',$git,'clean','-dxf'));
+  my @cleanArgs = ('clean','-dxf');
+  execute($git, @cleanArgs);
+  runGit(\@cleanArgs);
 }
 
 # ---- Pull: Switch to branch unless there is one (check preferred
@@ -453,7 +462,7 @@ if ( $CLEAN !=  0 ) {
 
 if ( $PULL !=  0 ) {
   print 'Pulling Qt 5 in ',$rootDir,"\n";
-  my $prc = system($git, ('pull'));
+  my $prc = execute($git, ('pull'));
   die 'Pull failed'  if ($prc);
   foreach my $MOD (@MODULES) {
      print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
@@ -468,13 +477,13 @@ if ( $PULL !=  0 ) {
         $desiredBranch = substr($branches[1],2) unless defined $desiredBranch;
         die ('Unable to determine suitable branch for ' . $MOD) if not defined $desiredBranch;
         print 'Switching ',$MOD, ' from ', $currentBranch,' to ',$desiredBranch,"\n";
-        my $rc = system($git, ('checkout', $desiredBranch));
+        my $rc = execute($git, ('checkout', $desiredBranch));
         die 'Checkout of ' . $desiredBranch . ' failed'  if ($rc);
      } else {
         print ' branch: ',$currentBranch,"\n";
      }
      print 'Pulling ', $MOD, "\n";
-     $prc = system($git, ('pull'));
+     $prc = execute($git, ('pull'));
      die 'Pull ' . $MOD . ' failed'  if ($prc);
      chdir($rootDir);
   }
@@ -485,8 +494,8 @@ if ( $PULL !=  0 ) {
 if ( $BUILD !=  0 ) {
     print 'Building Qt 5 in ',$rootDir,"\n";
     winRemoveGitFromPath() if $minGW;
-    my @configureArguments;
-    push (@configureArguments, '-nokia-developer') if $nokiaDeveloper;
+    my @configureArguments = ('-prefix', File::Spec->catfile($rootDir, 'qtbase'), '-confirm-license');
+    push (@configureArguments, $nokiaDeveloper ? '-nokia-developer' : '-opensource');
     push (@configureArguments, '-nomake', 'tests', '-nomake', 'demos', '-nomake examples');
 #   -- detect X11
     push (@configureArguments, '-xcb') if defined $ENV{'DISPLAY'};
@@ -503,7 +512,7 @@ if ( $BUILD !=  0 ) {
         chdir($shadowBuildDir) or die  ('Unable to chdir ' . $shadowBuildDir . ' :' . $!);
     }
 #   ---- Configure and build
-    my $brc = system(File::Spec->catfile($rootDir, 'configure'), @configureArguments);
+    my $brc = execute(File::Spec->catfile($rootDir, 'configure'), @configureArguments);
     die 'Configure failed'  if ($brc);
 }
 
@@ -516,7 +525,7 @@ if ( $BUILD + $MAKE !=  0) {
         }
     }
 #   Run a global make. If that fails, check if a list of 'force modules' is configured and build them with -k
-    my $makeRc = system($make, @makeArgs);
+    my $makeRc = execute($make, @makeArgs);
     if ($makeRc) {
         $exitCode = 1;
         my @forcedModules = forceModules();
@@ -525,7 +534,7 @@ if ( $BUILD + $MAKE !=  0) {
         push(@makeArgs, $makeForceArg);
         foreach my $MOD (@forcedModules) {
             chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
-            my $subMakeRc = system($make, @makeArgs);
+            my $subMakeRc = execute($make, @makeArgs);
             warn ('######' . $make . ' failed in ' . $MOD . '.')  if ($subMakeRc);
             chdir($rootDir);
         }
@@ -536,7 +545,7 @@ if ( $BUILD + $MAKE !=  0) {
 
 if ($DOC !=  0 ) {
    print 'Documenting Qt 5 in ',$rootDir,"\n";
-   my $drc = system($make, (@makeArgs,'docs'));
+   my $drc = execute($make, (@makeArgs,'docs'));
    die ($make . ' docs failed')  if ($drc);
 }
 
