@@ -318,6 +318,10 @@ my $codeReviewUser = readQt5ToolConfig('codeReviewUser');
 if ( $BOOTSTRAP != 0 ) {
     my $repoURL = 'ssh://' . $codeReviewHost . ':' . $codeReviewPort .'/qt/qt5.git';
     my $targetFolder = 'qt-5';
+    print 'Enter target folder: [',$targetFolder, ']:';
+    my $targetFolderInput = <STDIN>;
+    chomp ($targetFolderInput);
+    $targetFolder = $targetFolderInput if $targetFolderInput ne '';
     my @initOptions;
     push (@initOptions, '-nokia-developer') if $nokiaDeveloper;
     push (@initOptions, '--codereview-username=' . $codeReviewUser) if $codeReviewUser ne '';
