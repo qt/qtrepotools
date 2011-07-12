@@ -41,9 +41,9 @@ my $STATUS=0;
 my $optModuleBranchArgument;
 my $optGerritModule;
 my $optCommitHook;
-my $configFile = '.qt5_tool';
 my $codeReviewHost = 'codereview.qt.nokia.com';
 my $codeReviewPort = 29418;
+my $configFile = '.qt5_tool';
 
 my $USAGE=<<EOF;
 Usage: qt5_tool [OPTIONS]
@@ -126,6 +126,8 @@ my $git = 'git'; # TODO: Mac, Windows special cases?
 my $rootDir = '';
 my $baseDir = '';
 my $home = $os == $OS_WINDOWS ? ($ENV{'HOMEDRIVE'} . $ENV{'HOMEPATH'}) : $ENV{'HOME'};
+my $user = $os == $OS_WINDOWS ? $ENV{'USERNAME'} : $ENV{'USER'};
+$configFile = File::Spec->catfile($home, $configFile);
 
 my @MODULES = ();
 
@@ -139,6 +141,17 @@ sub execute
     print '### [',basename(getcwd()),'] ', join(' ', @args),"\n";
     my $rc = system(@args);
     die ($args[0] . ' failed ' . $rc . ':' . $!) if $rc != 0;
+}
+
+# --- Prompt for input with a default
+
+sub prompt
+{
+    my ($promptText, $defaultValue) = @_;
+    print $promptText,' [', $defaultValue, ']:';
+    my $userInput = <STDIN>;
+    chomp ($userInput);
+    return $userInput eq '' ? $defaultValue : $userInput;
 }
 
 # --- Fix a diff line from a submodule such that it can be applied to
@@ -271,9 +284,9 @@ sub readQt5ToolConfig
 {
     my ($key) = @_;
     my $repoKey = $key . '-' . $baseDir;
-    my $repoValue = readConfigFile(File::Spec->catfile($home, $configFile), $repoKey);
+    my $repoValue = readConfigFile($configFile, $repoKey);
     return $repoValue if $repoValue ne '';
-    return readConfigFile(File::Spec->catfile($home, $configFile), $key);
+    return readConfigFile($configFile, $key);
 }
 
 sub shadowBuildFolder
@@ -311,17 +324,28 @@ if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
     exit (1);
 }
 
+#   -- Prompt to create config before reading anything for bootstrapping.
+if ( $BOOTSTRAP != 0 && ! -f $configFile) {
+    print "This appears to be the first use of qt5_tool on this machine.\nCreating ",$configFile, "...,\n";
+    my $newCodeReviewUser = prompt('Enter CodeReview user name', $user);
+    my $newInitArguments = prompt('Enter arguments to init-repository', '--berlin --no-webkit');
+    my $newConfigureArguments = prompt('Enter arguments to configure', '-no-webkit');
+    my $configFileHandle = new IO::File('>' . $configFile) or die ('Unable to write to ' . $configFile . ':' . $!);
+    print $configFileHandle 'configureArguments=', $newConfigureArguments, "\n" if $newConfigureArguments ne '';
+    print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
+    print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
+    $configFileHandle->close();
+    print 'Wrote ',$configFile, "\n";
+}
+
+#  --- read config file
 my $codeReviewUser = readQt5ToolConfig('codeReviewUser');
 
 # --------------- Bootstrap
 
 if ( $BOOTSTRAP != 0 ) {
     my $repoURL = 'ssh://' . $codeReviewHost . ':' . $codeReviewPort .'/qt/qt5.git';
-    my $targetFolder = 'qt-5';
-    print 'Enter target folder: [',$targetFolder, ']:';
-    my $targetFolderInput = <STDIN>;
-    chomp ($targetFolderInput);
-    $targetFolder = $targetFolderInput if $targetFolderInput ne '';
+    my $targetFolder = prompt('Enter target folder', 'qt-5');
     my @initOptions;
     push (@initOptions, '-nokia-developer') if $nokiaDeveloper;
     push (@initOptions, '--codereview-username=' . $codeReviewUser) if $codeReviewUser ne '';
