@@ -306,12 +306,13 @@ while (<DIFF>) {
             $file = $1;
             #print "*** got file ".$file.".\n";
             $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
+            my $foreign = ($file =~ /\/3rdparty\//);
             $new_file = 0;
             $maybe_bin = 0;
             $is_submodule = 0;
             $crlf_fail = defined($cfg{crlf});
-            $mixws_check = !$merge && $clike && !defined($cfg{mixws});
-            $ws_check = !defined($cfg{style}) && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
+            $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
+            $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
             $tabs_check = $ws_check && ($file !~ /((^|\/)Makefile\b|\.def$)/);
             $ctlkw_check = $tabs_check && $clike;
             $conflict_fail = defined($cfg{conflict});
