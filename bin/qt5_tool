@@ -311,6 +311,57 @@ sub isAbsolute
     return index($file, '/') == 0;
 }
 
+# ---- Determine modules by trying to find <module>/.git/config.
+sub determineModules
+{
+    my ($rootFolder) = @_;
+    opendir (DIR, $rootFolder) or die ('Cannot read ' . $rootFolder . $!);
+    my @mods = ();
+    while (my $e = readdir(DIR)) {
+        if ($e ne '.' && $e ne '..') {
+            push(@mods, $e) if (-d $e && -f (File::Spec->catfile($e, '.git','config')));
+       }
+    }
+    closedir(DIR);
+    die ('Failed to detect modules in ' . $rootFolder . ".\nNeeds to be called from the root directory.") if @mods == 0;
+    # Sort & Put a (potentially failing) webkit last.
+    my @nonWebKit = sort(grep(!/^qtwebkit$/, @mods));
+    my @webKit = grep(/^qtwebkit$/, @mods);
+    return (@nonWebKit, @webKit)
+}
+
+# ---- Helper to be called before pull. Checks if
+#      the module is in a 'no branch' state after init-repository.
+#      If so, check out a branch, checking preferredBranches hash.
+
+sub checkoutInitialBranch
+{
+    my ($mod) = @_;
+    # Which branch are we on?
+    my $rc = execute($git, ('fetch', '--all'));
+    die 'fetch of ' . $mod . ' failed'  if ($rc);
+    my @branches = split("\n", `$git branch`);
+    my @currentBranches = grep(/^\* /, @branches);
+    die ('Unable to determine branch of ' . $mod) if @currentBranches != 1;
+    my $currentBranch = substr($currentBranches[0], 2);
+    #  We have one, no need to act.
+    if ($currentBranch ne '(no branch)') {
+        print ' branch: ',$currentBranch,"\n";
+        return;
+    }
+    # Switch to suitable branch when none is set initially.
+    my $desiredBranch = $preferredBranches{$mod};
+    if (defined($desiredBranch) && $desiredBranch eq '') {
+        print 'Not changing branch for ',$mod,"\n";
+        return;
+    }
+    $desiredBranch = substr($branches[1],2) unless defined $desiredBranch;
+    die ('Unable to determine suitable branch for ' . $mod) unless defined $desiredBranch;
+    print 'Switching ',$mod, ' from ', $currentBranch,' to ',$desiredBranch,"\n";
+    $rc = execute($git, ('checkout', $desiredBranch));
+    die 'Checkout of ' . $desiredBranch . ' failed'  if ($rc);
+}
+
 # --------------- MAIN: Parse arguments
 
 if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
@@ -387,16 +438,8 @@ $rootDir = dirname(dirname(dirname($prog)));
 $baseDir = basename($rootDir);
 chdir($rootDir) or die ('Failed to chdir to' . $rootDir . '":' . $!);
 my $exitCode = 0;
-# ---- Determine modules by trying to find <module>/.git/config.
 
-opendir (DIR, $rootDir) or die ('Cannot read ' . $rootDir . $!);
-while (my $e = readdir(DIR)) {
-   if ($e ne '.' && $e ne '..') {
-       push(@MODULES, $e) if (-d $e && -f (File::Spec->catfile($e, '.git','config')));
-   }
-}
-closedir(DIR);
-die ('Failed to detect modules in ' . $rootDir . ".\nNeeds to be called from the root directory.") if @MODULES == 0;
+@MODULES = determineModules($rootDir);
 
 print diff($rootDir, \@MODULES) if $DIFF;
 
@@ -495,21 +538,7 @@ if ( $PULL !=  0 ) {
   foreach my $MOD (@MODULES) {
      print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
      chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
-     my @branches = split("\n", `$git branch`);
-     my @currentBranches = grep(/^\* /, @branches);
-     die ('Unable to determine branch of ' . $MOD) if @currentBranches != 1;
-     my $currentBranch = substr($currentBranches[0], 2);
-     if ($currentBranch eq '(no branch)') {
-        # Switch to suitable branch when none is set initially.
-        my $desiredBranch = $preferredBranches{$MOD};
-        $desiredBranch = substr($branches[1],2) unless defined $desiredBranch;
-        die ('Unable to determine suitable branch for ' . $MOD) if not defined $desiredBranch;
-        print 'Switching ',$MOD, ' from ', $currentBranch,' to ',$desiredBranch,"\n";
-        my $rc = execute($git, ('checkout', $desiredBranch));
-        die 'Checkout of ' . $desiredBranch . ' failed'  if ($rc);
-     } else {
-        print ' branch: ',$currentBranch,"\n";
-     }
+     checkoutInitialBranch($MOD);
      print 'Pulling ', $MOD, "\n";
      $prc = execute($git, ('pull'));
      die 'Pull ' . $MOD . ' failed'  if ($prc);
