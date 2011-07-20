@@ -355,6 +355,16 @@ sub checkoutInitialBranch
         print 'Not changing branch for ',$mod,"\n";
         return;
     }
+    # -- Special treatment for webkit: Remove existing invalid branch
+    if ($mod eq 'qtwebkit') {
+        my $webkitBranch = 'qt-modularization-base';
+        execute($git, ('branch', '-D', $webkitBranch));
+        $rc = execute($git, 'branch', '--track', $webkitBranch, 'gerrit/' . $webkitBranch);
+        die 'tracking branch  ' . $webkitBranch . ' ' . $mod . ' failed' if ($rc);
+        $rc = execute($git, ('checkout', $webkitBranch));
+        die 'Checkout of ' . $webkitBranch. ' failed'  if ($rc);
+        return;
+    }
     $desiredBranch = substr($branches[1],2) unless defined $desiredBranch;
     die ('Unable to determine suitable branch for ' . $mod) unless defined $desiredBranch;
     print 'Switching ',$mod, ' from ', $currentBranch,' to ',$desiredBranch,"\n";
