@@ -113,19 +113,57 @@ if (index($^O, 'MSWin') >= 0) {
    $os = $OS_MAC;
 }
 
+# -- Convenience for path search.
+#    There is File::Which, but not by default installed on Linux.
+
+sub which
+{
+    my ($needle) = @_;
+    my $sep = $os == $OS_WINDOWS ? ';' : ':';
+    my @needles = ($needle);
+    push(@needles, $needle . '.exe', $needle . '.bat', $needle . '.cmd') if $os == $OS_WINDOWS;
+    foreach my $path (split(/$sep/, $ENV{'PATH'})) {
+        foreach my $n (@needles) {
+            my $binary = File::Spec->catfile($path, $n);
+            return $binary if (-f $binary);
+        }
+    }
+    return undef;
+}
+
+# -- Locate an utility (grep, scp, etc) in MSYS git. This is specifically
+#    for the setup case in which only git.cmd and not the utilities are in
+#    the path. We then look at the git.cmd and return ..\bin\<utility>.exe.
+sub msysGitUtility
+{
+#   -- Look for 'git.cmd' and cd ..\bin
+    my ($git, $utility) = @_;
+    if ($git =~ /.cmd$/i) {
+	my $msysGitBinFolder = File::Spec->catfile(dirname(dirname($git)), 'bin');
+	return File::Spec->catfile($msysGitBinFolder, $utility . '.exe');
+    }
+    return $utility;
+}
+
 my $qmakeSpec = $ENV{'QMAKESPEC'};
 my $minGW = $os == $OS_WINDOWS && defined($qmakeSpec) && index($qmakeSpec,'g++') > 0;
 my $make = 'make';
 $make = $minGW ?  'mingw32-make' : 'nmake' if ($os == $OS_WINDOWS);
 
 my @makeArgs = $os == $OS_WINDOWS && !$minGW ? () : ('-s');
-my $scp = $os == $OS_WINDOWS ? 'pscp' : 'scp';
+
+my $git = which('git'); # TODO: Mac, Windows special cases?
+die ('Unable to locate git') unless defined $git;
+
 my $makeForceArg = $os == $OS_WINDOWS && !$minGW ? '/k' : '-k';
-my $git = 'git'; # TODO: Mac, Windows special cases?
 
 my $rootDir = '';
 my $baseDir = '';
 my $home = $os == $OS_WINDOWS ? ($ENV{'HOMEDRIVE'} . $ENV{'HOMEPATH'}) : $ENV{'HOME'};
+
+# -- Set a HOME variable on Windows such that scp. etc. feel at home (locating .ssh).
+$ENV{'HOME'} = $home if ($os == $OS_WINDOWS && not defined $ENV{'HOME'});
+
 my $user = $os == $OS_WINDOWS ? $ENV{'USERNAME'} : $ENV{'USER'};
 $configFile = File::Spec->catfile($home, $configFile);
 
@@ -180,7 +218,7 @@ sub diff
     my ($rootDir,$modArrayRef) = @_;
     foreach my $MOD (@$modArrayRef) {
      chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
-     my $diffOutput = `$git diff`;
+     my $diffOutput = `"$git" diff`;
      foreach my $line (split(/\n/, $diffOutput)) {
          chomp($line);
          $totalDiff .= fixDiff($line, $MOD);
@@ -340,7 +378,7 @@ sub checkoutInitialBranch
     # Which branch are we on?
     my $rc = execute($git, ('fetch', '--all'));
     die 'fetch of ' . $mod . ' failed'  if ($rc);
-    my @branches = split("\n", `$git branch`);
+    my @branches = split("\n", `"$git" branch`);
     my @currentBranches = grep(/^\* /, @branches);
     die ('Unable to determine branch of ' . $mod) if @currentBranches != 1;
     my $currentBranch = substr($currentBranches[0], 2);
@@ -515,6 +553,9 @@ if (defined $optModuleBranchArgument) {
 # --------------- Init gerrit
 
 if (defined $optGerritModule) {
+    my $scp = which('scp');
+    $scp = msysGitUtility($git, 'scp') unless defined $scp || $os != $OS_WINDOWS;
+    die ('Unable to locate scp.') unless defined $scp;
     die ('This option requires a codereview-user name') if $codeReviewUser eq '';
     chdir($optGerritModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optGerritModule);
     my $remoteRepo = $codeReviewUser . '@' . $codeReviewHost . ':qt/' . $optGerritModule;
