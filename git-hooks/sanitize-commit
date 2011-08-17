@@ -222,6 +222,7 @@ my $crlf_fail;
 my $conflict_fail;
 my $tabs_check;
 my $ws_check;
+my $tsv_check;
 my $ctlkw_check;
 open DIFF, "git diff-tree --no-commit-id --diff-filter=ACMR --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -M --root ".$sha1." |" or die "cannot run git: $!";
 while (<DIFF>) {
@@ -272,14 +273,18 @@ while (<DIFF>) {
             $conflict_fail = 1;
         }
         if ($ws_check) {
-            styleFail("Space indent followed by a TAB character") if (/^ +\t/);
-            styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
-            styleFail("Trailing whitespace") if (/[ \t]\r?\n$/);
-            if ($tabs_check) {
-                styleFail("Leading tabs") if (/^\t+/);
-                if ($ctlkw_check) {
-                    styleFail("Flow control keywords must be followed by a single space")
-                       if (/\b(if|for|foreach|Q_FOREACH|while|do|switch)(|  +)\(/);
+            if ($tsv_check) {
+                styleFail("Mixing spaces with TABs") if (/^ +\t|\t +/);
+            } else {
+                styleFail("Space indent followed by a TAB character") if (/^ +\t/);
+                styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
+                styleFail("Trailing whitespace") if (/[ \t]\r?\n$/);
+                if ($tabs_check) {
+                    styleFail("Leading tabs") if (/^\t+/);
+                    if ($ctlkw_check) {
+                        styleFail("Flow control keywords must be followed by a single space")
+                           if (/\b(if|for|foreach|Q_FOREACH|while|do|switch)(|  +)\(/);
+                    }
                 }
             }
         }
@@ -313,7 +318,8 @@ while (<DIFF>) {
             $crlf_fail = defined($cfg{crlf});
             $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
             $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
-            $tabs_check = $ws_check && ($file !~ /((^|\/)Makefile\b|\.def$)/);
+            $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
+            $tabs_check = $ws_check && !$tsv_check && ($file !~ /((^|\/)Makefile\b|\.def$)/);
             $ctlkw_check = $tabs_check && $clike;
             $conflict_fail = defined($cfg{conflict});
             $braces = 0;
