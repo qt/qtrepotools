@@ -38,9 +38,11 @@ my $RESET=0;
 my $DIFF=0;
 my $BOOTSTRAP=0;
 my $STATUS=0;
+my $UPDATE=0;
 my $optModuleBranchArgument;
 my $optGerritModule;
 my $optCommitHook;
+my $gitoriousURL = 'git://gitorious.org/qt/qt5.git';
 my $codeReviewHost = 'codereview.qt.nokia.com';
 my $codeReviewPort = 29418;
 my $configFile = '.qt5_tool';
@@ -54,34 +56,34 @@ Feel free to extend!
 
 Options:
   -d  Diff (over all modules, relative to root)
-  -u  Status
+  -s  Status
   -r  Reset hard
   -c  Clean
-  -p  Pull
+  -u  Update
+  -p  Pull (for development only)
   -b  Build (configure + build)
   -m  Make
   -o  [D]ocumentation
-  -q  Quick bootstrap a new checkout under current folder. Before doing that
-      for the first time, a configuration file \$HOME/$configFile
-      should be created containing the arguments to init-repository and
-      the user name for code review (see below).
+  -q  Quick bootstrap a new checkout under current folder.
   -g <module> Set up gerrit for the module.
-  -s <module> Set up a tracking branch for the module. By default, this is
+  -t <module> Set up a tracking branch for the module. By default, this is
               staging/master. It is possible the specify the branch by appending
               :remote-branch to the module parameter, for example:
               qtbase:origin/refactor
   -h <hook>   Path to commit hook for -s.
 
 Example use cases:
-  qt5_tool -c -p -b     Clean, pull and build for nightly builds
+  qt5_tool -c -u -b     Clean, update and build for nightly builds
   qt5_tool -d           Generate modules diff relative to root directory
   qt5_tool -r           Reset --hard of repo.
 
 qt_tool can be configured by creating a configuration file \$HOME/$configFile in
 the format key=value. It is possible to use repository-specific values by
 adding a key postfixed by a dash and the repository folder base name.
+Use 'true', '1' for Boolean keys.
 Supported keys:
 
+nokiaDeveloper:     Nokia Developer mode (Boolean)
 initArguments:      Arguments to init-repository for -q. Example:
                     [--berlin-|--brisbane-|--]nokia-developer
 codeReviewUser:     User name for code review (Gerrit)
@@ -89,7 +91,6 @@ configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
 forceModules:       A list of modules (like "qtbase qtscript") that will be
                     built using 'make -k' if the global 'make' fails.
-
 Example:
 shadowBuildPostfix=-build
 shadowBuildPostfix-qt-5special=-special-build
@@ -139,8 +140,8 @@ sub msysGitUtility
 #   -- Look for 'git.cmd' and cd ..\bin
     my ($git, $utility) = @_;
     if ($git =~ /.cmd$/i) {
-	my $msysGitBinFolder = File::Spec->catfile(dirname(dirname($git)), 'bin');
-	return File::Spec->catfile($msysGitBinFolder, $utility . '.exe');
+        my $msysGitBinFolder = File::Spec->catfile(dirname(dirname($git)), 'bin');
+        return File::Spec->catfile($msysGitBinFolder, $utility . '.exe');
     }
     return $utility;
 }
@@ -169,8 +170,7 @@ $configFile = File::Spec->catfile($home, $configFile);
 
 my @MODULES = ();
 
-# Move this to configuration file for general use?
-my $nokiaDeveloper = 1;
+my $nokiaDeveloperConfigKey = 'nokiaDeveloper';
 
 # --- Execute a command and print to log.
 sub execute
@@ -295,7 +295,7 @@ sub winRemoveGitFromPath
     my @path = split(/;/, $ENV{'PATH'});
     my @cleanPath = grep(!/git/, @path);
     if (@path != @cleanPath) {
-	print 'Removing git from path...';
+        print 'Removing git from path...';
         $ENV{'PATH'} = join(';', @cleanPath);
     }
 }
@@ -325,6 +325,13 @@ sub readQt5ToolConfig
     my $repoValue = readConfigFile($configFile, $repoKey);
     return $repoValue if $repoValue ne '';
     return readConfigFile($configFile, $key);
+}
+
+sub readQt5ToolConfigBool
+{
+   my ($key) = @_;
+   my $value = readQt5ToolConfig($key);
+   return (length($value) > 0 && ($value eq '1' || $value =~ /true/i)) ? 1 : 0;
 }
 
 sub shadowBuildFolder
@@ -413,11 +420,11 @@ sub checkoutInitialBranch
 # --------------- MAIN: Parse arguments
 
 if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
-     'pull' => \$PULL, 'reset' => \$RESET, 'diff' => \$DIFF, 'us' => \$STATUS,
-     'build' => \$BUILD, 'make' => \$MAKE, 'staging=s' => \$optModuleBranchArgument,
+     'pull' => \$PULL, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
+     'build' => \$BUILD, 'make' => \$MAKE, 'tracking=s' => \$optModuleBranchArgument,
      'gerrit=s' => \$optGerritModule,
      'hook=s' => \$optCommitHook, 'quick-bootstrap'  => \$BOOTSTRAP)
-    || ($CLEAN + $DOC + $PULL + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS == 0
+    || ($CLEAN + $DOC + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS == 0
         && ! defined $optModuleBranchArgument && !defined $optGerritModule)) {
     print $USAGE;
     exit (1);
@@ -426,13 +433,20 @@ if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
 #   -- Prompt to create config before reading anything for bootstrapping.
 if ( $BOOTSTRAP != 0 && ! -f $configFile) {
     print "This appears to be the first use of qt5_tool on this machine.\nCreating ",$configFile, "...,\n";
-    my $newCodeReviewUser = prompt('Enter CodeReview user name', $user);
-    my $newInitArguments = prompt('Enter arguments to init-repository', '--berlin --no-webkit');
+    my $newNokiaDeveloper = prompt('Nokia developer (y/n)', 'n') =~ /y/i;
+    my $newCodeReviewUser = '';
+    my $newInitArgumentsDefault = '--no-webkit';
+    if ($newNokiaDeveloper) {
+        $newCodeReviewUser = prompt('Enter CodeReview user name', $user);
+        $newInitArgumentsDefault .= ' --berlin';
+    }
+    my $newInitArguments = prompt('Enter arguments to init-repository', $newInitArgumentsDefault);
     my $newConfigureArguments = prompt('Enter arguments to configure', '-no-webkit');
     my $configFileHandle = new IO::File('>' . $configFile) or die ('Unable to write to ' . $configFile . ':' . $!);
     print $configFileHandle 'configureArguments=', $newConfigureArguments, "\n" if $newConfigureArguments ne '';
     print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
     print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
+    print $configFileHandle "nokiaDeveloper=true\n" if $newNokiaDeveloper;
     $configFileHandle->close();
     print 'Wrote ',$configFile, "\n";
 }
@@ -443,7 +457,10 @@ my $codeReviewUser = readQt5ToolConfig('codeReviewUser');
 # --------------- Bootstrap
 
 if ( $BOOTSTRAP != 0 ) {
-    my $repoURL = 'ssh://' . $codeReviewHost . ':' . $codeReviewPort .'/qt/qt5.git';
+    my $nokiaDeveloper = readQt5ToolConfigBool($nokiaDeveloperConfigKey);
+    my $repoURL = $nokiaDeveloper  ?
+                   ('ssh://' . $codeReviewHost . ':' . $codeReviewPort .'/qt/qt5.git') :
+                   $gitoriousURL;
     my $targetFolder = prompt('Enter target folder', 'qt-5');
     my @initOptions;
     push (@initOptions, '-nokia-developer') if $nokiaDeveloper;
@@ -468,13 +485,6 @@ if ( $BOOTSTRAP != 0 ) {
         $initRc = execute('./init-repository', @initOptions);
     }
     die 'init '. $repoURL  . ' failed.' if $initRc;
-    # -- Checkout 'master' in repotools and run the qt5_tool there
-    # to pull such that the branches are initialized.
-    chdir($toolsFolder) or die ('Failed to chdir to tools folder:' . $!);
-    my $checkoutMasterRc = execute($git, ('checkout', 'master'));
-    die 'checkout master in tools repository failed.' if $checkoutMasterRc;
-    chdir('..');
-    execute(File::Spec->catfile($toolsFolder, 'bin', 'qt5_tool'), '-p');
     exit 0;
 }
 
@@ -583,18 +593,26 @@ if ( $CLEAN !=  0 ) {
 #      branch hash, default to branch n+1, which is mostly master).
 
 if ( $PULL !=  0 ) {
-  print 'Pulling Qt 5 in ',$rootDir,"\n";
-  my $prc = execute($git, ('pull'));
-  die 'Pull failed'  if ($prc);
-  foreach my $MOD (@MODULES) {
-     print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
-     chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
-     checkoutInitialBranch($MOD);
-     print 'Pulling ', $MOD, "\n";
-     $prc = execute($git, ('pull'));
-     die 'Pull ' . $MOD . ' failed'  if ($prc);
-     chdir($rootDir);
-  }
+    print 'Pulling Qt 5 in ',$rootDir,"\n";
+    my $prc = execute($git, ('pull'));
+    die 'Pull failed'  if ($prc);
+    foreach my $MOD (@MODULES) {
+        print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
+        chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
+        checkoutInitialBranch($MOD);
+        print 'Pulling ', $MOD, "\n";
+        $prc = execute($git, ('pull'));
+        die 'Pull ' . $MOD . ' failed'  if ($prc);
+        chdir($rootDir);
+   } # foreach
+} # pull
+
+# ---- Update
+
+if ( $UPDATE !=  0 ) {
+    print 'Updating Qt 5 in ',$rootDir,"\n";
+    my $urc = execute($git, ('submodule', 'update'));
+    die 'update failed'  if ($urc);
 }
 
 # ---- Configure and build
@@ -605,7 +623,7 @@ if ( $BUILD !=  0 ) {
     my @configureArguments = ('-prefix', File::Spec->catfile($rootDir, 'qtbase'), '-confirm-license');
 #   -- Remove later.
     push (@configureArguments, '-no-qt3support') if $os == $OS_WINDOWS;
-    push (@configureArguments, $nokiaDeveloper ? '-nokia-developer' : '-opensource');
+    push (@configureArguments, readQt5ToolConfigBool($nokiaDeveloperConfigKey) ? '-nokia-developer' : '-opensource');
     push (@configureArguments, '-nomake', 'tests', '-nomake', 'demos', '-nomake examples');
 #   -- detect X11
     push (@configureArguments, '-xcb') if defined $ENV{'DISPLAY'};
