@@ -611,7 +611,9 @@ if ( $PULL !=  0 ) {
 
 if ( $UPDATE !=  0 ) {
     print 'Updating Qt 5 in ',$rootDir,"\n";
-    my $urc = execute($git, ('submodule', 'update'));
+    my $urc = execute($git, ('pull'));
+    die 'pull failed'  if ($urc);
+    $urc = execute($git, ('submodule', 'update'));
     die 'update failed'  if ($urc);
 }
 
