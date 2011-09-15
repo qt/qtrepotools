@@ -43,7 +43,7 @@ my $optModuleBranchArgument;
 my $optGerritModule;
 my $optCommitHook;
 my $gitoriousURL = 'git://gitorious.org/qt/qt5.git';
-my $codeReviewHost = 'codereview.qt.nokia.com';
+my $codeReviewHost = 'codereview.qt-project.org';
 my $codeReviewPort = 29418;
 my $configFile = '.qt5_tool';
 
