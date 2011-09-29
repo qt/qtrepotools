@@ -25,6 +25,7 @@ use Getopt::Long;
 use File::Basename;
 use Cwd;
 use File::Spec;
+use File::Copy;
 use POSIX;
 use IO::File;
 use File::Path;
@@ -644,6 +645,18 @@ if ( $BUILD !=  0 ) {
 #   ---- Configure and build
     my $brc = execute(File::Spec->catfile($rootDir, 'configure'), @configureArguments);
     die 'Configure failed'  if ($brc);
+#   --- Workaround: The module .pri files are currently (as of 30.9.2011) not copied to their
+#       target location on Windows.
+    if ($os == $OS_WINDOWS) {
+        my $targetProfileFolder = File::Spec->catfile($rootDir, 'qtbase', 'mkspecs', 'modules');
+        if (! -f File::Spec->catfile($targetProfileFolder, 'qt_core.pri')) {
+            my $sourceProfilePattern = File::Spec->catfile($rootDir, 'qtbase', 'module-paths', 'modules' , '*.pri');
+            foreach my $sourceProfile (glob($sourceProfilePattern)) {
+                print 'Workaround: Copying ', $sourceProfile, ' to ',$targetProfileFolder,"\n";
+                File::Copy::copy($sourceProfile, $targetProfileFolder) or die ('Copy error '. $!);
+            }
+        }
+   }
 }
 
 if ( $BUILD + $MAKE !=  0) {
