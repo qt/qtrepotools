@@ -134,15 +134,19 @@ sub flushChunk()
         my ($a, $d) = ("", "");
         while ($ai < @addi) {
             $a = $addi[$ai++];
-            $nlonly = 0 if ($a ne "\n" && $a ne "\r\n");
             $a =~ s/\s+$//;
-            last if (length($a));
+            if (length($a)) {
+                $nlonly = 0;
+                last;
+            }
         }
         while ($di < @deli) {
             $d = $deli[$di++];
-            $nlonly = 0 if ($d ne "\n" && $d ne "\r\n");
             $d =~ s/\s+$//;
-            last if (length($d));
+            if (length($d)) {
+                $nlonly = 0;
+                last;
+            }
         }
         last if (!length($a) && !length($d));
 
