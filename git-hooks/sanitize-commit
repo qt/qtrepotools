@@ -314,7 +314,7 @@ while (<DIFF>) {
             }
             $file = $1;
             #print "*** got file ".$file.".\n";
-            $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
+            $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|qdoc|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
             my $foreign = ($file =~ /\/3rdparty\//);
             $new_file = 0;
             $maybe_bin = 0;
