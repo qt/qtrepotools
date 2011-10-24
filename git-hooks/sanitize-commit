@@ -188,7 +188,7 @@ sub formatSize($)
 {
     my $sz = shift;
     if ($sz >= 10 * 1024 * 1024) {
-        return int($sz / (1024 * 1024))."MeB";
+        return int($sz / (1024 * 1024))."MiB";
     } elsif ($sz >= 10 * 1024) {
         return int($sz / 1024)."KiB";
     } else {
@@ -337,7 +337,7 @@ while (<DIFF>) {
                 }
             } else {
                 if (!defined($cfg{giant}) && $size > (2 << 20)) {
-                    &complain("Changing huge binary file (".formatSize($size)." > 2MeB)", "giant", 1);
+                    &complain("Changing huge binary file (".formatSize($size)." > 2MiB)", "giant", 1);
                 }
             }
             next;
@@ -362,7 +362,7 @@ while (<DIFF>) {
                 }
                 if ($size > (2 << 20)) {
                     if (!defined($cfg{giant})) {
-                        &complain("Adding huge file (".formatSize($size)." > 2MeB)", "giant", 1);
+                        &complain("Adding huge file (".formatSize($size)." > 2MiB)", "giant", 1);
                     }
                 } elsif ($size > 50000 && !$issrc && !defined($cfg{size})) {
                     &complain("Warning: Adding big file (".formatSize($size)." > 50kB)", "size");
