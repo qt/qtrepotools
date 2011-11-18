@@ -78,10 +78,14 @@ my $ln = 0;
 my $iswip = defined($cfg{wip});
 my $revok = defined($cfg{revby});
 my $badlog = defined($cfg{log});
+my $parents = 0;
 open MSG, "git log -1 --pretty=raw ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     chomp;
-    s/^    // or next;
+    if (!s/^    //) {
+        $parents++ if (/^parent /);
+        next
+    }
     if ($ln == 0) {
         $summary = $_;
         if (!$iswip && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
@@ -92,7 +96,7 @@ while (<MSG>) {
         } elsif (!$badlog && length($_) > 120) {
             &complain("Log message summary is excessively long", "log");
             $badlog = 1;
-        } elsif (length($_) > 70 && !/^Merge ((remote )?branch '[^ ]+'|branch '[^ ]+' of [^ ]+( into [^ ]+)?)$/) {
+        } elsif ($parents < 2 && length($_) > 70) {
             &complain("Aim for shorter log message summaries", "", -1);
         }
     } elsif ($ln == 1) {
