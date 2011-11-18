@@ -79,6 +79,7 @@ my $iswip = defined($cfg{wip});
 my $revok = defined($cfg{revby});
 my $badlog = defined($cfg{log});
 my $parents = 0;
+my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 open MSG, "git log -1 --pretty=raw ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     chomp;
@@ -88,6 +89,7 @@ while (<MSG>) {
     }
     if ($ln == 0) {
         $summary = $_;
+        $revert1 = 1 if (/^Revert ".*"$/);
         if (!$iswip && $parents < 2 && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
             &complain("Apparently pushing a Work In Progress", "wip", 1);
         } elsif (!$iswip && !$badlog && length($_) < 7) {
@@ -99,21 +101,32 @@ while (<MSG>) {
         } elsif ($parents < 2 && length($_) > 70) {
             &complain("Aim for shorter log message summaries", "", -1);
         }
-    } elsif ($ln == 1) {
-        if (!$badlog && $_ ne "") {
-            &complain("2nd line of log message is not empty", "log");
-            $badlog = 1;
-        }
     } else {
-        if (!$revok && /^Reviewed-by: *(pending|TBD)?$/i) {
-            &complain("Bogus or empty Reviewed-by header", "revby", 1);
-            $revok = 1;
+        if (/^This reverts commit [[:xdigit:]]{40}\.?$/) {
+            $revert2 = 1;
+        } elsif (!/^[-\w]+:|^$/) {
+            $nonrevert = 1;
+        }
+        if ($ln == 1) {
+            if (!$badlog && $_ ne "") {
+                &complain("2nd line of log message is not empty", "log");
+                $badlog = 1;
+            }
+        } else {
+            if (!$revok && /^Reviewed-by: *(pending|TBD)?$/i) {
+                &complain("Bogus or empty Reviewed-by header", "revby", 1);
+                $revok = 1;
+            }
         }
     }
     $ln++;
 }
 close MSG;
 printerr;
+
+if ($revert1 && $revert2 && !$nonrevert) {
+    &complain("Revert without justification", "revert", 1);
+}
 
 my $chunk = 0;
 my @addi = ();
