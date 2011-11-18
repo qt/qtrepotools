@@ -94,10 +94,8 @@ while (<MSG>) {
             &complain("Apparently pushing a Work In Progress", "wip", 1);
         } elsif (!$iswip && !$badlog && length($_) < 7) {
             &complain("Log message summary is too short", "log");
-            $badlog = 1;
         } elsif (!$badlog && !$revert1 && length($_) > 120) {
             &complain("Log message summary is excessively long", "log");
-            $badlog = 1;
         } elsif ($parents < 2 && !$revert1 && length($_) > 70) {
             &complain("Aim for shorter log message summaries", "", -1);
         }
@@ -110,7 +108,6 @@ while (<MSG>) {
         if ($ln == 1) {
             if (!$badlog && $_ ne "") {
                 &complain("2nd line of log message is not empty", "log");
-                $badlog = 1;
             }
         } else {
             if (!$revok && /^Reviewed-by: *(pending|TBD)?$/i) {
