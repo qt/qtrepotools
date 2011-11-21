@@ -40,6 +40,7 @@ my $DIFF=0;
 my $BOOTSTRAP=0;
 my $STATUS=0;
 my $UPDATE=0;
+my $REBUILD_CONFIGURE=0;
 my $optModuleBranchArgument;
 my $optGerritModule;
 my $optCommitHook;
@@ -66,6 +67,7 @@ Options:
   -m  Make
   -o  [D]ocumentation
   -q  Quick bootstrap a new checkout under current folder.
+  -w  Windows: Rebuild configure.exe (requires MSVC setup)
   -g <module> Set up gerrit for the module.
   -t <module> Set up a tracking branch for the module. By default, this is
               staging/master. It is possible the specify the branch by appending
@@ -314,6 +316,25 @@ sub initTrackingBranch
     die 'checkout failed.' if $strc;
 }
 
+# ---- Windows: Rebuild configure.exe
+
+sub rebuildConfigure
+{
+    my ($rootDir) = @_;
+    print "### Rebuilding configure.exe'\n";
+    my $qtbase = File::Spec->catfile($rootDir, 'qtbase');
+    my $qmake = File::Spec->catfile($qtbase, 'bin', 'qmake.exe');
+    my $configureFolder = File::Spec->catfile($qtbase, 'tools' , 'configure');
+    chdir ($configureFolder) or die ('Failed to chdir to "' . $configureFolder . '":' . $!);
+    my $makefile = 'Makefile.Release';
+    execute('nmake', ('/s', '/f', $makefile, 'clean')) if -f $makefile;
+    execute($qmake, ('CONFIG-=debug'));
+    execute('nmake', ('/s', '/f', $makefile));
+    my $configureExe = File::Spec->catfile($qtbase, 'configure.exe');
+    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size, $atime,$mtime,$ctime,$blksize,$blocks) = stat($configureExe);
+    print $configureExe, ' ', $size, ' ', scalar(localtime($mtime)), "\n";
+}
+
 # ---- Read a value from the '$HOME/.qt5_tool' configuration file
 #      When given a key 'key' for the repository directory '/foo/qt-5',
 #      check for the repo-specific value 'key-qt5' and then for the general
@@ -424,8 +445,9 @@ if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
      'pull' => \$PULL, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
      'build' => \$BUILD, 'make' => \$MAKE, 'tracking=s' => \$optModuleBranchArgument,
      'gerrit=s' => \$optGerritModule,
-     'hook=s' => \$optCommitHook, 'quick-bootstrap'  => \$BOOTSTRAP)
-    || ($CLEAN + $DOC + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS == 0
+     'hook=s' => \$optCommitHook, 'quick-bootstrap'  => \$BOOTSTRAP,
+     'w' => \$REBUILD_CONFIGURE)
+    || ($CLEAN + $DOC + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS + $REBUILD_CONFIGURE == 0
         && ! defined $optModuleBranchArgument && !defined $optGerritModule)) {
     print $USAGE;
     exit (1);
@@ -607,6 +629,11 @@ if ( $PULL !=  0 ) {
         chdir($rootDir);
    } # foreach
 } # pull
+
+# --------------- Rebuild configure.exe
+if ( $REBUILD_CONFIGURE !=  0 ) {
+    rebuildConfigure($rootDir);
+}
 
 # ---- Update
 
