@@ -211,6 +211,13 @@ sub formatSize($)
     }
 }
 
+sub isExe($)
+{
+    my $sha = shift;
+    my $type = `git cat-file -p $sha | file -b -`;
+    return $type =~ /^(ELF|PE32) /;
+}
+
 my @style_fails = ();
 
 sub styleFail($)
@@ -347,7 +354,7 @@ while (<DIFF>) {
         }
         if ($maybe_bin && /^Binary files /) {
             if ($new_file) {
-                if (!defined($cfg{generated}) && $file =~ /\.(obj|o|lib|a|dll|so|exe|exp|qm|pdb|idb|suo)$/i) {
+                if (!defined($cfg{generated}) && ($file =~ /\.(obj|o|lib|a|dll|so|exe|exp|qm|pdb|idb|suo)$/i || isExe($maybe_bin))) {
                     &complain("Adding build artifact", "generated");
                 }
             } else {
@@ -395,7 +402,7 @@ while (<DIFF>) {
                                 formatSize($old_size)." => ".formatSize($size).")", "size");
                 }
             }
-            $maybe_bin = 1;
+            $maybe_bin = $new_tree;
             next;
         }
     }
