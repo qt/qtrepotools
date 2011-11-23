@@ -79,12 +79,19 @@ my $iswip = defined($cfg{wip});
 my $revok = defined($cfg{revby});
 my $badlog = defined($cfg{log});
 my $parents = 0;
+my ($badauthor, $badcommitter) = (0, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 open MSG, "git log -1 --pretty=raw ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     chomp;
     if (!s/^    //) {
-        $parents++ if (/^parent /);
+        if (/^parent /) {
+            $parents++ ;
+        } elsif (/^author .*\.\(none\)/) {
+            $badauthor = 1;
+        } elsif (/^commiter .*\.\(none\)/) {
+            $badcommitter = 1;
+        }
         next
     }
     if ($ln == 0) {
@@ -123,6 +130,13 @@ printerr;
 
 if ($revert1 && $revert2 && !$nonrevert) {
     &complain("Revert without justification", "revert", 1);
+}
+# These need to be delayed, because at the time they are found the subject is not known yet.
+if ($badauthor) {
+    &complain("Bogus author email", "email", 1);
+}
+if ($badcommitter) {
+    &complain("Bogus committer email", "email", 1);
 }
 
 my $chunk = 0;
