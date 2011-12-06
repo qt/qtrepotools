@@ -25,8 +25,8 @@ my @repos = (
     [ "qttranslations.pro", "qt5/qttranslations" ],
     [ "qtxmlpatterns.pro", "qt5/qtxmlpatterns" ],
 
+    [ "git-hooks/sanitize-commit", "qt5/qtrepotools" ],
     [ "shell/sanitize-commit", "devtools" ],
-    [ "git-hooks/sanitize-commit", "devscripts" ],
 );
 
 my @mappings = (
@@ -60,8 +60,8 @@ my @mappings = (
     ] ],
     [ [ "qt", "qt5/qtxmlpatterns" ], [
     ] ],
-    [ [ "devtools", "devscripts" ], [
-        [ 'shell/git-', 'git-bin/git-' ],
+    [ [ "devtools", "qt5/qtrepotools" ], [
+        [ 'shell/git-', 'bin/git-' ],
         [ 'shell/git_post_commit_hook', 'git-hooks/git_post_commit_hook' ],
         [ 'shell/sanitize-commit', 'git-hooks/sanitize-commit' ]
     ] ]
