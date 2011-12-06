@@ -1,0 +1,195 @@
+#! /usr/bin/perl
+
+use strict;
+use warnings;
+use POSIX;
+use JSON;
+use File::Path;
+
+# Usage:
+# - configure ssh: Host, Port, User, IdentityFile
+# - configure git: git config --global sanitybot.<option> <value>
+# Valid options are:
+#   gerrithost (mandatory)
+#     Target host. The identification is done via SSH.
+#   useremail (mandatory)
+#     Bot's email address. Used to identify invitations and own actions.
+#   inviteonly (default 0)
+#     If this flag is set, the bot will only become active if it is a
+#     requested reviewer. DON'T USE (see TODO).
+#   gitbasedir (mandatory)
+#     Base dir for local GIT clones of the projects.
+#   gitdofetch
+#     Need to fetch the repos or are they local?
+#   worker
+#     The worker is run in a local bare clone of the inspected repository.
+#     The magic string @SHA@ is replaced by the commit to be checked.
+#     Everything it dumps to stdout & stderr will be attached as a comment.
+#     It is supposed to return a score (offset by +10).
+#   verbose (default 0)
+#     Print progress/result messages.
+
+# TODO
+# - Implement some retry mechanism to deal with network failures
+# - Make inviteonly actually work beyond the initial startup.
+#   See http://code.google.com/p/gerrit/issues/detail?id=1200
+
+# Doing this is less expensive than calling git repeatedly.
+my %config = ();
+for (`git config -l`) {
+  /^([^=]+)=(.*$)/;
+  $config{$1} = $2;
+}
+
+sub getcfg($;$)
+{
+  my ($key, $def) = @_;
+  my $fkey = 'sanitybot.'.$key;
+  if (defined $config{$fkey}) {
+    return $config{$fkey};
+  } elsif (defined $def) {
+    return $def;
+  } else {
+    die $fkey." not set.\n";
+  }
+}
+
+my $GERRIT_HOST = getcfg 'gerrithost';
+my $USER_EMAIL = getcfg 'useremail';
+my $INVITE_ONLY = getcfg 'inviteonly', 0;
+my $GIT_BASEDIR = getcfg 'gitbasedir';
+my $GIT_DO_FETCH = getcfg 'gitdofetch';
+my $WORKER = getcfg 'worker';
+my $verbose = getcfg 'verbose', 0;
+
+my @gerrit = ("ssh", $GERRIT_HOST, "gerrit");
+
+my %processed = ();
+
+sub printerr($)
+{
+  my ($msg) = @_;
+  die $msg.": execution failed: ".$!."\n" if ($? < 0);
+  die $msg.": command crashed with signal ".$?."\n" if ($? & 127);
+  print STDERR $msg.".\n";
+}
+
+sub process_commit($$$)
+{
+  my ($project, $ref, $rev) = @_;
+
+  if (defined $processed{$ref}) {
+    return;
+  }
+  $processed{$ref} = 1;
+  my $orig_project = $project;
+  $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
+  $verbose and print "===== ".strftime("%c %Z", localtime(time()))." ===== processing commit ".$ref." in ".$project."\n";
+  my $GIT_DIR = $GIT_BASEDIR."/".$project.".git";
+  if (!-d $GIT_DIR) {
+    mkpath $GIT_DIR or die "cannot create ".$GIT_DIR.": ".$!;
+  }
+  chdir $GIT_DIR or die "cannot change to ".$GIT_DIR.": ".$!;
+  if ($GIT_DO_FETCH) {
+    if (!-d $GIT_DIR."/refs/remotes" and `git config remote.origin.url` eq "") {
+      if (!-d $GIT_DIR."/refs") {
+        if (system("git", "init", "--bare")) {
+          printerr "Init of ".$project." failed";
+          return;
+        }
+      }
+      if (system("git", "remote", "add", "origin", 'ssh://'.$GERRIT_HOST.'/'.$project)) {
+        printerr "Adding remote for ".$project." failed";
+        return;
+      }
+    }
+    if (system("git", "fetch", "origin")) { # Update refs, otherwise the selective fetches start from scratch each time.
+      printerr "GIT fetch from ".$project." failed";
+      return;
+    }
+    $verbose and print "===== ".strftime("%c %Z", localtime(time()))." ===== updated mainlines\n";
+    my $dref = $ref;
+    $dref =~ s,/[^/]+$,,;
+    if (system("git", "fetch", "-f", "origin", $ref.":".$dref)) {
+      printerr "GIT fetch of ".$ref." from ".$project." failed";
+      return;
+    }
+    $verbose and print "===== ".strftime("%c %Z", localtime(time()))." ===== fetched change\n";
+  }
+  my $worker = $WORKER;
+  $worker =~ s/\@SHA1\@/$rev/g;
+  open VERDICT, $worker." 2>&1 |" or die "cannot run worker: ".$!;
+  my @verdict = <VERDICT>;
+  close VERDICT;
+  die "Worker for commit ".$ref." in ".$project." crashed with signal ".$?.".\n" if ($? & 127);
+  my $score = $? >> 8;
+  die "Worker returned invalid score ".$score." for commit ".$ref." in ".$project.".\n" if ($score > 20);
+  $score -= 10;
+  my $verdict = "@verdict";
+  if (length($verdict) > 20000) {
+    $verdict = substr($verdict, 0, 20000)."\n\n**** Output truncated. Fix the problems above to get more output.\n";
+  }
+  $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
+  $verdict =~ s/^\s+|\s+$//g;
+  my @args = ();
+#  push @args, ("--project", $project);
+  push @args, ("--project", $orig_project);  # XXX Workaround QTQAINFRA-381
+  push @args, ("--sanity-review", ($score > 0) ? "+".$score : $score);
+  push @args, ("--message", '"'.$verdict.'"') if (length($verdict));
+  if (system(@gerrit, "review", @args, $rev)) {
+    print "===== ".strftime("%c %Z", localtime(time()))." ===== verdict NOT submitted\n";
+    printerr("Submission of verdict for ".$rev." (".$project."/".$ref.") failed");
+    return;
+  }
+  $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref."): $score\n";
+}
+
+$| = 1; # make STDOUT autoflush
+
+open UPDATES, "-|", @gerrit, "stream-events" or die "cannot run ssh: ".$!;
+
+# Try to ensure that the event streaming has started before we make the snapshot, to avoid a race.
+# Of course, the first connect may be still delayed ...
+sleep(1);
+
+my @query = ("status:open");
+push @query, "reviewer:".$USER_EMAIL if ($INVITE_ONLY);
+open STATUS, "-|", @gerrit, "query", "--format", "JSON", "--current-patch-set", @query or die "cannot run ssh: ".$!;
+REVIEW: while (<STATUS>) {
+  my $review = decode_json($_);
+  defined($review) or die "cannot decode JSON string '".chomp($_)."'\n";
+  my $project = $$review{'project'};
+  my $cps = $$review{'currentPatchSet'};
+  if (defined $cps) {
+    my $status = $$review{'status'};
+    if ($status ne 'NEW') {
+       next REVIEW;
+    }
+    my $ref = $$cps{'ref'};
+    my $revision = $$cps{'revision'};
+    my $approvals = $$cps{'approvals'};
+    if (defined $approvals) {
+      foreach my $appr (@$approvals) {
+        my $by = $$appr{'by'};
+        defined $$by{'email'} or next;   # The reviewer may be gone and thus have no valid mail any more.
+        if ($$by{'email'} eq $USER_EMAIL) {
+          next REVIEW;
+        }
+      }
+    }
+    process_commit($project, $ref, $revision);
+  }
+}
+close STATUS;
+
+while (<UPDATES>) {
+  my $update = decode_json($_);
+  defined($update) or die "cannot decode JSON string '".chomp($_)."'\n";
+  my $type = $$update{'type'};
+  if (defined($type) && $type eq 'patchset-created') {
+    my $chg = $$update{'change'};
+    my $ps = $$update{'patchSet'};
+    process_commit($$chg{'project'}, $$ps{'ref'}, $$ps{'revision'});
+  }
+}
+close UPDATES;
