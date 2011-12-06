@@ -1,0 +1,19 @@
+#! /bin/sh
+# Copyright (c) 2011 Nokia Corporation and/or its subsidiary(-ies).
+# All rights reserved.
+#
+# Contact:  Nokia Corporation <info@qt.nokia.com>
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+# Usage: in every repository you want to have checked:
+#    cd .git/hooks
+#    ln -s /path/to/git_post_commit_hook post-commit
+#
+
+sha1=${1-HEAD} # just for debugging
+GIT_PUSH=${GIT_PUSH+$GIT_PUSH,}wip # this check makes totally no sense locally
+export GIT_PUSH
+exec sanitize-commit $sha1 strict >&2

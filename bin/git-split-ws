@@ -1,0 +1,220 @@
+#! /usr/bin/perl
+# Copyright (c) 2011 Nokia Corporation and/or its subsidiary(-ies).
+# All rights reserved.
+#
+# Contact:  Nokia Corporation <info@qt.nokia.com>
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use warnings;
+use strict;
+
+my $invocationCommand = '';
+if ($#ARGV >= 0) {
+    $invocationCommand = $ARGV[0];
+}
+
+if ($invocationCommand ne 'commit' and $invocationCommand ne 'stash' and $invocationCommand ne '') {
+    print STDERR <<EOF ;
+Usage: $0 [commit | stash]
+Removes white space only change chunks from the HEAD commit.
+If invoked with commit, WS changes are committed as a separate commit on top.
+If invoked with stash, WS changes are stashed.
+Otherwise it will merely reapply the WS changes to the working tree.
+EOF
+    exit 2;
+}
+
+sub printerr()
+{
+    die "cannot run git: ".$! if ($? < 0);
+    die "git crashed with signal ".$? if ($? & 127);
+    die "git exited with status ".($? >> 8) if ($?);
+}
+
+open STATUS, "git status --porcelain |" or printerr;
+while (<STATUS>) {
+    if (/^[^ ?!]/) {
+        print STDERR "Index is not clean. Aborting.\n";
+        exit 1;
+    }
+}
+close STATUS or printerr;
+
+my $patch = "";
+
+my $file = "";
+my @filehdr = ("", "");
+my $fileHdrShown = 0;
+
+my $chunk = 0;
+my @addi = ();
+my @deli = ();
+my $nonws;
+my $ws;
+my $mixws_check = 0;
+my $lineno = 0;
+my $lineno2 = 0;
+my @ws_files = ();
+my %ws_lines = (); # hash of lists
+my $braces = 0;
+my $open_key = qr/\s*#\s*if|.*{/;
+my $close_key = qr/\s*#\s*endif|.*}/;
+my $kill_all_ws = qr/\s+((?:\"(?:\\.|[^\"])*\"|\S)+)/; # Collapse all whitespace not inside strings.
+my $kill_nl_ws = qr/((?:\"(?:\\.|[^\"])*\"|\S)+)\s+/; # Collapse all non-leading whitespace not inside strings.
+
+sub flushChunk()
+{
+    my $loc_nonws = 0;
+    my $nlonly = 1;
+    my ($ai, $di) = (0, 0);
+    while (!$loc_nonws) {
+        my ($a, $d) = ("", "");
+        while ($ai < @addi) {
+            $a = $addi[$ai++];
+            $a =~ s/\s+$//;
+            if (length($a)) {
+                $nlonly = 0;
+                last;
+            }
+        }
+        while ($di < @deli) {
+            $d = $deli[$di++];
+            $d =~ s/\s+$//;
+            if (length($d)) {
+                $nlonly = 0;
+                last;
+            }
+        }
+        last if (!length($a) && !length($d));
+
+        $a =~ /^$close_key/o and $braces--;
+        $d =~ /^$close_key/o and $braces++;
+        if ($braces) {
+            $a =~ s/$kill_nl_ws/$1/go;
+            $d =~ s/$kill_nl_ws/$1/go;
+        } else {
+            $a =~ s/$kill_all_ws/$1/go;
+            $d =~ s/$kill_all_ws/$1/go;
+        }
+        $loc_nonws = 1 if ($a ne $d);
+        $a =~ /^$open_key/o and $braces++;
+        $d =~ /^$open_key/o and $braces--;
+    }
+    while ($ai < @addi) {
+        my $a = $addi[$ai++];
+        $a =~ /^$close_key/o and $braces--;
+        $a =~ /^$open_key/o and $braces++;
+    }
+    while ($di < @deli) {
+        my $d = $deli[$di++];
+        $d =~ /^$close_key/o and $braces++;
+        $d =~ /^$open_key/o and $braces--;
+    }
+    if ($loc_nonws) {
+        $nonws = 1;
+    } elsif (!$nlonly) {
+        $ws = 1;
+        my $chunkhdr = "@@ -".($lineno2 - $#deli).",".($#deli + 1)." +".($lineno - $#addi).",".($#addi + 1)." @@\n";
+        if (!$fileHdrShown) {
+            $fileHdrShown = 1;
+            $patch .= join("", @filehdr);
+        }
+        $patch .= $chunkhdr."-".join("-", @deli)."+".join("+", @addi);
+        push @ws_files, $file if (!defined($ws_lines{$file}));
+        push @{$ws_lines{$file}}, $lineno - $#addi;
+    }
+    @addi = @deli = ();
+    $chunk = 0;
+}
+
+open DIFF, "git diff-tree --no-commit-id --diff-filter=ACMR --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -M --root HEAD |" or printerr;
+while (<DIFF>) {
+    if (/^-/) {
+        if ($mixws_check) {
+            if (/^--- /) {
+                $filehdr[0] = $_;
+                next;
+            }
+            push @deli, substr($_, 1);
+            $chunk = 1;
+        }
+        $lineno2++;
+        next;
+    }
+    if (/^\+/) {
+        if (/^\+\+\+ /) {
+            $filehdr[1] = $_;
+            next;
+        }
+        $lineno++;
+        $_ = substr($_, 1);
+        if ($mixws_check) {
+            push @addi, $_;
+            $chunk = 1;
+        }
+    } else {
+        flushChunk() if ($chunk);
+        if (/^ /) {
+            $lineno++;
+            $lineno2++;
+            next;
+        }
+        if (/^\@\@ -(\d+),\d+ \+(\d+)/) {
+            $lineno2 = $1 - 1;
+            $lineno = $2 - 1;
+            next;
+        }
+        if (/^diff /) {
+            if (/^diff --git \@old\@\/.+ \@new\@\/(.+)$/) {
+            } elsif (/^diff --cc (.+)$/) {
+                print STDERR "Cannot operate on merge commits.\n";
+                exit 1;
+            } else {
+                print STDERR "Warning: cannot parse diff header '".$_."'\n";
+                next;
+            }
+            $fileHdrShown = 0;
+            $file = $1;
+            #print "*** got file ".$file.".\n";
+            my $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|qdoc|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
+            my $foreign = ($file =~ /\/3rdparty\//);
+            $mixws_check = !$foreign && $clike;
+            $braces = 0;
+            next;
+        }
+    }
+}
+close DIFF or printerr;
+flushChunk() if ($chunk);
+if (!$ws) {
+    print STDERR "No WS only changes, not touching this.\n";
+    exit 1;
+}
+if (!$nonws and $ws) {
+    print STDERR "Entirely WS changes, not touching this.\n";
+    exit 1;
+}
+# $patch contains the patch for appling the WS changes (-R to remove them). Now apply git-foo.
+system "git reset --soft HEAD^" or printerr;
+open PATCH_A, "| git apply --unidiff-zero -R --index -" or printerr;
+print PATCH_A $patch;
+close PATCH_A or printerr;
+system "git commit -C ORIG_HEAD" or printerr;
+if ($invocationCommand ne '') {
+    open PATCH_B, "| git apply --unidiff-zero --index -" or printerr;
+    print PATCH_B $patch;
+    close PATCH_B or printerr;
+    if ($invocationCommand eq 'commit') {
+        system "git commit -m \"Whitespace Changes\"" or printerr;
+    } else {
+        system "git stash save \"Whitespace Changes\"" or printerr;
+    }
+} else {
+    open PATCH_C, "| git apply --unidiff-zero -" or printerr;
+    print PATCH_C $patch;
+    close PATCH_C or printerr;
+}
+exit 0;

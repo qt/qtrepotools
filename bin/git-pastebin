@@ -1,0 +1,204 @@
+#!/usr/bin/env perl
+# Arguments are:
+#  git pastebin [<commit>]
+#
+
+# Copyright (C) Thiago Macieira <thiago@kde.org>
+# Additional fixes by Giuseppe D'Angelo <dangelog@gmail.com>
+# This program is based on paste2pastebin.pl, that is
+#   Copyright (C) Fred Blaise <chapeaurouge_at_madpenguin_dot_org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+use strict;
+use LWP::UserAgent;
+use WWW::Mechanize;
+
+my $description;
+my $content;
+my $squash = -1;
+my @committish;
+my @fpargs;
+my @pathargs;
+my $dashdash = 0;
+
+while (scalar @ARGV) {
+    my $arg = shift @ARGV;
+
+    if ($arg eq "-d" || $arg eq "--description") {
+        die "Option $arg requires an argument" unless scalar @ARGV;
+        $description = shift @ARGV;
+    } elsif ($arg eq "-s" || $arg eq "--squash") {
+        $squash = 1;
+    } elsif ($arg eq "--no-squash") {
+        $squash = 0;
+    } elsif ($arg eq "--") {
+        $dashdash = 1;
+    } elsif ($arg =~ m/^-/) {
+        push @fpargs, $arg;
+    } elsif ($dashdash) {
+        push @pathargs, $arg;
+    } else {
+        push @committish, $arg;
+    }
+}
+
+# Squash by default if description was given
+$squash = $description if ($squash == -1);
+
+# Default revision is HEAD
+push @committish, "HEAD" unless (scalar @committish);
+
+# Prepend -- if pathargs isn't empty
+unshift @pathargs, "--" if (scalar @pathargs);
+
+# Try to parse this commit
+my @revlist;
+my $needsrevlist = 0;
+open REVPARSE, "-|", "git", "rev-parse", @committish;
+while (<REVPARSE>) {
+    chomp;
+    push @revlist, $_;
+    $needsrevlist = 1 if (m/^\^/);
+}
+close REVPARSE;
+
+if ($needsrevlist) {
+    # Get the revision list then
+    open REVLIST, "-|", "git", "rev-list", "--reverse", @revlist
+        or die "Cannot run git-rev-list: $!";
+    @revlist = ();
+    while (<REVLIST>) {
+        chomp;
+        push @revlist, $_;
+    }
+    close REVLIST;
+}
+
+# Are we squashing?
+if (scalar @revlist > 1 && $squash) {
+    # Yes, this one is easy
+    open FORMATPATCH, "-|", "git", "format-patch", "--stdout", @fpargs, @committish, @pathargs
+        or die "Cannot run git format-patch: $!";
+
+    while (<FORMATPATCH>) {
+        $content .= $_;
+    }
+    close FORMATPATCH;
+
+    submit($description, $content);
+    exit(0);
+}
+
+# No, we're not squashing
+# Iterate over the commits
+for my $rev (@revlist) {
+    $content = "";
+    $description = "";
+
+    # Get description
+    open PRETTY, "-|", "git", "log", "--pretty=format:%s%n%b", "$rev^!"
+        or die "Cannot get description for $rev: $!";
+    while (<PRETTY>) {
+        $description .= $_;
+    }
+    close PRETTY;
+
+    # Get patch
+    open FORMATPATCH, "-|", "git", "format-patch", "--stdout", @fpargs, "$rev^!", @pathargs
+        or die "Cannot get patch for $rev: $!";
+    while (<FORMATPATCH>) {
+        $content .= $_;
+    }
+    close FORMATPATCH;
+
+    submit($description, $content);
+}
+
+sub submit($$) {
+    if ($ENV{PASTEBIN} =~ /pastebin\.ca/) {
+        submit_pastebinca(@_);
+    } elsif ($ENV{PASTEBIN} =~ /pastebin.com/) {
+        submit_pastebincom(@_);
+    } elsif (!$ENV{PASTEBIN}) {
+        submit_default(@_);
+    } else {
+        die "Sorry, I don't know how to talk to $ENV{PASTEBIN}."
+    }
+}
+
+sub submit_default($$) {
+    submit_pastebincom(@_);
+}
+
+sub submit_pastebincom($$) {
+    my ($description, $content) = @_;
+    my $paste_subdomain;
+    $paste_subdomain = $2 if ($ENV{PASTEBIN} =~ m,(https?://)?(.*)\.pastebin\.com,);
+
+    my %fields = (
+        paste_code      =>       $content,
+        paste_subdomain =>       $paste_subdomain,
+        paste_format    =>       'diff',
+        paste_name      =>       $ENV{PASTEBIN_NAME}
+    );
+
+    my $agent = LWP::UserAgent->new();
+    my $api = 'http://pastebin.com/api_public.php';
+
+    my $reply = $agent->post($api, \%fields);
+
+    die "Could not send paste: $!" unless ($reply->is_success);
+
+    my $reply_content = $reply->decoded_content;
+
+    # actually, pastebin.com is so dumb that it returns
+    # HTTP 200 OK even in case of error; the content then contains an error message...
+    die "Could not send paste: $reply_content" if ($reply_content =~ /^ERROR/);
+
+    print $reply_content, "\n";
+}
+
+sub submit_pastebinca($$) {
+    my ($description, $content) = @_;
+    my %fields = (
+        content         =>      $content,
+        description     =>      $description,
+        type            =>      '34', # Unfortunately, "Diff/Patch" is missing in the quiet interface
+        expiry          =>      '1 month',
+        name            =>      '',
+    );
+    my $www = WWW::Mechanize->new();
+
+    my $api_key       = "1OIIB1/PYzkNe/azsjOFkm4iBe0414V0";
+    my $pastebin_url  = "http://pastebin.ca/quiet-paste.php?api=$api_key";
+    my $pastebin_root = "http://pastebin.ca";
+
+    $www->get($pastebin_url);
+    die "Cannot get the pastebin form: $!" unless ($www->success());
+
+    $www->form_name('pasteform');
+    $www->set_fields(%fields);
+    $www->submit_form(button => 's');
+
+    die "Could not send paste: $!" unless ($www->success());
+
+    $content = $www->content();
+    if($content =~ m/^SUCCESS:(.*)/) {
+        print "$pastebin_root/$1\n";
+    } else {
+        print $content;
+    }
+}

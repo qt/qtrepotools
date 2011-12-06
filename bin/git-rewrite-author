@@ -1,0 +1,152 @@
+#!/usr/bin/env perl
+# Copyright (c) 2011 Nokia Corporation and/or its subsidiary(-ies).
+# All rights reserved.
+#
+# Contact:  Nokia Corporation <info@qt.nokia.com>
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+
+sub usage {
+    print STDERR
+q{Usage: git rewrite-author --from <from> --to <to> [ -f | --force ]
+    [--] [<rev-list options>...]
+
+  Replace author and committer field in some commits.
+
+
+EXAMPLE:
+
+  You've accidentally made some commits like this:
+
+    Author: bjones <bjones@localhost.localdomain>
+
+  ... where it should have been:
+
+    Author: Bob Jones <bob.jones@example.com>
+
+  The first bad commit is a1b2c3d4...
+
+  Fix it up by:
+
+   $ git rewrite-author --from "bjones <bjones@localhost.localdomain>" \
+      --to "Bob Jones <bob.jones@example.com>" a1b2c3d4^..HEAD
+
+  If you omit a range of commits, this command will scan _all_ commits
+  leading up to HEAD, which will take a long time for repositories with
+  a large history.
+
+  WARNING: this script will change the SHA1 of every commit including
+  and following the first rewritten commit. You can't do this for commits
+  you've already pushed unless you really know what you're doing!
+};
+}
+
+sub parse_author
+{
+    my $author = shift;
+    if ($author =~ /^(.*?) <([^>]+)>$/) {
+        return ($1, $2);
+    }
+    else {
+        die "Could not parse `$author'; expected something like \"Some Name <some.address\@example.com>\"";
+    }
+}
+
+
+# Return a string single-quoted for use in shell
+sub sh_squote
+{
+    my $out = shift;
+    $out =~ s/'/'"'"'/g;
+    return "'$out'";
+}
+
+# Return fragment of shell code to rewrite a specific env var
+sub rewrite_env
+{
+    my %opts = @_;
+    my $env = $opts{env};
+    my $from = sh_squote($opts{from});
+    my $to = sh_squote($opts{to});
+
+    my $cmd = <<EOF
+if [ "\$$env" = $from ]; then
+    $env=$to;
+    export $env;
+    if [ \$REWROTE = 0 ]; then
+        echo;
+        echo Hit for \$GIT_COMMIT:;
+        REWROTE=1;
+    fi;
+    echo "   $env:" $from '->' $to;
+fi
+EOF
+    ;
+
+    $cmd =~ s/\n */ /sg;
+
+    return $cmd;
+}
+
+my $from;
+my $to;
+my $force;
+if (!GetOptions(
+    "from=s" => \$from,
+    "to=s"   => \$to,
+    "force"  => \$force,
+)) {
+    usage;
+    exit 2;
+}
+
+if (!$from || !$to) {
+    print STDERR "Need `--from' and `--to' arguments\n";
+    usage;
+    exit 2;
+}
+
+my ($from_name, $from_address) = parse_author($from);
+my ($to_name, $to_address)     = parse_author($to);
+
+my $env_filter_command = "REWROTE=0; ".
+    rewrite_env(
+        env     =>  'GIT_AUTHOR_NAME',
+        from    =>  $from_name,
+        to      =>  $to_name,
+    )
+    . "; " .
+    rewrite_env(
+        env     =>  'GIT_COMMITTER_NAME',
+        from    =>  $from_name,
+        to      =>  $to_name,
+    )
+    . "; " .
+    rewrite_env(
+        env     =>  'GIT_AUTHOR_EMAIL',
+        from    =>  $from_address,
+        to      =>  $to_address,
+    )
+    . "; " .
+    rewrite_env(
+        env     =>  'GIT_COMMITTER_EMAIL',
+        from    =>  $from_address,
+        to      =>  $to_address,
+    )
+;
+
+my @git_filter_branch = ("git", "filter-branch", "--env-filter", $env_filter_command);
+if ($force) {
+    push @git_filter_branch, "--force";
+}
+push @git_filter_branch, @ARGV;
+
+exec @git_filter_branch;
+

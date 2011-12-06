@@ -1,0 +1,250 @@
+#! /usr/bin/perl
+# Copyright (c) 2011 Nokia Corporation and/or its subsidiary(-ies).
+# All rights reserved.
+#
+# Contact:  Nokia Corporation <info@qt.nokia.com>
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use warnings;
+use strict;
+
+my @repos = (
+    [ "projects.pro", "qt" ],
+    [ "qlalr.pro", "qt5/qlalr" ],
+    [ "qtactiveqt.pro", "qt5/qtactiveqt" ],
+    [ "qtbase.pro", "qt5/qtbase" ],
+    [ "qtdeclarative.pro", "qt5/qtdeclarative" ],
+    [ "qtdoc.pro", "qt5/qtdoc" ],
+    [ "qtphonon.pro", "qt5/qtphonon" ],
+    [ "qtscript.pro", "qt5/qtscript" ],
+    [ "qtsvg.pro", "qt5/qtsvg" ],
+    [ "qttools.pro", "qt5/qttools" ],
+    [ "qttranslations.pro", "qt5/qttranslations" ],
+    [ "qtxmlpatterns.pro", "qt5/qtxmlpatterns" ],
+
+    [ "shell/sanitize-commit", "devtools" ],
+    [ "git-hooks/sanitize-commit", "devscripts" ],
+);
+
+my @mappings = (
+    [ [ "qt", "qt5/qlalr" ], [
+        [ 'util/qlalr//[^/]+$', 'src//[^/]+$' ],
+        [ 'util/qlalr', '' ]
+    ] ],
+    [ [ "qt", "qt5/qtactiveqt" ], [
+        [ 'tools/activeqt', 'tools' ],
+        [ 'doc/src/examples/activeqt', 'doc/src/examples' ],
+        [ 'doc/src/development//[^/]+$', 'doc/src//[^/]+$' ]
+    ] ],
+    [ [ "qt", "qt5/qtbase" ], [
+    ] ],
+    [ [ "qt", "qt5/qtdeclarative" ], [
+        [ 'tools/qml', 'tools/qmlviewer' ]
+    ] ],
+    [ [ "qt", "qt5/qtdoc" ], [
+        [ 'tools/qdoc3/test', 'doc/config' ]
+    ] ],
+    [ [ "qt", "qt5/qtphonon" ], [
+    ] ],
+    [ [ "qt", "qt5/qtscript" ], [
+    ] ],
+    [ [ "qt", "qt5/qtsvg" ], [
+    ] ],
+    [ [ "qt", "qt5/qttools" ], [
+        [ 'tools', 'src' ]
+    ] ],
+    [ [ "qt", "qt5/qttranslations" ], [
+    ] ],
+    [ [ "qt", "qt5/qtxmlpatterns" ], [
+    ] ],
+    [ [ "devtools", "devscripts" ], [
+        [ 'shell/git-', 'git-bin/git-' ],
+        [ 'shell/git_post_commit_hook', 'git-hooks/git_post_commit_hook' ],
+        [ 'shell/sanitize-commit', 'git-hooks/sanitize-commit' ]
+    ] ]
+);
+
+my ($cand, $inv);
+sub map_name($)
+{
+    my ($fn) = @_;
+    for my $ptha (@{$$cand[1]}) {
+        my ($pthi, $ptho) = ($$ptha[$inv], $$ptha[1 - $inv]);
+        $pthi .= "(.*)" if (!($pthi =~ s,//(.*),/($1),));
+        $ptho =~ s,//.*,/,;
+        last if ($fn =~ s/^$pthi/$ptho$1/);
+    }
+    return $fn;
+}
+
+sub get_arg()
+{
+    if (@ARGV < 2) {
+        die $ARGV[0]." requires an argument.\n";
+    }
+    shift @ARGV;
+    return $ARGV[0];
+}
+
+sub get_repo_arg()
+{
+    my $arg = $ARGV[0];
+    my $val = get_arg();
+    for my $rp (@repos) {
+        if ($$rp[1] eq $val) {
+            return $val;
+        }
+        if ($$rp[1] =~ /\/\Q$val\E$/) {
+            return $$rp[1];
+        }
+    }
+    die "Fatal: Unknown repository passed to $arg.\n";
+}
+
+my ($src_repo, $dst_repo, $other_path) = ("", "", "");
+my @commits = ();
+my $push = 0;
+my $noop = 0;
+while (@ARGV) {
+    my $arg = $ARGV[0];
+    if ($arg eq '-h' or $arg eq '-help' or $arg eq '--help') {
+        print <<EOF ;
+Usage: $0 [options] [SHA1/-range]
+
+Options:
+  -l, --pull <repo>   Specify repo to pull from instead of guessing it.
+  -s, --push [<repo>] Push [to specified repo] instead of pulling.
+  -p, --path <path>   Specify path of other repo instead of guessing it.
+  -n, --dry-run       Dump patch to stdout instead of applying it.
+  --                  Only SHA1s follow this option (use with -s without repo).
+
+By default, the HEAD commit of the source repo is cherry-picked.
+EOF
+        exit 0;
+    } elsif ($arg eq '-l' or $arg eq '--pull') {
+        $src_repo = get_repo_arg();
+    } elsif ($arg eq '-s' or $arg eq '--push') {
+        $dst_repo = get_repo_arg() if (@ARGV >= 2 && $ARGV[1] !~ /^-/);
+        $push = 1;
+    } elsif ($arg eq '-p' or $arg eq '--path') {
+        $other_path = get_arg();
+    } elsif ($arg eq '-n' or $arg eq '--dry-run') {
+        $noop = 1;
+    } elsif ($arg eq "--") {
+        shift @ARGV;
+        push @commits, @ARGV;
+        last;
+    } elsif ($arg =~ /^-/) {
+        die "Unrecognized option $arg.\n";
+    } else {
+        push @commits, $arg;
+    }
+    shift @ARGV;
+}
+
+die "-s and -l are mutually exclusive.\n" if ($src_repo ne "" and $dst_repo ne "");
+
+push @commits, "HEAD" if (!@commits);
+
+my $cdup = `git rev-parse --show-cdup` or exit 1;
+chomp $cdup;
+if (length($cdup)) {
+    chdir $cdup or die "Cannot enter $cdup: $!\n";
+}
+
+my $this_repo = "";
+for my $rp (@repos) {
+    if (-f $$rp[0]) {
+        $this_repo = $$rp[1];
+        last;
+    }
+}
+die "Fatal: This Git repository is not known to this script.\n" if ($this_repo eq "");
+
+if (!$push) {
+    $dst_repo = $this_repo;
+} else {
+    $src_repo = $this_repo;
+}
+
+die "Fatal: source and target repository are the same.\n" if ($src_repo eq $dst_repo);
+
+my @candidates = ();
+for my $cand (@mappings) {
+    for my $inv (0, 1) {
+        if (("" eq $src_repo or $$cand[0][$inv] eq $src_repo) and
+            ("" eq $dst_repo or $$cand[0][1 - $inv] eq $dst_repo)) {
+            push @candidates, [ $cand, $inv ];
+            last;
+        }
+    }
+}
+if (@candidates == 0) {
+    die "Fatal: found no mapping between source and target repository.\n";
+} elsif (@candidates > 1) {
+    die "Fatal: found multiple mappings between source and target repository. Try -l/-p.\n";
+}
+($cand, $inv) = @{$candidates[0]};
+print "Porting from ".$$cand[0][$inv]." to ".$$cand[0][1 - $inv]."\n";
+if ($other_path eq "") {
+    my $this_path = $$cand[0][1 - ($push ^ $inv)];
+    my $cnt = 1;
+    while ($this_path =~ /\//g) { $cnt++ }
+    $other_path = "../"x$cnt . $$cand[0][$push ^ $inv];
+}
+print "Other path is ".$other_path."\n";
+my $cd_other = "cd \"".$other_path."\" && ";
+my ($src_cd, $dst_cd) = ("", "");
+if (!$push) {
+    $src_cd = $cd_other;
+} else {
+    $dst_cd = $cd_other;
+}
+
+my $needid = -1;
+for my $commit (@commits) {
+    my @revs;
+    if ($commit =~ /\.\./) {
+        @revs = `${src_cd}git rev-list --reverse $commit`;
+    } else {
+        @revs = ($commit);
+    }
+    for my $rev (@revs) {
+        my ($first, $empty, $sha1, $patch, $haveid) = (1, 0, "", "", 0);
+        open DIFF, $src_cd."git format-patch --stdout -1 --src-prefix=\@old\@/ --dst-prefix=\@new\@/ ".$rev." |" or die "cannot run git: $!";
+        while (<DIFF>) {
+            if ($first) {
+                $first = 0;
+                /^From (.{40}) / and $sha1 = $1;
+            } elsif ($_ eq "\n" || /^[-\w]+: /) {
+                $haveid = 1 if (/^Change-Id:/);
+                $empty = 1;
+            } else {
+                if (s/^(diff --git \@old\@\/)(.*)( \@new\@\/)(.*)\n/$1.map_name($2).$3.map_name($4)."\n"/e) {
+                } elsif (s/^(--- \@old\@|\+\+\+ \@new\@)\/([^\n]+)/$1."\/".map_name($2)/e) {
+                } elsif ($_ eq "---\n") {
+                    $patch .= "\n" if (!$empty);
+                    $patch .= "(cherry picked from commit ".$sha1.")\n";
+                    if (!$haveid) {
+                        $needid = int(grep /codereview/, `${dst_cd}git remote -v`) if ($needid < 0);
+                        $patch .= "Change-Id: I".$sha1."\n" if ($needid);
+                    }
+                }
+                $empty = 0;
+            }
+            $patch .= $_;
+        }
+        close DIFF or die "Aborting at ".$rev."\n";
+        if ($noop) {
+            print $patch;
+        } else {
+            open PATCH, "| ".$dst_cd."git am -3" or die "cannot run git: $!";
+            print PATCH $patch;
+            close PATCH or die "Aborting at ".$rev."\n";
+        }
+    }
+}
+exit 0;
