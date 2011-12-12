@@ -24,6 +24,7 @@ my @repos = (
     [ "qttools.pro", "qt5/qttools" ],
     [ "qttranslations.pro", "qt5/qttranslations" ],
     [ "qtxmlpatterns.pro", "qt5/qtxmlpatterns" ],
+    [ "qtcreator.pro", "qtcreator" ],
 
     [ "git-hooks/sanitize-commit", "qt5/qtrepotools" ],
     [ "shell/sanitize-commit", "devtools" ],
@@ -64,7 +65,10 @@ my @mappings = (
         [ 'shell/git-', 'bin/git-' ],
         [ 'shell/git_post_commit_hook', 'git-hooks/git_post_commit_hook' ],
         [ 'shell/sanitize-commit', 'git-hooks/sanitize-commit' ]
-    ] ]
+    ] ],
+    [ [ "qtcreator", "qt5/qttools" ], [
+        [ 'src/shared/proparser', 'src/linguist/shared' ],
+    ], 1 ]
 );
 
 my ($cand, $inv);
