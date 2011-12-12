@@ -173,12 +173,20 @@ if (!$push) {
 die "Fatal: source and target repository are the same.\n" if ($src_repo eq $dst_repo);
 
 my @candidates = ();
+my $mincand = 10;
 for my $cand (@mappings) {
-    for my $inv (0, 1) {
-        if (("" eq $src_repo or $$cand[0][$inv] eq $src_repo) and
-            ("" eq $dst_repo or $$cand[0][1 - $inv] eq $dst_repo)) {
-            push @candidates, [ $cand, $inv ];
-            last;
+    my $mcand = $$cand[2] // 0;
+    if ($mcand <= $mincand) {
+        for my $inv (0, 1) {
+            if (("" eq $src_repo or $$cand[0][$inv] eq $src_repo) and
+                ("" eq $dst_repo or $$cand[0][1 - $inv] eq $dst_repo)) {
+                if ($mcand < $mincand) {
+                    $mincand = $mcand;
+                    @candidates = ();
+                }
+                push @candidates, [ $cand, $inv ];
+                last;
+            }
         }
     }
 }
