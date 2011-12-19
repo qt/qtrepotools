@@ -393,7 +393,7 @@ while (<DIFF>) {
                     &complain("Adding temporary file from merge conflict resolution", "conflict", 1);
                     $conflict_fail = 1;
                 }
-                if (!defined($cfg{alien}) && $file =~ /(\.(sln|vcproj|vcxproj|pro\.user)|(^|\/)(Makefile\.am|CMakeLists\.txt))$/i) {
+                if (!defined($cfg{alien}) && $file =~ /\.(sln|vcproj|vcxproj|user)$/i) {
                     &complain("Warning: Adding alien build system file", "alien");
                 }
                 if ($size > (2 << 20)) {
