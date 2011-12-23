@@ -402,8 +402,9 @@ sub determineModules
     opendir (DIR, $rootFolder) or die ('Cannot read ' . $rootFolder . $!);
     my @mods = ();
     while (my $e = readdir(DIR)) {
-        if ($e ne '.' && $e ne '..') {
-            push(@mods, $e) if (-d $e && -f (File::Spec->catfile($e, '.git','config')));
+        if ($e ne '.' && $e ne '..' && -d $e) {
+            my $gitFolder = File::Spec->catfile($e, '.git');
+            push(@mods, $e) if -e $gitFolder;
        }
     }
     closedir(DIR);
