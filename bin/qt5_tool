@@ -766,7 +766,7 @@ if ( $BUILD !=  0 ) {
     if (readQt5ToolConfigBool($nokiaDeveloperConfigKey)) {
         push (@configureArguments, '-developer-build');
     }
-    push (@configureArguments, '-nomake', 'tests', '-nomake', 'demos', '-nomake examples');
+    push (@configureArguments, '-nomake', 'tests', '-nomake', 'examples');
 #   -- detect X11
     push (@configureArguments, '-xcb') if defined $ENV{'DISPLAY'};
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
