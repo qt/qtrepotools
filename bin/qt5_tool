@@ -763,7 +763,6 @@ if ( $BUILD !=  0 ) {
     winRemoveGitFromPath() if $minGW;
     my @configureArguments = ('-prefix', File::Spec->catfile($rootDir, 'qtbase'), '-confirm-license', '-opensource');
 #   -- Remove later.
-    push (@configureArguments, '-no-qt3support') if $os == $OS_WINDOWS;
     if (readQt5ToolConfigBool($nokiaDeveloperConfigKey)) {
         push (@configureArguments, '-developer-build');
     }
