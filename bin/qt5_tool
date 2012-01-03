@@ -761,10 +761,12 @@ if ( $UPDATE !=  0 ) {
 if ( $BUILD !=  0 ) {
     print 'Building Qt 5 in ',$rootDir,"\n";
     winRemoveGitFromPath() if $minGW;
-    my @configureArguments = ('-prefix', File::Spec->catfile($rootDir, 'qtbase'), '-confirm-license');
+    my @configureArguments = ('-prefix', File::Spec->catfile($rootDir, 'qtbase'), '-confirm-license', '-opensource');
 #   -- Remove later.
     push (@configureArguments, '-no-qt3support') if $os == $OS_WINDOWS;
-    push (@configureArguments, readQt5ToolConfigBool($nokiaDeveloperConfigKey) ? '-nokia-developer' : '-opensource');
+    if (readQt5ToolConfigBool($nokiaDeveloperConfigKey)) {
+        push (@configureArguments, '-developer-build');
+    }
     push (@configureArguments, '-nomake', 'tests', '-nomake', 'demos', '-nomake examples');
 #   -- detect X11
     push (@configureArguments, '-xcb') if defined $ENV{'DISPLAY'};
