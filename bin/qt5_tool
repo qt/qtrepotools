@@ -788,17 +788,18 @@ if ( $BUILD !=  0 ) {
 #       target location on Windows.
     if ($os == $OS_WINDOWS) {
         my $targetProfileFolder = File::Spec->catfile($rootDir, 'qtbase', 'mkspecs', 'modules');
-        if (! -f File::Spec->catfile($targetProfileFolder, 'qt_core.pri')) {
-            foreach my $module (@MODULES) {
-                my $sourceProfilePattern = File::Spec->catfile($rootDir, $module, 'modules' , '*.pri');
-                foreach my $sourceProfile (glob($sourceProfilePattern)) {
-                    print 'Workaround: Copying ', $sourceProfile, ' to ',$targetProfileFolder,"\n";
+        foreach my $module (@MODULES) {
+            my $sourceProfilePattern = File::Spec->catfile($rootDir, $module, 'modules' , '*.pri');
+            foreach my $sourceProfile (glob($sourceProfilePattern)) {
+                my $target = File::Spec->catfile($targetProfileFolder, basename($sourceProfile));
+                if ( ! -f $target) {
+                    print 'Workaround: Copying ', $sourceProfile, ' to ',$target,"\n";
                     File::Copy::copy($sourceProfile, $targetProfileFolder) or die ('Copy error '. $!);
                 }
             }
         }
    }
-}
+} # BUILD
 
 if ( $BUILD + $MAKE !=  0) {
     if ($BUILD == 0) { # Did not go through configure, cd
