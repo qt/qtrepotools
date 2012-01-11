@@ -791,10 +791,13 @@ if ( $BUILD !=  0 ) {
         foreach my $module (@MODULES) {
             my $sourceProfilePattern = File::Spec->catfile($rootDir, $module, 'modules' , '*.pri');
             foreach my $sourceProfile (glob($sourceProfilePattern)) {
-                my $target = File::Spec->catfile($targetProfileFolder, basename($sourceProfile));
-                if ( ! -f $target) {
-                    print 'Workaround: Copying ', $sourceProfile, ' to ',$target,"\n";
-                    File::Copy::copy($sourceProfile, $targetProfileFolder) or die ('Copy error '. $!);
+                my $baseName = basename($sourceProfile);
+                if (index($baseName, 'jsondb') < 0 && index($baseName, 'compositor') < 0) {
+                    my $target = File::Spec->catfile($targetProfileFolder, basename($sourceProfile));
+                    if ( ! -f $target) {
+                        print 'Workaround: Copying ', $sourceProfile, ' to ',$target,"\n";
+                        File::Copy::copy($sourceProfile, $targetProfileFolder) or die ('Copy error '. $!);
+                    }
                 }
             }
         }
