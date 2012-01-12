@@ -221,6 +221,24 @@ sub fixDiff
    return $line;
 }
 
+# --- Determine a suitable log file name for test log files.
+
+sub formatTestLogBaseName
+{
+    my ($number, $module) = @_;
+    my $result = 'test';
+    $result .= '_win' if $os == $OS_WINDOWS;
+    $result .= '_unix' if $os == $OS_LINUX;
+    $result .= '_mac' if $os == $OS_MAC;
+    if (defined $module) {
+        $result .= '_';
+        $result .=  index($module, 'qt') == 0 ? substr($module, 2) : $module;
+    }
+    $result .= '_' . strftime('%y%m%d', localtime());
+    $result .= '_' . $number if $number > 0;
+    return $result;
+}
+
 # ---- Generate a diff from all submodules such that it can be applied to
 #      the root Qt 5 directory.
 
@@ -572,7 +590,7 @@ if ( $STATUS !=  0 ) {
 #   found, a tasks file for Qt Creator..
 
 if ( $TEST !=  0 ) {
-    my @testPaths = ();
+    my %testPaths;
     my $testRelativePath = File::Spec->catfile('tests', 'auto');
     my $catCommand = $os == $OS_WINDOWS ? 'type' : 'cat';
 #   ---  Find relevant modules.
@@ -582,35 +600,33 @@ if ( $TEST !=  0 ) {
                        || ($MOD eq 'qtwayland' && $os == $OS_WINDOWS);
         if (!$excluded) {
             my $testPath = File::Spec->catfile($MOD, $testRelativePath);
-            push (@testPaths, $testPath) if -d $testPath;
+            $testPaths{$MOD} = $testPath if -d $testPath;
         }
     }
 #   -- Locate 'test2tasks.pl'. This is a script located in the Qt Creator repository
 #      that converts test output into task files that can be loaded into Qt  Creator's
 #      'Build issues' pane.
     my $test2tasks = which('test2tasks.pl');
-#   -- Initialize logging, find a log file name.
-    my ($testLogBaseName, $testLogFileName, $summaryLogFile);
-    for (my $fn = 0; ; $fn++) {
-        $testLogBaseName = 'test' . strftime('%y%m%d', localtime());
-        $testLogBaseName .= '_' . $fn if $fn > 0;
-        $testLogFileName = $testLogBaseName . '.log';
-        $summaryLogFile   = File::Spec->catfile($rootDir, $testLogFileName);
-        last unless -f $testLogFileName;
+#   -- Initialize logging, find a unique log file name.
+    my $testLogUniqueNumber = 0;
+    my ($summaryLogFile, $summaryTasksFile);
+    for ( ; ; $testLogUniqueNumber++) {
+        my $testLogBaseName = formatTestLogBaseName($testLogUniqueNumber);
+        $summaryLogFile = File::Spec->catfile($rootDir, $testLogBaseName . '.log');
+        $summaryTasksFile = File::Spec->catfile($rootDir, $testLogBaseName . '.tasks');
+        last unless -f $summaryLogFile || -f $summaryTasksFile;
     }
-    my $testTasksFileName = $testLogBaseName . '.tasks';
-    my $summaryTasksFile = File::Spec->catfile($rootDir, $testTasksFileName);
     if (-e $summaryTasksFile) {
         unlink($summaryTasksFile) or die ('Unable to delete existing tasks file ' . $summaryTasksFile . ' ' . $!);
     }
-    print '### Testing ', scalar(@testPaths), ' modules: ', join(', ', @testPaths), "\n### Logging to: ",
+    print '### Testing ', scalar(keys(%testPaths)), ' modules: ', join(', ', keys(%testPaths)), "\n### Logging to: ",
           $summaryLogFile, "\n";
 #   -- Build the tests, qmake, make
     my @buildFailures;
     my $tn = 0;
-    foreach my $testPath (@testPaths) {
+    foreach my $testPath (values(%testPaths)) {
         chdir($testPath) || die ('Failed to chdir from' . $rootDir . ' to "' . $testPath);
-        print '### Building #', ++$tn, ' of ', scalar(@testPaths), ' ', $testPath, "\n";
+        print '### Building #', ++$tn, ' of ', scalar(keys(%testPaths)), ' ', $testPath, "\n";
         my $rc = execute('qmake');
         die ('qmake failed') unless $rc == 0;
         $rc = execute($make, @makeArgs);
@@ -622,15 +638,18 @@ if ( $TEST !=  0 ) {
     }
 #   -- Run the test: 'make check'
     $tn = 0;
-    foreach my $testPath (@testPaths) {
+    foreach my $module (keys(%testPaths)) {
+        my $testPath = $testPaths{$module};
         ++$tn;
         if (grep (/$testPath/, @buildFailures)) {
             print '### Skipping ', $testPath, "\n";
             next;
         }
         chdir($testPath) || die ('Failed to chdir from' . $rootDir . ' to "' . $testPath);
-        print '### Running #', ++$tn, ' of ', scalar(@testPaths), ' ', $testPath, "\n";
-        my $moduleLogFile = File::Spec->catfile(getcwd(), $testLogFileName);
+        print '### Running #', ++$tn, ' of ', scalar(keys(%testPaths)), ' ', $testPath, "\n";
+        my $moduleLogBaseName = formatTestLogBaseName($testLogUniqueNumber, $module);
+        my $moduleLogFile = File::Spec->catfile(getcwd(), $moduleLogBaseName . '.log');
+        my $moduleTasksFile = File::Spec->catfile(getcwd(),  $moduleLogBaseName . '.tasks');
         my $cmd = $make . ' ' . join(' ', @makeArgs) . ' ' . $makeForceArg . ' check > ' .  $moduleLogFile;
         print '### Running: ', $cmd, "\n";
         system($cmd);
@@ -641,7 +660,6 @@ if ( $TEST !=  0 ) {
 #       --- Create a tasks file for Qt Creator
         if (defined $test2tasks) {
 #           -- Local file with relative paths
-            my $moduleTasksFile = File::Spec->catfile(getcwd(), $testTasksFileName);
                 $cmd = $test2tasks . ' < ' . $moduleLogFile . ' > ' . $moduleTasksFile;
             print '### Running: ', $cmd, "\n";
                    system($cmd);
