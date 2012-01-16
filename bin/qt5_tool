@@ -636,8 +636,9 @@ if ( $TEST !=  0 ) {
         }
         chdir($rootDir);
     }
-#   -- Run the test: 'make check'
+#   -- Run the test: 'make check'. Explicitly set 'Keep' on Windows as flags are not propagated.
     $tn = 0;
+    $ENV{'MAKEFLAGS'} = 'K' if  $make eq 'nmake';
     foreach my $module (keys(%testPaths)) {
         my $testPath = $testPaths{$module};
         ++$tn;
