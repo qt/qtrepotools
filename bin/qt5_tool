@@ -176,7 +176,7 @@ $configFile = File::Spec->catfile($home, $configFile);
 
 my @MODULES = ();
 
-my $nokiaDeveloperConfigKey = 'nokiaDeveloper';
+my ($developerBuildConfigKey, $nokiaDeveloperConfigKey) = ('developerBuild', 'nokiaDeveloper');
 
 # --- Execute a command and print to log.
 sub execute
@@ -420,7 +420,7 @@ sub determineModules
     opendir (DIR, $rootFolder) or die ('Cannot read ' . $rootFolder . $!);
     my @mods = ();
     while (my $e = readdir(DIR)) {
-        if ($e ne '.' && $e ne '..' && -d $e) {
+        if ($e ne '.' && $e ne '..' && -d $e && $e ne 'qtquick3d') {
             my $gitFolder = File::Spec->catfile($e, '.git');
             push(@mods, $e) if -e $gitFolder;
        }
@@ -490,23 +490,34 @@ if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
     exit (1);
 }
 
+sub defaultConfigureArguments
+{
+    my ($developerBuild) = @_;
+    my $result = '-confirm-license';
+    $result .= ' -developer-build' if ($developerBuild);
+    $result .= ' -opensource -debug';
+    $result .= ' -xcb' if $os == $OS_LINUX && defined $ENV{'DISPLAY'};
+    $result .= ' -no-webkit -nomake tests -nomake examples';
+    return $result;
+}
+
 #   -- Prompt to create config before reading anything for bootstrapping.
 if ( $BOOTSTRAP != 0 && ! -f $configFile) {
-    print "This appears to be the first use of qt5_tool on this machine.\nCreating ",$configFile, "...,\n";
+    print "This appears to be the first use of qt5_tool on this machine.\nCreating configuration file '",$configFile, "'...,\n";
+    my $newDeveloperBuild = prompt('Developer build (y/n)', 'y') =~ /y/i;
     my $newNokiaDeveloper = prompt('Nokia developer (y/n)', 'n') =~ /y/i;
     my $newCodeReviewUser = '';
     my $newInitArgumentsDefault = '--no-webkit';
-    if ($newNokiaDeveloper) {
-        $newCodeReviewUser = prompt('Enter CodeReview user name', $user);
-        $newInitArgumentsDefault .= ' --berlin';
-    }
+    $newCodeReviewUser = prompt('Enter CodeReview user name', $user) if ($newDeveloperBuild || $newNokiaDeveloper);
+    $newInitArgumentsDefault .= ' --berlin'  if $newNokiaDeveloper;
     my $newInitArguments = prompt('Enter arguments to init-repository', $newInitArgumentsDefault);
-    my $newConfigureArguments = prompt('Enter arguments to configure', '-no-webkit');
+    my $newConfigureArguments = prompt('Enter arguments to configure', defaultConfigureArguments($newDeveloperBuild));
     my $configFileHandle = new IO::File('>' . $configFile) or die ('Unable to write to ' . $configFile . ':' . $!);
     print $configFileHandle 'configureArguments=', $newConfigureArguments, "\n" if $newConfigureArguments ne '';
     print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
     print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
-    print $configFileHandle "nokiaDeveloper=true\n" if $newNokiaDeveloper;
+    print $configFileHandle $developerBuildConfigKey, "=true\n" if $newNokiaDeveloper;
+    print $configFileHandle $nokiaDeveloperConfigKey, "=true\n" if $newDeveloperBuild;
     $configFileHandle->close();
     print 'Wrote ',$configFile, "\n";
 }
@@ -518,6 +529,7 @@ my $codeReviewUser = readQt5ToolConfig('codeReviewUser');
 
 if ( $BOOTSTRAP != 0 ) {
     my $nokiaDeveloper = readQt5ToolConfigBool($nokiaDeveloperConfigKey);
+    my $developerBuild = readQt5ToolConfigBool($developerBuildConfigKey);
     my $repoURL = $nokiaDeveloper  ?
                    ('ssh://' . $codeReviewHost . ':' . $codeReviewPort .'/qt/qt5.git') :
                    $gitoriousURL;
@@ -780,14 +792,7 @@ if ( $UPDATE !=  0 ) {
 if ( $BUILD !=  0 ) {
     print 'Building Qt 5 in ',$rootDir,"\n";
     winRemoveGitFromPath() if $minGW;
-    my @configureArguments = ('-prefix', File::Spec->catfile($rootDir, 'qtbase'), '-confirm-license', '-opensource');
-#   -- Remove later.
-    if (readQt5ToolConfigBool($nokiaDeveloperConfigKey)) {
-        push (@configureArguments, '-developer-build');
-    }
-    push (@configureArguments, '-nomake', 'tests', '-nomake', 'examples');
-#   -- detect X11
-    push (@configureArguments, '-xcb') if $os == $OS_LINUX && defined $ENV{'DISPLAY'};
+    my @configureArguments = ('-prefix', File::Spec->catfile($rootDir, 'qtbase'));
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
 #   --- Shadow builds: Remove and re-create directory
