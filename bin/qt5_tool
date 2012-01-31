@@ -496,8 +496,10 @@ sub defaultConfigureArguments
     my $result = '-confirm-license';
     $result .= ' -developer-build' if ($developerBuild);
     $result .= ' -opensource -debug';
+#   On Mac, -debug requires -no-framework (or use -debug-and-release)?
+    $result .= ' -no-framework' if  $os == $OS_MAC;
     $result .= ' -xcb' if $os == $OS_LINUX && defined $ENV{'DISPLAY'};
-    $result .= ' -no-webkit -nomake tests -nomake examples';
+    $result .= ' -nomake tests -nomake examples';
     return $result;
 }
 
