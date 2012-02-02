@@ -1,8 +1,6 @@
 #!/bin/sh
 # Copyright (C) 2012 Nokia Corporation and/or its subsidiary(-ies).
-# All rights reserved.
-#
-# Contact:  Nokia Corporation <info@qt.nokia.com>
+# Contact: http://www.qt-project.org/
 #
 # You may use this file under the terms of the 3-clause BSD license.
 # See the file LICENSE from this package for details.
