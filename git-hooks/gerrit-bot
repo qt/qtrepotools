@@ -93,7 +93,7 @@ sub process_commit($$$)
   $processed{$ref} = 1;
   my $orig_project = $project;
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
-  $verbose and print "===== ".strftime("%c %Z", localtime(time()))." ===== processing commit ".$ref." in ".$project."\n";
+  $verbose and print "===== ".strftime("%c", localtime(time()))." ===== processing commit ".$ref." in ".$project."\n";
   my $GIT_DIR = $GIT_BASEDIR."/".$project.".git";
   if (!-d $GIT_DIR) {
     mkpath $GIT_DIR or die "cannot create ".$GIT_DIR.": ".$!;
@@ -116,14 +116,14 @@ sub process_commit($$$)
       printerr "GIT fetch from ".$project." failed";
       return;
     }
-    $verbose and print "===== ".strftime("%c %Z", localtime(time()))." ===== updated mainlines\n";
+    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== updated mainlines\n";
     my $dref = $ref;
     $dref =~ s,/[^/]+$,,;
     if (system("git", "fetch", "-f", "origin", $ref.":".$dref)) {
       printerr "GIT fetch of ".$ref." from ".$project." failed";
       return;
     }
-    $verbose and print "===== ".strftime("%c %Z", localtime(time()))." ===== fetched change\n";
+    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== fetched change\n";
   }
   my $worker = $WORKER;
   $worker =~ s/\@SHA1\@/$rev/g;
@@ -146,7 +146,7 @@ sub process_commit($$$)
   push @args, ("--sanity-review", ($score > 0) ? "+".$score : $score);
   push @args, ("--message", '"'.$verdict.'"') if (length($verdict));
   if (system(@gerrit, "review", @args, $rev)) {
-    print "===== ".strftime("%c %Z", localtime(time()))." ===== verdict NOT submitted\n";
+    print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
     printerr("Submission of verdict for ".$rev." (".$project."/".$ref.") failed");
     return;
   }
