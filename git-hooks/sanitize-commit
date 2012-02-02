@@ -359,7 +359,7 @@ while (<DIFF>) {
             $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
             $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
             $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
-            $tabs_check = $ws_check && !$tsv_check && ($file !~ /((^|\/)Makefile\b|\.def$)/);
+            $tabs_check = $ws_check && !$tsv_check && ($file !~ /((^|\/)Makefile\b|\.(def|spec|changes)$)/);
             $ctlkw_check = $tabs_check && $clike;
             $conflict_fail = defined($cfg{conflict});
             $braces = 0;
