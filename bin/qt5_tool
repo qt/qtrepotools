@@ -48,7 +48,7 @@ my $optCommitHook;
 my $gitoriousURL = 'git://gitorious.org/qt/qt5.git';
 my $codeReviewHost = 'codereview.qt-project.org';
 my $codeReviewPort = 29418;
-my $configFile = '.qt5_tool';
+my $configFile;
 
 my $USAGE=<<EOF;
 Usage: qt5_tool [OPTIONS]
@@ -83,18 +83,20 @@ Example use cases:
   qt5_tool -d           Generate modules diff relative to root directory
   qt5_tool -r           Reset --hard of repo.
 
-qt_tool can be configured by creating a configuration file \$HOME/$configFile in
-the format key=value. It is possible to use repository-specific values by
-adding a key postfixed by a dash and the repository folder base name.
+qt_tool can be configured by creating a configuration file
+"%CONFIGFILE%"
+in the format key=value. It is possible to use repository-specific values
+by adding a key postfixed by a dash and the repository folder base name.
 Use 'true', '1' for Boolean keys.
 Supported keys:
 
-nokiaDeveloper:     Nokia Developer mode (Boolean)
+developerBuild:     Developer build (Boolean)
 initArguments:      Arguments to init-repository for -q. Example:
                     [--berlin-|--brisbane-|--]nokia-developer
 codeReviewUser:     User name for code review (Gerrit)
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
+nokiaDeveloper:     Nokia Developer mode (Boolean)
 forceModules:       A list of modules (like "qtbase qtscript") that will be
                     built using 'make -k' if the global 'make' fails.
 Example:
@@ -172,7 +174,17 @@ my $home = $os == $OS_WINDOWS ? ($ENV{'HOMEDRIVE'} . $ENV{'HOMEPATH'}) : $ENV{'H
 $ENV{'HOME'} = $home if ($os == $OS_WINDOWS && not defined $ENV{'HOME'});
 
 my $user = $os == $OS_WINDOWS ? $ENV{'USERNAME'} : $ENV{'USER'};
-$configFile = File::Spec->catfile($home, $configFile);
+
+# -- Determine configuration file (~/.config if present).
+if ($os == $OS_WINDOWS) {
+    $configFile = File::Spec->catfile($ENV{'APPDATA'}, 'qt5_tool.conf');
+} else {
+    my $configFolder = File::Spec->catfile($home, '.config');
+    $configFile = -d $configFolder ?
+                  File::Spec->catfile($configFolder, 'qt5_tool.conf') :
+                  File::Spec->catfile($home, '.qt5_tool');
+}
+$USAGE =~ s/%CONFIGFILE%/$configFile/; # Replace placeholder.
 
 my @MODULES = ();
 
@@ -503,9 +515,9 @@ sub defaultConfigureArguments
     return $result;
 }
 
-#   -- Prompt to create config before reading anything for bootstrapping.
-if ( $BOOTSTRAP != 0 && ! -f $configFile) {
-    print "This appears to be the first use of qt5_tool on this machine.\nCreating configuration file '",$configFile, "'...,\n";
+#   -- Prompt to create configuration file for options that require it.
+if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) {
+    print "\n### This appears to be the first use of qt5_tool on this machine.\n\nCreating configuration file '",$configFile, "'...\n";
     my $newDeveloperBuild = prompt('Developer build (y/n)', 'y') =~ /y/i;
     my $newNokiaDeveloper = prompt('Nokia developer (y/n)', 'n') =~ /y/i;
     my $newCodeReviewUser = '';
@@ -521,7 +533,7 @@ if ( $BOOTSTRAP != 0 && ! -f $configFile) {
     print $configFileHandle $developerBuildConfigKey, "=true\n" if $newNokiaDeveloper;
     print $configFileHandle $nokiaDeveloperConfigKey, "=true\n" if $newDeveloperBuild;
     $configFileHandle->close();
-    print 'Wrote ',$configFile, "\n";
+    print "Wrote '",$configFile, "'\n\n";
 }
 
 #  --- read config file
