@@ -1,0 +1,180 @@
+1.  Introduction to installer scripts
+
+    Release-tools contains scripts to generate desktop installers based on
+    Qt Installer-Framework. Example configuration templates are provided but
+    actual content that is to be installed needs to be generated separately.
+
+    For detailed usage of the Qt Installer-Framework itself please refer to the
+    Qt Installer-Framework documentation.
+
+
+2.  Quick start
+
+    To create standalone offline installer use:
+
+    Linux:      python create_installer.py linux x86 offline        OR
+                python create_installer.py linux x86_64 offline
+
+    Mac:        python create_installer.py mac x86_64 offline
+
+    Windows:    python create_installer.py mac x86 offline
+
+
+    output:
+        - SDK installer executable will be generated into the scripts root directory.
+        - "repositories" directory will be generated into the scripts root directory
+          if offline installer is made. This contains complete repository
+          structure.
+
+
+3.  General requirements
+
+    Make sure you have the following tools installed:
+    - Python 2.6 or 2.7
+    - Win: win32api python module
+    - 7z
+
+    Build requirements:
+    - Linux/Mac: gcc toolchain
+    - Windows: MinGW/Visual Studio toolchain
+
+
+4.  Files
+
+    /create_installer.py
+        - main build script
+        - creates installer binary based on Qt Installer-Framework
+    /bldinstallercommon.py
+        - common utility functions
+    /bld_ifw_tools.py
+    /bld_ifw_tools_impl.py
+        - utilities to build static Qt and Installer-Framework
+    /configurations
+        - contains all configuration files
+    /configurations/pkg
+        - contains package templates that define the SDK structure
+    /configurations/config_qt5
+        - template files, e.g. icons, xml files
+    /configurations/linux
+        - contains Linux specific configuration files
+    /configurations/linux/common
+        - common configuration data for Linux installers
+    /configurations/linux/config.xml.template.linux
+        - config.xml template
+    /configurations/linux/installer-framework
+        - configuration file for building Qt Installer-Framework
+    /configurations/linux/x86_32
+        - configuration file that defines all the SDK packages to be included
+          and other installer specific data
+
+
+5.  Using the scripts
+
+    * General usage of the SDK/installer build script is as follows:
+        > python create_installer.py <platform> <configuration file>
+
+        The <platform> is one of the following: linux/mac/windows
+            - /configurations/linux
+            - /configurations/mac
+            - /configurations/lwindows
+
+        The <configuration file> must be found under /configurations/<platform>/
+
+    * If you wish to prebuild Installer-Framework (+ static Qt) for faster
+      development cycles use the following:
+
+        > python bld_ifw_tools.py <platform>
+
+        The <platform> is linux/mac/windows.
+        Open /configurations/<platform>/installer-framework file for build
+        configuration details.
+
+    * The create_installer.py will default to online installer which would
+      require online distribution server to be in use.
+      To create offline installer, use the following:
+
+        > python create_installer.py <platform> <configuration file> offline
+
+        Optional arguments:
+        devmode     # Note! this is enabled by default, will force to build IFW and static Qt. If this option is not used
+                    # then the pre-build package must be available and defined in [InstallerFrameworkTools]
+        testclient  # When online installer is build, make it use the alternative distribution server url instead
+
+
+6.  Package configuration file syntax:
+
+    * Syntax must conform to Python configuration file format.
+    * The package configuration file (e.g. /configurations/linux/x86_64) defines
+      the components that should be included in the SDK/installer.
+
+        [PackagesNamespace]
+        name:                   com.qt                                      # defines what sections in this config file should be treated as SDK components
+
+        [com.qt]                                                            # "com.qt" matches against the namespace defined above
+        root_component:         yes                                         # used when creating online installer, only the main component is used for online installer
+        version:                1.0.0
+        version_tag:            %SDK_VERSION_NUM%                           # substitution tag in .xml/.qs files, replace this tag with given version number
+
+        [com.qt.src]                                                        # "com.qt.src" matches against the namespace defined above
+        version:                1.0.0
+        version_tag:            %SDK_VERSION_NUM%
+
+        [com.qt.src.500]                                                    # this component contains actual data
+        archives:               meta-com.qt.src.500.1                       # comma separated list of archives (.7z) that should be included in this package
+        target_install_base:    /Src/Qt/5.0.0                               # base directory structure how data will be installed in installation directory
+        version:                5.0.0
+        version_tag:            %QT_VERSION_NUM%
+        package_default:        no                                          # this value will be put into the components package.xml file
+        [meta-com.qt.src.500.1]                                             # archive defined in the "archives" list above (section name can be anything)
+        archive_uri:            qt-everywhere-opensource-src-5.0.0.tar.gz   # source uri for the archive (see further explanation below..)
+        package_strip_dirs:     1                                           # if needed, the build script will strip unnecessary folder structure from the source archive and repackage it
+        target_install_dir:     /                                           # installation path, this will be appended into "target_install_base"
+        rpath_target:                                                       # the build script will patch RPath value if needed (Linux, Solaris). Leave empty if not needed
+        archive_name:           qt-everywhere-opensource-src-5.0.0.7z       # the final archive name, this will be used in "addDownloadableArchive" in installscript.qs
+
+        [com.qt.desktop]
+        version:                1.0.0
+        version_tag:            %SDK_VERSION_NUM%
+
+        [com.qt.desktop.qt]
+        version:                1.0.0
+        version_tag:            %SDK_VERSION_NUM%
+
+        [com.qt.desktop.qt.500]
+        version:                5.0.0
+        version_tag:            %QT_VERSION_NUM%
+
+        [com.qt.desktop.qt.500.gcc]
+        archives:               meta-com.qt.desktop.qt.500.gcc.1
+        target_install_base:    /Desktop/Qt/5.0.0/gcc
+        version:                5.0.0
+        version_tag:            %QT_VERSION_NUM%
+        package_default:        yes
+        [meta-com.qt.desktop.qt.500.gcc.1]
+        archive_uri:            qt-5.0.0-desktop-gcc.7z
+        package_strip_dirs:     4                                           # e.g. strip 4 directories from the "qt-5.0.0-desktop-gcc.7z" archive
+        target_install_dir:     /                                           # extract this archive "qt-5.0.0-desktop-gcc.7z" into the root ("/") of the SDK
+        rpath_target:           /lib                                        # patch the RPath value of binaries inside the archive "qt-5.0.0-desktop-gcc.7z". "/lib" points to the directory where the RPath value should point to
+        archive_name:           qt-5.0.0-desktop-gcc.7z
+
+
+        [OfflinePackageExcludeList]
+        package_list:                                                       # comma separated list of packages which to exclude from the offline installer (repositories will always contain all packages)
+
+        [SdkUpdateRepository]
+        repository_url:                                                     # url for distribution server when using online installer
+        repository_url_rnd:                                                 # if you build the installer with "testclient" switch, this url will be used instead, can be used for testing purposes
+
+        [TargetArchitechture]
+        instruction_set:        x86_32
+
+        [ConfigDir]
+        template_name:          config_qt5                                  # points to template directory: /configurations/<template_name>
+        target_dir:             config                                      # template save as name in the scripts root directory
+
+        [ConfigXml]
+        template_name:          config.xml.template.linux                   # define the config.xml template
+
+        [WorkingDirectories]
+        packages_dir:           pkg                                         # define from which directory to search for the package templates
+
