@@ -17,6 +17,7 @@ my @repos = (
     [ "qtdeclarative.pro", "qt5/qtdeclarative" ],
     [ "qtdoc.pro", "qt5/qtdoc" ],
     [ "qtphonon.pro", "qt5/qtphonon" ],
+    [ "qtquick1.pro", "qt5/qtquick1" ],
     [ "qtscript.pro", "qt5/qtscript" ],
     [ "qtsvg.pro", "qt5/qtsvg" ],
     [ "qttools.pro", "qt5/qttools" ],
@@ -47,6 +48,8 @@ my @mappings = (
         [ 'tools/qdoc3/test', 'doc/config' ]
     ] ],
     [ [ "qt", "qt5/qtphonon" ], [
+    ] ],
+    [ [ "qt", "qt5/qtquick1" ], [
     ] ],
     [ [ "qt", "qt5/qtscript" ], [
     ] ],
