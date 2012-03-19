@@ -452,6 +452,8 @@ sub determineModules
 sub checkoutInitialBranch
 {
     my ($mod) = @_;
+    # -- Special treatment for webkit: Do not touch.
+    return if ($mod eq 'qtwebkit');
     # Which branch are we on?
     my $rc = execute($git, ('fetch', '--all'));
     die 'fetch of ' . $mod . ' failed'  if ($rc);
@@ -468,16 +470,6 @@ sub checkoutInitialBranch
     my $desiredBranch = $preferredBranches{$mod};
     if (defined($desiredBranch) && $desiredBranch eq '') {
         print 'Not changing branch for ',$mod,"\n";
-        return;
-    }
-    # -- Special treatment for webkit: Remove existing invalid branch
-    if ($mod eq 'qtwebkit') {
-        my $webkitBranch = 'qt-modularization-base';
-        execute($git, ('branch', '-D', $webkitBranch));
-        $rc = execute($git, 'branch', '--track', $webkitBranch, 'gerrit/' . $webkitBranch);
-        die 'tracking branch  ' . $webkitBranch . ' ' . $mod . ' failed' if ($rc);
-        $rc = execute($git, ('checkout', $webkitBranch));
-        die 'Checkout of ' . $webkitBranch. ' failed'  if ($rc);
         return;
     }
     $desiredBranch = substr($branches[1],2) unless defined $desiredBranch;
@@ -555,8 +547,6 @@ if ( $BOOTSTRAP != 0 ) {
 #   -- Webkit is usually too slow to clone unless something is configured.
     if ($initArgumentsFromConfig ne '') {
         push(@initOptions, split(/ /, $initArgumentsFromConfig));
-    } else {
-        push(@initOptions, '--no-webkit');
     }
     my $toolsFolder = 'qtrepotools';
     # -- Clone
