@@ -42,6 +42,7 @@ my $STATUS=0;
 my $UPDATE=0;
 my $TEST=0;
 my $REBUILD_CONFIGURE=0;
+my $BUILD_WEBKIT = 0;
 my $optModuleBranchArgument;
 my $optGerritModule;
 my $optCommitHook;
@@ -70,13 +71,14 @@ Options:
   -t  Test: Builds and runs tests located in tests/auto for each module,
       creates log file(s) in that directory as well as a summary log  file.
   -q  Quick bootstrap a new checkout under current folder.
-  -w  Windows: Rebuild configure.exe (requires MSVC setup)
+  -w  Build WebKit
   -g <module> Set up gerrit for the module.
   -a <module> Set up a tracking branch for the module. By default, this is
               staging/master. It is possible the specify the branch by appending
               :remote-branch to the module parameter, for example:
               qtbase:origin/refactor
   -h <hook>   Path to commit hook for -s.
+  -x  Windows: Rebuild configure.exe (requires MSVC setup)
 
 Example use cases:
   qt5_tool -c -u -b     Clean, update and build for nightly builds
@@ -479,6 +481,30 @@ sub checkoutInitialBranch
     die 'Checkout of ' . $desiredBranch . ' failed'  if ($rc);
 }
 
+sub buildWebKit
+{
+    my $webkit = 'qtwebkit';
+    chdir($webkit) or die ('Failed to chdir from' . $rootDir . ' to "' . $webkit . '":' . $!);
+    my $webOutDir = File::Spec->catfile($rootDir, $webkit, 'WebKitBuild');
+    print 'Setting WEBKITOUTPUTDIR: ', $webOutDir, "\n";
+    $ENV{'WEBKITOUTPUTDIR'} = $webOutDir;
+    if ($os == $OS_WINDOWS) { # get bison from mother repository
+        my $toolsPath = File::Spec->catfile($rootDir, 'gnuwin32', 'bin');
+        my $path = $ENV{'PATH'};
+        $path .= ';' unless $path =~ /;$/; # SDKs create trailing semicolons
+        $path .= $toolsPath;
+        print 'Adding tools to path: ', $toolsPath, "\n";
+        $ENV{'PATH'} = $path;
+    }
+    my $script = File::Spec->catfile($rootDir, $webkit, 'Tools', 'Scripts', 'build-webkit');
+    my $qmake = File::Spec->catfile($rootDir, 'qtbase', 'bin', 'qmake');
+    $qmake .= '.exe' if ($os == $OS_WINDOWS);
+    my @args = ($script, '--qt', '--qmake=' . $qmake, '--makeargs=' . join(' ', @makeArgs));
+    push (@args, '--release') unless grep('-debug', split(' ', readQt5ToolConfig('configureArguments')));
+    executeCheck('perl', @args);
+    chdir($rootDir);
+}
+
 # --------------- MAIN: Parse arguments
 
 if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
@@ -486,9 +512,9 @@ if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
      'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
      'acking=s' => \$optModuleBranchArgument, 'gerrit=s' => \$optGerritModule,
      'hook=s' => \$optCommitHook, 'quick-bootstrap'  => \$BOOTSTRAP,
-     'w' => \$REBUILD_CONFIGURE)
+     'webkit'  => \$BUILD_WEBKIT, 'x' => \$REBUILD_CONFIGURE)
     || ($CLEAN + $DOC + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS
-        + $REBUILD_CONFIGURE + $TEST == 0
+        + $REBUILD_CONFIGURE + $TEST + $BUILD_WEBKIT== 0
         && ! defined $optModuleBranchArgument && !defined $optGerritModule)) {
     print $USAGE;
     exit (1);
@@ -856,6 +882,11 @@ if ( $BUILD + $MAKE !=  0) {
         }
     }
 }
+
+if ( $BUILD_WEBKIT !=  0) {
+    buildWebKit();
+}
+
 
 # ---- Untested: Build documentation.
 
