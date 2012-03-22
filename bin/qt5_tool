@@ -162,7 +162,16 @@ my $make = 'make';
 $make = $minGW ?  'mingw32-make' : 'nmake' if ($os == $OS_WINDOWS);
 
 my @makeArgs = $os == $OS_WINDOWS && !$minGW ? ('/s') : ('-s');
-$ENV{'CL'} = '/MP' if $os == $OS_WINDOWS; # Switch cl compiler to multicore
+
+if ($os == $OS_WINDOWS) {  # Switch cl compiler to multicore
+    my $oldCL = $ENV{'CL'};
+    if (defined $oldCL) {
+        $ENV{'CL'} = $oldCL . ' /MP'
+    } else {
+        $ENV{'CL'} = '/MP'
+    }
+}
+
 my $git = which('git'); # TODO: Mac, Windows special cases?
 die ('Unable to locate git') unless defined $git;
 
