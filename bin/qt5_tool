@@ -99,8 +99,7 @@ codeReviewUser:     User name for code review (Gerrit)
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
 nokiaDeveloper:     Nokia Developer mode (Boolean)
-forceModules:       A list of modules (like "qtbase qtscript") that will be
-                    built using 'make -k' if the global 'make' fails.
+
 Example:
 shadowBuildPostfix=-build
 shadowBuildPostfix-qt-5special=-special-build
@@ -161,7 +160,7 @@ my $minGW = $os == $OS_WINDOWS && defined($qmakeSpec) && index($qmakeSpec,'g++')
 my $make = 'make';
 $make = $minGW ?  'mingw32-make' : 'nmake' if ($os == $OS_WINDOWS);
 
-my @makeArgs = $os == $OS_WINDOWS && !$minGW ? ('/s') : ('-s');
+my @makeArgs = $os == $OS_WINDOWS && !$minGW ? ('/s', '/l') : ('-s');
 
 if ($os == $OS_WINDOWS) {  # Switch cl compiler to multicore
     my $oldCL = $ENV{'CL'};
@@ -366,6 +365,26 @@ sub initTrackingBranch
     die 'checkout failed.' if $strc;
 }
 
+# ---- Set 'MAKEFLAGS' which depends on OS
+sub setMakeEnvironment
+{
+    my ($make, @makeArgs) = @_;
+    my $makeFlags = $ENV{"MAKEFLAGS"};
+    $makeFlags = '' unless defined $makeFlags;
+    if ($make eq 'nmake' || $make eq 'jom') {
+        # Windows: MAKEFLAGS=SLK
+        for my $arg (@makeArgs) {
+            $makeFlags .= substr($arg, 1);
+        }
+    } else {
+        # UNIX: Concatenate
+        $makeFlags .= ' ' unless $makeFlags eq '';
+        $makeFlags .= join(' ', @makeArgs);
+    }
+    print 'Setting environment for ', $make, " '", $makeFlags, "'\n";
+    $ENV{"MAKEFLAGS"} = $makeFlags;
+}
+
 # ----- Create ls -l like listing for a file name
 sub ls
 {
@@ -418,13 +437,6 @@ sub shadowBuildFolder
 {
     my $shadowBuildPostfix = readQt5ToolConfig('shadowBuildPostfix');
     return $shadowBuildPostfix ne '' ? $rootDir . $shadowBuildPostfix : '';
-}
-
-# ---- Read a list of modules which will be built with -k if the global 'make' fails
-sub forceModules()
-{
-    my $forceModules = readQt5ToolConfig('forceModules');
-    return $forceModules ne '' ? split(/ /, $forceModules) : ();
 }
 
 # ---- Check for absolute path names.
@@ -508,7 +520,9 @@ sub buildWebKit
     my $script = File::Spec->catfile($rootDir, $webkit, 'Tools', 'Scripts', 'build-webkit');
     my $qmake = File::Spec->catfile($rootDir, 'qtbase', 'bin', 'qmake');
     $qmake .= '.exe' if ($os == $OS_WINDOWS);
-    my @args = ($script, '--qt', '--qmake=' . $qmake, '--makeargs=' . join(' ', @makeArgs));
+    my @args = ($script, '--qt', '--no-netscape-plugin');
+    push (@args, '--no-webkit2') if $os == $OS_WINDOWS;
+    push (@args, '--qmake=' . $qmake, '--makeargs=' . join(' ', @makeArgs));
     push (@args, '--release') unless grep('-debug', split(' ', readQt5ToolConfig('configureArguments')));
     executeCheck('perl', @args);
     chdir($rootDir);
@@ -868,41 +882,32 @@ if ( $BUILD !=  0 ) {
 } # BUILD
 
 if ( $BUILD + $MAKE !=  0) {
+    my $makeShadowBuildDir = shadowBuildFolder();
     if ($BUILD == 0) { # Did not go through configure, cd
-        my $makeShadowBuildDir = shadowBuildFolder();
         if ($makeShadowBuildDir ne '') {
             print 'Shadow build: "', $makeShadowBuildDir,"\"\n";
             chdir($makeShadowBuildDir) or die  ('Unable to chdir ' . $makeShadowBuildDir . ' :' . $!);
         }
     }
-#   Run a global make. If that fails, check if a list of 'force modules' is configured and build them with -k
-    my $makeRc = execute($make, @makeArgs);
-    if ($makeRc) {
-        $exitCode = 1;
-        my @forcedModules = forceModules();
-        die ($make . ' failed')  if @forcedModules == 0;
-        warn ('######' . $make . ' failed, resorting to forcibly building ' . join(',', @forcedModules))  if ($makeRc);
-        push(@makeArgs, $makeForceArg);
-        foreach my $MOD (@forcedModules) {
-            chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
-            my $subMakeRc = execute($make, @makeArgs);
-            warn ('######' . $make . ' failed in ' . $MOD . '.')  if ($subMakeRc);
-            chdir($rootDir);
-        }
+#   Run a global make for non-shadow developer build, else call 'build'.
+    if (readQt5ToolConfigBool($developerBuildConfigKey) && $makeShadowBuildDir eq '') {
+        executeCheck($make, @makeArgs);
+    } else {
+        setMakeEnvironment($make, @makeArgs);
+        executeCheck('perl', 'build');
     }
-}
+} # MAKE
 
 if ( $BUILD_WEBKIT !=  0) {
     buildWebKit();
 }
 
-
-# ---- Untested: Build documentation.
+# ---- Build documentation. Note: qch_docs may fail on Windows.
 
 if ($DOC !=  0 ) {
    print 'Documenting Qt 5 in ',$rootDir,"\n";
-   my $drc = execute($make, (@makeArgs,'docs'));
-   die ($make . ' docs failed')  if ($drc);
+   chdir('qtdoc') or die ('Unable to chdir to qtdoc:' . $!);
+   executeCheck($make, (@makeArgs, 'online_docs', 'qch_docs'));
 }
 
 exit($exitCode);
