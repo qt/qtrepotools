@@ -1,0 +1,249 @@
+#!/usr/bin/env perl
+# Copyright (C) 2012 Nokia Corporation and/or its subsidiary(-ies).
+# Contact: http://www.qt-project.org/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use strict;
+use warnings;
+
+package Git::Gerrit::Push;
+
+use File::Basename;
+use Switch;
+
+# Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
+# may not (msysgit for example) support this module, even if it's considered a Core module.
+sub usage
+{
+    print << "EOM";
+Usage:
+    git gpush [opts] [remote] [[sha1/ref-from]:[ref-to]] [+<reviewer>] [=<CC user>] [-- <push opts>]
+
+    Pushes changes to Gerrit and adds reviewers and CC to the patch
+    sets
+
+Description:
+    This script is used to push patch sets to Gerrit, and at the same
+    time add reviewers and CCs to the patch sets pushed.
+
+    You can use email addresses, Gerrit usernames or aliases for the
+    name of the reviewers/CCs. Aliases are read from the
+        .git-gpush-aliases
+    located next to the script, then from the git config which may
+    have aliases set either locally in the current repository,
+    globally (in your ~/.gitconfig), or system-wide.
+
+    You can and alias in your global git config like this:
+        git config --global gpush.alias.<alias key> <alias value>
+    and if you only want it local in the current repository, just drop
+    the --global option.
+
+    If no sha1 or ref-from is specified or configured, 'HEAD' is used.
+    You may configure a ref-from like this
+        git config gpush.ref-from <ref-from value>
+
+    If no ref-to is specified or configured, the remote tracking
+    branch for 'ref-from' is used as
+        'refs/for/<remote tracking branch>'.
+    You may configure a ref-to like this
+        git config gpush.ref-to <ref-from value>
+
+    If no remote is specified or configured, 'gerrit' is used. You may
+    configure a remote like this:
+        git config gpush.remote <remote name>
+
+    If all the options above have been populated, the remainder
+    options are passed on directly to the normal 'git push' command.
+    If you want to avoid specifying all options first, any options
+    specified after a '--' are also passed on directly to the
+    underlying 'git push' command.
+
+Options:
+    -v, --verbose
+        Shows the alias resolving, and final 'git push' command as a
+        comma-separated list of arguments.
+
+    -n, --dry-run
+        Do everything except actually send the updates.
+        Can be combined with --verbose to see the final command gpush
+        will run.
+
+    --aliases
+        Reports all registered aliases.
+
+Copyright:
+    Copyright (C) 2012 Nokia Corporation and/or its subsidiary(-ies).
+    Contact: http://www.qt-project.org/
+
+License:
+    You may use this file under the terms of the 3-clause BSD license.
+EOM
+}
+
+sub parse_arguments
+{
+    my ($self, @arguments) = @_;
+
+    while (scalar @arguments) {
+        my $arg = shift @arguments;
+
+        if ($arg eq "-v" || $arg eq "--verbose") {
+            $self->{'verbose'} = 1;
+            push @{$self->{'arguments'}}, $arg;
+        } elsif ($arg eq "--aliases") {
+            foreach my $key (sort(keys %{$self->{'aliases'}})) {
+                print "$key = $self->{'aliases'}->{$key}\n";
+            }
+            exit 0;
+        } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "--help") {
+            $self->usage();
+            exit 0;
+        } elsif ($arg eq "--") {
+            push @{$self->{'arguments'}}, @arguments;
+            return;
+        } elsif ($arg =~ /^\+(.+)/) {
+            push @{$self->{'reviewers'}}, $self->lookup_alias($1);
+        } elsif ($arg =~ /^\=(.+)/) {
+            push @{$self->{'CCs'}}, $self->lookup_alias($1);
+        } elsif ($arg =~ /^\-(.+)/) {
+            push @{$self->{'arguments'}}, $arg;
+        } elsif (!$self->{'remote-override'} || !$self->{'ref-override'}) {
+            if ($arg =~ /(.*):(.*)/) {
+                $self->{'ref-from'} = "$1" if (defined $1 && $1 ne "");
+                $self->{'ref-to'} = "$2" if (defined $2 && $2 ne "");
+                $self->{'ref-override'} = 1;
+            } else {
+                $self->{'remote'} = $arg;
+                $self->{'remote-override'} = 1;
+            }
+        } else {
+            push @{$self->{'arguments'}}, $arg;
+        }
+    }
+}
+
+sub fileContents {
+    my ($self, $filename) = @_;
+
+    my @contents = "";
+    my $fh;
+    if (-e $filename && open($fh, "< $filename")) {
+        @contents = <$fh>;
+        close $fh;
+    }
+    return @contents;
+}
+
+sub load_aliases
+{
+    my ($self) = @_;
+    my $script_path = dirname($0);
+
+    # Read aliases from .git-gpush-aliases file
+    foreach my $line ($self->fileContents("$script_path/.git-gpush-aliases")) {
+        chomp $line;
+        $line =~ s,(#|//).*$,,;             # Remove any comments
+        if ($line =~ /([^ ]+)\s*=\s*(\S+)/) {  # Capture the alias
+            $self->{'aliases'}->{$1} = $2;
+        }
+    }
+
+    # Read aliases and configurations from git config
+    my @gitconfigs = `git config --get-regexp gpush.*`;
+    return if ($?); # just return if no git configs for gpush
+
+    foreach (@gitconfigs) {
+        if (/^gpush\.(remote|ref-from|ref-to) (\w+)/) {
+            $self->{$1} = $2;
+        } elsif (/^gpush\.alias.([^ ]*) (.+)/) {
+            $self->{'aliases'}->{$1} = $2;
+        } # else ignore
+    }
+}
+
+sub lookup_alias
+{
+    my ($self, $user) = @_;
+
+    my $alias = $self->{'aliases'}->{$user};
+    if (defined $alias && $alias ne "") {
+        print " $user = $alias\n" if ($self->{'verbose'});
+        return $alias;
+    }
+
+    return $user;
+}
+
+sub push_patches
+{
+    my ($self) = @_;
+
+    # Detect tracking branch if ref-to is not set
+    if ($self->{'ref-to'} eq "") {
+        my $ref = `git symbolic-ref -q $self->{'ref-from'}`;
+        die "Detached HEAD mode. I won't know where to push to." if ($? != 0);
+        $ref =~ s,refs/heads/(\S+).*,$1,;
+        chomp $ref;
+        my $trackref = `git config branch.$ref.merge`;
+        die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed." if ($? != 0);
+        $trackref =~ s,refs/heads/(\S+).*,$1,;
+        chomp $trackref;
+        $self->{'ref-to'} = "refs/for/$trackref";
+    }
+
+    my @reviewers = ();
+    if (@{$self->{'reviewers'}} || @{$self->{'CCs'}}) {
+        push @reviewers, "--receive-pack=git receive-pack";
+        push @reviewers, map { " --reviewer=$_" } @{$self->{'reviewers'}};
+        push @reviewers, map { " --cc=$_" } @{$self->{'CCs'}};
+    }
+
+    my @gitcmd = ("git", "push");
+    push @gitcmd, @{$self->{'arguments'}};
+    push @gitcmd, join '', @reviewers if(scalar @reviewers); # Single argument to git push
+    push @gitcmd, $self->{'remote'}, "$self->{'ref-from'}:$self->{'ref-to'}";
+
+    print '+'.join(',', @gitcmd)."\n" if ($self->{'verbose'});
+    exit system(@gitcmd);
+}
+
+sub new
+{
+    my ($class, @arguments) = @_;
+
+    my $self = {};
+    bless $self, $class;
+
+    $self->{'verbose'} = 0;
+
+    $self->{'remote'} = "gerrit";
+    $self->{'remote-override'} = 0;
+    $self->{'ref-from'} = "HEAD";
+    $self->{'ref-to'} = "";
+    $self->{'ref-override'} = 0;
+
+    $self->{'aliases'} = ();
+
+    $self->{'reviewers'} = [];
+    $self->{'CCs'} = [];
+
+    $self->{'arguments'} = [];
+
+    $self->load_aliases;
+    $self->parse_arguments(@arguments);
+    return $self;
+}
+
+sub run
+{
+    my ($self) = @_;
+    $self->push_patches;
+}
+
+#==============================================================================
+
+Git::Gerrit::Push->new(@ARGV)->run if (!caller);
+1;

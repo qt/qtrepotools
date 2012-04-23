@@ -1,0 +1,33 @@
+# This file contains a mapping of #qt-labs et al. IRC nicks to Gerrit username, allowing for easy
+# assigning of reviewers through the 'git gpush' script.
+
+ossi=buddenha
+ossi|tt=buddenha
+tronical=shausman
+danimo=dmolkent
+dt|tt=dt
+dt|home=dt
+fkleint=kleint
+sahumada=seahumad
+torarne=vestbo
+jbarron=jabarron
+paulot=tvete
+ddenis=dzyubenk
+msorvig=sorvig
+thiago=thiago-intel
+mariusso=stormols
+mstormo=stormols
+sroedal=rodal
+shanek=shkearns
+lars=laknoll
+jlind=jolind
+bnilsen=bjnilsen
+fregl=frederik
+bhughes-mpd=bhughes
+harryf=fernenge
+khansen=kenthans
+anshaw=andysh
+steveire=stephen.kelly
+bogdan=taipan
+roberto__=raggi
+jobor=jbornema
