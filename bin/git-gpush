@@ -12,7 +12,6 @@ use warnings;
 package Git::Gerrit::Push;
 
 use File::Basename;
-use Switch;
 
 # Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
 # may not (msysgit for example) support this module, even if it's considered a Core module.
