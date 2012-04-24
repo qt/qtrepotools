@@ -40,6 +40,9 @@ Description:
     and if you only want it local in the current repository, just drop
     the --global option.
 
+    An alias may contain multiple comma-separated email addresses;
+    for example, to set a single alias for an entire team.
+
     If no sha1 or ref-from is specified or configured, 'HEAD' is used.
     You may configure a ref-from like this
         git config gpush.ref-from <ref-from value>
@@ -101,9 +104,9 @@ sub parse_arguments
             push @{$self->{'arguments'}}, @arguments;
             return;
         } elsif ($arg =~ /^\+(.+)/) {
-            push @{$self->{'reviewers'}}, $self->lookup_alias($1);
+            push @{$self->{'reviewers'}}, split(/,/, $self->lookup_alias($1));
         } elsif ($arg =~ /^\=(.+)/) {
-            push @{$self->{'CCs'}}, $self->lookup_alias($1);
+            push @{$self->{'CCs'}}, split(/,/, $self->lookup_alias($1));
         } elsif ($arg =~ /^\-(.+)/) {
             push @{$self->{'arguments'}}, $arg;
         } elsif (!$self->{'remote-override'} || !$self->{'ref-override'}) {
