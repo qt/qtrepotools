@@ -477,9 +477,7 @@ sub checkoutInitialBranch
     my ($mod) = @_;
     # -- Special treatment for webkit: Do not touch.
     return if ($mod eq 'qtwebkit');
-    # Which branch are we on?
-    my $rc = execute($git, ('fetch', '--all'));
-    die 'fetch of ' . $mod . ' failed'  if ($rc);
+    # Determine branch
     my @branches = split("\n", `"$git" branch`);
     my @currentBranches = grep(/^\* /, @branches);
     die ('Unable to determine branch of ' . $mod) if @currentBranches != 1;
@@ -489,6 +487,9 @@ sub checkoutInitialBranch
         print ' branch: ',$currentBranch,"\n";
         return;
     }
+    # Fetch all
+    my $rc = execute($git, ('fetch', '--all'));
+    die 'fetch of ' . $mod . ' failed'  if ($rc);
     # Switch to suitable branch when none is set initially.
     my $desiredBranch = $preferredBranches{$mod};
     if (defined($desiredBranch) && $desiredBranch eq '') {
@@ -571,8 +572,8 @@ if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) 
     print $configFileHandle 'configureArguments=', $newConfigureArguments, "\n" if $newConfigureArguments ne '';
     print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
     print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
-    print $configFileHandle $developerBuildConfigKey, "=true\n" if $newNokiaDeveloper;
-    print $configFileHandle $nokiaDeveloperConfigKey, "=true\n" if $newDeveloperBuild;
+    print $configFileHandle $developerBuildConfigKey, "=true\n" if $newDeveloperBuild;
+    print $configFileHandle $nokiaDeveloperConfigKey, "=true\n" if $newNokiaDeveloper;
     $configFileHandle->close();
     print "Wrote '",$configFile, "'\n\n";
 }
