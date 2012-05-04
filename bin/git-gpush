@@ -190,7 +190,12 @@ sub push_patches
         die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
         chomp $trackref;
         $trackref =~ s,^refs/heads/,,;
-        $self->{'ref-to'} = "refs/for/$trackref";
+        $self->{'ref-to'} = $trackref;
+    }
+    if ($self->{'ref-to'} =~ m,^refs/for/,) {
+        print STDERR "Notice: it is unnecessary to specify refs/for/ in the target ref.\n";
+    } else {
+        $self->{'ref-to'} = "refs/for/".$self->{'ref-to'};
     }
 
     my @reviewers = ();
