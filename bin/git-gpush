@@ -111,8 +111,8 @@ sub parse_arguments
             push @{$self->{'arguments'}}, $arg;
         } elsif (!$self->{'remote-override'} || !$self->{'ref-override'}) {
             if ($arg =~ /(.*):(.*)/) {
-                $self->{'ref-from'} = "$1" if (defined $1 && $1 ne "");
-                $self->{'ref-to'} = "$2" if (defined $2 && $2 ne "");
+                $self->{'ref-from'} = $1 if (defined $1 && $1 ne "");
+                $self->{'ref-to'} = $2 if (defined $2 && $2 ne "");
                 $self->{'ref-override'} = 1;
             } else {
                 $self->{'remote'} = $arg;
