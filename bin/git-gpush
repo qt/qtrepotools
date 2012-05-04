@@ -183,8 +183,13 @@ sub push_patches
     # Detect tracking branch if ref-to is not set
     if ($self->{'ref-to'} eq "") {
         my $ref = `git symbolic-ref -q $self->{'ref-from'}`;
-        die "Detached HEAD mode. I won't know where to push to.\n" if ($? != 0);
-        chomp $ref;
+        if ($? == 0) {
+            chomp $ref;
+        } else {
+            $ref = $self->{'ref-from'};
+            system("git", "rev-parse", "--verify", "-q", $ref);
+            die "Unrecognized source $ref.\n" if ($? != 0);
+        }
         $ref =~ s,^refs/heads/,,;
         my $trackref = `git config branch.$ref.merge`;
         die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
