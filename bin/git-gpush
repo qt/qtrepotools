@@ -184,12 +184,12 @@ sub push_patches
     if ($self->{'ref-to'} eq "") {
         my $ref = `git symbolic-ref -q $self->{'ref-from'}`;
         die "Detached HEAD mode. I won't know where to push to.\n" if ($? != 0);
-        $ref =~ s,refs/heads/(\S+).*,$1,;
         chomp $ref;
+        $ref =~ s,^refs/heads/,,;
         my $trackref = `git config branch.$ref.merge`;
         die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
-        $trackref =~ s,refs/heads/(\S+).*,$1,;
         chomp $trackref;
+        $trackref =~ s,^refs/heads/,,;
         $self->{'ref-to'} = "refs/for/$trackref";
     }
 
