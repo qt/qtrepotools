@@ -58,17 +58,14 @@ Description:
     options are passed on directly to the normal 'git push' command.
     If you want to avoid specifying all options first, any options
     specified after a '--' are also passed on directly to the
-    underlying 'git push' command.
+    underlying 'git push' command. This is can be particularly useful
+    with the -n/--dry-run options, which make git do everything except
+    actually sending the updates.
 
 Options:
     -v, --verbose
         Shows the alias resolving, and final 'git push' command as a
         comma-separated list of arguments.
-
-    -n, --dry-run
-        Do everything except actually send the updates.
-        Can be combined with --verbose to see the final command gpush
-        will run.
 
     --aliases
         Reports all registered aliases.
