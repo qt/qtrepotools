@@ -94,7 +94,7 @@ sub parse_arguments
                 print "$key = $self->{'aliases'}->{$key}\n";
             }
             exit 0;
-        } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "--help") {
+        } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
             $self->usage();
             exit 0;
         } elsif ($arg eq "--") {
