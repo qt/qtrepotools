@@ -7,6 +7,7 @@
 #
 
 use strict;
+use Cwd;
 
 if ($#ARGV < 0 or $#ARGV > 1 || ($#ARGV == 1 && $ARGV[1] !~ /^(strict|gerrit)$/)) {
     print STDERR "Usage: $0 <sha1> [strict]\n";
@@ -16,9 +17,24 @@ my $sha1 = $ARGV[0];
 my $gerrit = ($#ARGV == 1 && $ARGV[1] eq "gerrit");
 my $strict = $gerrit || ($#ARGV == 1 && $ARGV[1] eq "strict");
 
+my $repo = getcwd();
+$repo =~ s,/?\.git$,,;
+$repo =~ s,^.*/,,;
+my %config = ();
+for (`git config --list`) {
+    if (/^sanity\.\Q$repo\E\.([^=]+)=(.*$)/) {
+        $config{$1} = $2;
+    }
+}
+
 my %cfg = ();
 if (defined $ENV{GIT_PUSH}) {
     foreach my $c (split ",", $ENV{GIT_PUSH}) {
+        $cfg{$c} = 1;
+    }
+}
+if (defined $config{flags}) {
+    foreach my $c (split ",", $config{flags}) {
         $cfg{$c} = 1;
     }
 }
