@@ -281,33 +281,46 @@ sub diff
   return $totalDiff;
 }
 
-# ---- Run git in root and module folders.
-#      Do not use 'git submodules foreach' to be able to work on partially corrupt repositories
+# ---- runGit() Run git in the current directory.
+
+my $RUN_GIT_FAILMODE_EXIT = 0;
+my $RUN_GIT_FAILMODE_IGNORE = 1;
+my $RUN_GIT_FAILMODE_RETRY = 2;
 
 sub runGit
 {
-    my ($argListRef, $keepGoing) = @_;
-    my $argString = join(' ', @$argListRef);
-    print 'Running ', $argString, "\n";
-    my $runRC = execute($git, @$argListRef);
-    if ($runRC) {
-       if ($keepGoing) {
-          warn($argString . ' failed in root.');
-       } else {
-          die ($argString . ' failed in root.');
-       }
+    my ($argListRef, $failMode, $module) = @_;
+    $failMode = $RUN_GIT_FAILMODE_EXIT unless defined $failMode;
+    $module = '<root>' unless defined $module;
+    my $exitCode = 1;
+    for (my $r = 0; $r < 3; ++$r) {
+        $exitCode = execute($git, @$argListRef);
+        last if !$exitCode || $failMode != $RUN_GIT_FAILMODE_RETRY;
+        warn('### Retrying ' . join(' ', @$argListRef) . ' in ' .  $module);
     }
+    if ($exitCode) {
+        my $reportString = join(' ', @$argListRef) . ' failed in ' . $module . '.';
+        die ($reportString) if $failMode != $RUN_GIT_FAILMODE_IGNORE;
+        warn ($reportString);
+   }
+   return $exitCode;
+}
+
+# ---- runGitAllModules() Run git in root and module folders.
+#      Do not use 'git submodules foreach' to be able to work on
+#      partially corrupt repositories.
+
+sub runGitAllModules
+{
+    my ($argListRef, $failMode) = @_;
+    $failMode = $RUN_GIT_FAILMODE_EXIT unless defined $failMode;
+    print 'Running ', join(' ', @$argListRef), "\n";
+
+    my $runRC = runGit($argListRef, $failMode);
     foreach my $MOD (@MODULES) {
         chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
-        my $modRunRC = execute($git, @$argListRef);
-        if ($modRunRC) {
-            if ($keepGoing) {
-                warn($argString . ' failed in ' . $MOD);
-            } else {
-               die ($argString . ' failed in ' . $MOD);
-            }
-           $runRC = 1;
-        }
+        my $modRunRC = runGit($argListRef, $failMode, $MOD);
+        $runRC = 1 if $modRunRC != 0;
         chdir($rootDir);
     }
     return $runRC;
@@ -640,15 +653,15 @@ if ( $RESET !=  0 ) {
      print 'Saved ', $patch, "\n";
   }
   my @resetArgs = ('reset','--hard');
-  runGit(\@resetArgs, 1);
+  runGitAllModules(\@resetArgs, $RUN_GIT_FAILMODE_IGNORE);
 }
 
 # --------------- Status.
 if ( $STATUS !=  0 ) {
     my @branchArgs = ('branch', '-v');
-    runGit(\@branchArgs, 1);
+    runGitAllModules(\@branchArgs, $RUN_GIT_FAILMODE_IGNORE);
     my @statusArgs = ('status');
-    runGit(\@statusArgs, 1);
+    runGitAllModules(\@statusArgs, $RUN_GIT_FAILMODE_IGNORE);
 }
 
 #   --------------- TEST: Run auto-tests in relevant modules
@@ -804,8 +817,7 @@ if (defined $optGerritModule) {
 if ( $CLEAN !=  0 ) {
   print 'Cleaning Qt 5 in ',$rootDir,"\n";
   my @cleanArgs = ('clean','-dxf');
-  executeCheck($git, @cleanArgs);
-  runGit(\@cleanArgs);
+  runGitAllModules(\@cleanArgs, $RUN_GIT_FAILMODE_RETRY);
 }
 
 # ---- Pull: Switch to branch unless there is one (check preferred
@@ -813,14 +825,15 @@ if ( $CLEAN !=  0 ) {
 
 if ( $PULL !=  0 ) {
     print 'Pulling Qt 5 in ',$rootDir,"\n";
-    my $prc = execute($git, ('pull'));
+    my @pullArgs = ('pull');
+    my $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY);
     die 'Pull failed'  if ($prc);
     foreach my $MOD (@MODULES) {
         print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
         chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
         checkoutInitialBranch($MOD);
         print 'Pulling ', $MOD, "\n";
-        $prc = execute($git, ('pull'));
+        $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY, $MOD);
         die 'Pull ' . $MOD . ' failed'  if ($prc);
         chdir($rootDir);
    } # foreach
