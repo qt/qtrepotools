@@ -179,15 +179,16 @@ sub push_patches
 
     # Detect tracking branch if ref-to is not set
     if ($self->{'ref-to'} eq "") {
-        my $ref = `git symbolic-ref -q $self->{'ref-from'}`;
+        my $ref = $self->{'ref-from'};
+        $ref =~ s/[~^].*$//;
+        my $sref = `git symbolic-ref -q $ref`;
         if ($? == 0) {
-            chomp $ref;
-        } else {
-            $ref = $self->{'ref-from'};
-            system("git", "rev-parse", "--verify", "-q", $ref);
-            die "Unrecognized source $ref.\n" if ($? != 0);
+            chomp $sref;
+            $ref = $sref;
         }
         $ref =~ s,^refs/heads/,,;
+        `git rev-parse --verify -q refs/heads/$ref`;
+        die "Cannot detect tracking branch, $ref is not a valid ref.\n" if ($? != 0);
         my $trackref = `git config branch.$ref.merge`;
         die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
         chomp $trackref;
