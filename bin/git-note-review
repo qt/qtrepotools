@@ -6,15 +6,28 @@
 # See the file LICENSE from this package for details.
 #
 
+force=false
+while test $# != 0; do
+    case $1 in
+        -f) force=true;;
+        -*) echo "Unrecognized option $1." >&2; exit 1;;
+        *) break;;
+    esac
+    shift
+done
+
 if test -z "$2"; then
     cat >&2 <<EOF
-Usage: $0 <user> <sha-1>...
+Usage: $0 [-f] <user> <sha-1>...
 
 git-note-review adds Reviewed-by: lines to the log messages of the
 named commits. Commits can be specified as either as a single sha1 or
 as a sha1_excl..sha1_incl range (see git rev-list).
 If any <whatever>-by: tag with the specified <user> is found to be
 already present in a given commit, the commit is skipped.
+If -f is specified, the check whether the commits were already pushed
+is omitted. This only makes sense if you are planning to make a forced
+push.
 EOF
     exit 1
 fi
@@ -90,7 +103,7 @@ fi
 #    exit 1
 #fi
 # This should be Good Enough (TM), and it is rather fast.
-if test -n "$(git rev-list -1 $firstSHA1^..@{upstream})"; then
+if ! $force && test -n "$(git rev-list -1 $firstSHA1^..@{upstream})"; then
     echo "Commit `git rev-parse --short $firstSHA1` has already been pushed - cannot edit it." >&2
     exit 1
 fi
