@@ -149,6 +149,7 @@ def prepare_qt_sources():
         if not bldinstallercommon.is_content_url_valid(QT_SRC_PACKAGE_URL):
             print '*** Qt src package url is invalid! Abort!'
             sys.exit(-1)
+        urllib.urlcleanup()
         urllib.urlretrieve(QT_SRC_PACKAGE_URL, QT_SRC_PACKAGE_URL_SAVE_AS)
     else:
         print 'Found old local package, using that: ' + QT_SRC_PACKAGE_URL_SAVE_AS
@@ -189,6 +190,7 @@ def build_qt():
     else:
         cmd_args = QT_CONFIGURE_BIN + ' ' + QT_INSTALLERFW_QT_CONFIGURE_LINE + QT_BUILD_DIR
     bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_BUILD_DIR, True)
+
     print '--------------------------------------------------------------------'
     print 'Building Qt'
     cmd_args = MAKE_CMD
@@ -229,6 +231,7 @@ def build_installer_framework():
 
     cmd_args = qmake_bin + ' ' + INSTALLER_FRAMEWORK_QMAKE_ARGS + ' ' + INSTALLER_FRAMEWORK_SOURCE_DIR
     bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), INSTALLER_FRAMEWORK_BUILD_DIR, True)
+
     cmd_args = MAKE_CMD
     bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), INSTALLER_FRAMEWORK_BUILD_DIR, True)
 
@@ -269,6 +272,7 @@ def archive_installer_framework():
         for filename in files:
             if filename.endswith(('.moc', 'Makefile', '.cpp', '.h', '.o')) or filename == 'Makefile':
                 os.remove(os.path.join(root, filename))
+
     cmd_args = ['7z', 'a', INSTALLER_FRAMEWORK_ARCHIVE_NAME, os.path.basename(INSTALLER_FRAMEWORK_BUILD_DIR)]
     bldinstallercommon.do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
 
@@ -362,9 +366,24 @@ def archive_qt():
     if not archive_name:
         print '*** Error! macdeployqt_archive_name not defined?!'
         sys.exit(-1)
+    # these directories can be deleted from the Qt binary package (built for SDK purposes only)
+    directories_to_delete = ['config.tests', 'src', 'qmake', 'doc', 'imports', 'lib' + os.sep + 'pkgconfig', 'tools']
+    for item in directories_to_delete:
+        full_path = content_path + os.sep + item
+        if os.path.exists(full_path) and not os.path.islink(full_path):
+            print 'Deleting: ' + item
+            shutil.rmtree(full_path)
+    # then strip out all remaining unnecessary files
+    for root, dirs, files in os.walk(content_path + os.sep + 'bin'):
+        for filename in files:
+            if filename.endswith(('.moc', 'Makefile', '.cpp', '.h', '.o')) or filename == 'Makefile':
+                os.remove(os.path.join(root, filename))
+            if filename.startswith(('designer', 'assistant', 'qcollectiongenerator', 'linguist', 'qhelpconverter', 'qhelpgenerator', 'pixeltool', 'qdoc3', 'qt3to4')):
+                os.remove(os.path.join(root, filename))
+    # archive libraries
     cmd_args_archive = ['7z', 'a', archive_name, content_path]
     bldinstallercommon.do_execute_sub_process(cmd_args_archive, SCRIPT_ROOT_DIR, True)
-
+    # check archive was generated successfully
     if not os.path.isfile(archive_name):
         print '*** Failed to generate archive: ' + archive_name
         sys.exit(-1)

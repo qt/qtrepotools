@@ -29,52 +29,62 @@
 ###############################################
 
 """Scripts to generate SDK installer based on open source InstallerFramework"""
+
 import ConfigParser
 import os
 import shutil
 import sys
 from time import gmtime, strftime
 import urllib
+
 import bldinstallercommon
 import bld_ifw_tools_impl
+from archiveresolver import ArchiveLocationResolver
+from sdkcomponent import SdkComponent
 
-BUILD_TIMESTAMP         = strftime('%d-%b-%Y', gmtime())
-CONFIG_COMMON           = 0
-CONFIG_TARGET           = 0
-PLATFORM_IDENTIFIER     = ''
-CONFIG_NAME             = ''
-SCRIPT_ROOT_DIR         = os.getcwd()
-GENERAL_TAG_SUBST_LIST  = []
-CONFIGURATIONS_DIR      = 'configurations'
-COMMON_CONFIG_NAME      = 'common'
-REPO_OUTPUT_DIR         = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + 'repository')
-SDK_VERSION_NUMBER      = ''
-PACKAGES_DIR_NAME       = ''
-PACKAGES_FULL_PATH_SRC  = ''
-PACKAGES_FULL_PATH_DST  = ''
-ROOT_COMPONENT_NAME     = ''
-CONFIG_XML_TARGET_DIR   = ''
-PACKAGES_NAMESPACE      = ''
-IFW_TOOLS_DIR           = ''
-ARCHIVEGEN_TOOL         = ''
-BINARYCREATOR_TOOL      = ''
-INSTALLERBASE_TOOL      = ''
-REPOGEN_TOOL            = ''
-SDK_NAME_ROOT           = ''
-SDK_NAME                = ''
-DEBUG_RPATH             = False
-DUMP_CONFIG             = False
-# force development mode as default. Change to False if using pre-built package
-DEVELOPMENT_MODE        = True
-OFFLINE_MODE            = False
-TESTCLIENT_MODE         = False
+# ----------------------------------------------------------------------
+BUILD_TIMESTAMP             = strftime('%d-%b-%Y', gmtime())
+CONFIG_PARSER_COMMON        = 0
+CONFIG_PARSER_TARGET        = 0
+PLATFORM_IDENTIFIER         = ''
+MAIN_CONFIG_NAME            = ''
+SCRIPT_ROOT_DIR             = os.getcwd()
+GENERAL_TAG_SUBST_LIST      = []
+CONFIGURATIONS_DIR          = 'configurations'
+CONFIG_DIR_DST              = 'config'
+COMMON_CONFIG_NAME          = 'common'
+COMMON_CONFIG_DIR_NAME      = 'all-os'
+REPO_OUTPUT_DIR             = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + 'repository')
+SDK_VERSION_NUMBER          = ''
+PACKAGES_DIR_NAME_LIST      = []
+PACKAGES_FULL_PATH_DST      = 'pkg'
+ROOT_COMPONENT_NAME         = ''
+PACKAGE_NAMESPACE           = ''
+IFW_TOOLS_DIR               = ''
+ARCHIVEGEN_TOOL             = ''
+BINARYCREATOR_TOOL          = ''
+INSTALLERBASE_TOOL          = ''
+REPOGEN_TOOL                = ''
+SDK_NAME_ROOT               = ''
+SDK_NAME                    = ''
+DEBUG_RPATH                 = False
+DUMP_CONFIG                 = False
+DEVELOPMENT_MODE            = False
+OFFLINE_MODE                = False
+TESTCLIENT_MODE             = False
+ARCHIVE_LOCATION_RESOLVER   = None
+SDK_COMPONENT_LIST          = []
+SDK_COMPONENT_IGNORE_LIST   = []
 
-IFW_DOWNLOADABLE_ARCHIVE_NAMES_TAG  = '%IFW_DOWNLOADABLE_ARCHIVE_NAMES%'
 TARGET_INSTALL_DIR_NAME_TAG         = '%TARGET_INSTALL_DIR%'
 PACKAGE_DEFAULT_TAG                 = '%PACKAGE_DEFAULT_TAG%'
 SDK_VERSION_NUM_TAG                 = '%SDK_VERSION_NUM%'
 UPDATE_REPOSITORY_URL_TAG           = '%UPDATE_REPOSITORY_URL%'
 PACKAGE_CREATION_DATE_TAG           = '%PACKAGE_CREATION_DATE%'
+INSTALL_PRIORITY_TAG                = '%INSTALL_PRIORITY%'
+SORTING_PRIORITY_TAG                = '%SORTING_PRIORITY%'
+# ----------------------------------------------------------------------
+
 
 ##############################################################
 # Start
@@ -85,7 +95,7 @@ def main():
         create_installer()
         sys.exit(0)
     else:
-        printInfo()
+        print_info()
         sys.exit(-1)
 
 
@@ -102,9 +112,29 @@ def print_info():
     print ''
     print 'Optional arguments:'
     print '  <offline>    Creates offline installer'
-    print '  <devmode>    Builds Qt and IFW. Enabled by default. (does not download pre-build IFW)'
+    print '  <devmode>    Builds Qt and IFW (does not download pre-build IFW)'
     print '  <testclient> Creates installer for RnD testing purposes only (different dist server used)'
     print ''
+
+
+##############################################################
+# Check that valid tools are present in the build environment
+##############################################################
+def check_required_tools():
+    """Check that valid tools are present in the build environment."""
+    found = False
+    tool_name = '7z'
+    if bldinstallercommon.is_win_platform():
+        tool_name = tool_name + '.exe'
+    for p in os.environ["PATH"].split(os.pathsep):
+        found = os.path.exists(os.path.join(p, tool_name))
+        if found:
+            break
+
+    if not found:
+        print '*** Error! Required tools are not present in the system (7z)'
+        print '*** Abort!'
+        sys.exit(-1)
 
 
 ##############################################################
@@ -116,6 +146,7 @@ def check_platform_identifier(platform_identifier):
     if os.path.exists(path_to_be_checked):
         return
     print '*** Unsupported platform identifier given: ' + platform_identifier
+    print '*** Following directory can not be found:   ' + path_to_be_checked
     sys.exit(-1)
 
 
@@ -124,7 +155,7 @@ def check_platform_identifier(platform_identifier):
 ##############################################################
 def check_configuration_file(configuration_name):
     """ Check if valid configuration file """
-    path_to_be_checked = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + PLATFORM_IDENTIFIER + os.sep + configuration_name
+    path_to_be_checked = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + configuration_name
     if os.path.isfile(path_to_be_checked):
         return
     print '*** Unable to find given configuration file: ' + path_to_be_checked
@@ -137,22 +168,18 @@ def check_configuration_file(configuration_name):
 def parse_cmd_line():
     """Parse command line arguments."""
     arg_count = len(sys.argv)
-    if arg_count < 3:
+    if arg_count < 2:
         return False
 
-    global PLATFORM_IDENTIFIER
-    global CONFIG_NAME
+    global MAIN_CONFIG_NAME
     global DEVELOPMENT_MODE
     global OFFLINE_MODE
     global TESTCLIENT_MODE
 
-    PLATFORM_IDENTIFIER = sys.argv[1]
-    CONFIG_NAME = sys.argv[2]
-    check_platform_identifier(PLATFORM_IDENTIFIER)
-    check_configuration_file(CONFIG_NAME)
-
-    if(arg_count > 3):
-        counter = 3
+    MAIN_CONFIG_NAME = sys.argv[1]
+    check_configuration_file(MAIN_CONFIG_NAME)
+    if(arg_count > 2):
+        counter = 2
         while(counter < arg_count):
             argument = sys.argv[counter].lower()
             if 'devmode' == argument:
@@ -164,9 +191,7 @@ def parse_cmd_line():
             else:
                 print '*** Unsupported argument given: ' + argument
                 sys.exit(-1)
-
             counter = counter + 1
-
     return True
 
 
@@ -176,64 +201,76 @@ def parse_cmd_line():
 def init_data():
     """Init data based on configuration files."""
     print '----------------------------------------'
-    print 'Init Data'
-    global CONFIG_COMMON
-    global CONFIG_TARGET
-    global PACKAGES_DIR_NAME
+    print ' Init Data'
+    global CONFIG_PARSER_COMMON
+    global CONFIG_PARSER_TARGET
+    global PACKAGES_DIR_NAME_LIST
     global SDK_VERSION_NUMBER
     global SDK_NAME
     global SDK_NAME_ROOT
-    global PACKAGES_NAMESPACE
-    global PACKAGES_FULL_PATH_SRC
+    global PACKAGE_NAMESPACE
     global PACKAGES_FULL_PATH_DST
     global IFW_TOOLS_DIR
+    global ARCHIVE_LOCATION_RESOLVER
+    global CONFIG_DIR
+    global PLATFORM_IDENTIFIER
 
     if DEVELOPMENT_MODE:
-        print '--------------------------'
-        print '[Development mode enabled]'
-        print '--------------------------'
+        print ' --------------------------'
+        print ' [Development mode enabled]'
+        print ' --------------------------'
 
-    common_conf_path = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + PLATFORM_IDENTIFIER + os.sep + COMMON_CONFIG_NAME
-    target_conf_path = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + PLATFORM_IDENTIFIER + os.sep + CONFIG_NAME
-    CONFIG_COMMON = ConfigParser.ConfigParser()
-    print 'Parsing: ' + common_conf_path
-    CONFIG_COMMON.readfp(open(common_conf_path))
-    CONFIG_TARGET = ConfigParser.ConfigParser()
-    print 'Parsing: ' + target_conf_path
-    CONFIG_TARGET.readfp(open(target_conf_path))
+    common_conf_path = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + COMMON_CONFIG_DIR_NAME + os.sep + COMMON_CONFIG_NAME
+    target_conf_path = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + MAIN_CONFIG_NAME
+    CONFIG_PARSER_COMMON = ConfigParser.ConfigParser()
+    print ' Parsing: ' + common_conf_path
+    CONFIG_PARSER_COMMON.readfp(open(common_conf_path))
+    CONFIG_PARSER_TARGET = ConfigParser.ConfigParser()
+    print ' Parsing: ' + target_conf_path
+    CONFIG_PARSER_TARGET.readfp(open(target_conf_path))
 
-    PACKAGES_DIR_NAME   = bldinstallercommon.config_section_map(CONFIG_TARGET,'WorkingDirectories')['packages_dir']
+    PLATFORM_IDENTIFIER = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'PlatformIdentifier')['identifier']
+    check_platform_identifier(PLATFORM_IDENTIFIER)
+    CONFIG_DIR_DST      = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + 'config')
+    PACKAGES_DIR_NAME   = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'WorkingDirectories')['packages_dir']
     PACKAGES_DIR_NAME   = os.path.normpath(PACKAGES_DIR_NAME)
-    SDK_VERSION_NUMBER  = bldinstallercommon.config_section_map(CONFIG_COMMON,'SdkCommon')['version']
-    SDK_NAME            = bldinstallercommon.config_section_map(CONFIG_COMMON,'SdkCommon')['name']
+    SDK_VERSION_NUMBER  = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['version']
+    SDK_NAME            = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['name']
     SDK_NAME_ROOT       = SDK_NAME
-    PACKAGES_NAMESPACE  = bldinstallercommon.config_section_map(CONFIG_TARGET,'PackagesNamespace')['name']
-    # if the packages directory name is absolute path, then the packages templates (or static packages)
-    # can reside outside the "<script_root_dir>/configurations" folder
-    # otherwise the packages templates must be under "/configurations"
-    if os.path.isabs(PACKAGES_DIR_NAME):
-        PACKAGES_FULL_PATH_SRC = os.path.normpath(PACKAGES_DIR_NAME)
-        PACKAGES_FULL_PATH_DST = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + os.path.basename(PACKAGES_DIR_NAME))
-    else:
-        PACKAGES_FULL_PATH_SRC = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + PACKAGES_DIR_NAME)
-        PACKAGES_FULL_PATH_DST = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + PACKAGES_DIR_NAME)
+    PACKAGE_NAMESPACE   = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'PackageNamespace')['name']
+
+    PACKAGES_FULL_PATH_DST = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + PACKAGES_FULL_PATH_DST)
+    packages_list_raw      = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'WorkingDirectories')['packages_dir']
+    packages_list_raw      = packages_list_raw.replace(' ', '')
+    packages_list          = packages_list_raw.split(',')
+    for package_template_dir in packages_list:
+        package_template_dir = os.path.normpath(package_template_dir)
+        # if the packages directory name is absolute path, then the packages templates (or static packages)
+        # can reside outside the "<script_root_dir>/configurations" folder
+        # otherwise the packages templates must be under "/configurations"
+        if os.path.isabs(package_template_dir):
+            PACKAGES_DIR_NAME_LIST.append(package_template_dir)
+        else:
+            PACKAGES_DIR_NAME_LIST.append(os.path.normpath(SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + package_template_dir))
 
     if OFFLINE_MODE:
         SDK_NAME = SDK_NAME + '-offline'
     else:
         SDK_NAME = SDK_NAME + '-online'
-
     if TESTCLIENT_MODE:
         SDK_NAME = SDK_NAME + '-RnD_testclient'
-
     if not DEVELOPMENT_MODE:
-        tools_dir_name = bldinstallercommon.config_section_map(CONFIG_TARGET,'InstallerFrameworkTools')['name']
+        tools_dir_name = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'InstallerFrameworkTools')['name']
         IFW_TOOLS_DIR = SCRIPT_ROOT_DIR + os.sep + tools_dir_name
         IFW_TOOLS_DIR = os.path.normpath(IFW_TOOLS_DIR)
 
+    # init data for archive locator
+    ARCHIVE_LOCATION_RESOLVER = ArchiveLocationResolver(CONFIG_PARSER_TARGET, TESTCLIENT_MODE)
+    ARCHIVE_LOCATION_RESOLVER.print_server_list()
+
     if DUMP_CONFIG:
-        bldinstallercommon.dump_config(CONFIG_COMMON, COMMON_CONFIG_NAME)
-        bldinstallercommon.dump_config(CONFIG_TARGET, CONFIG_NAME)
+        bldinstallercommon.dump_config(CONFIG_PARSER_COMMON, COMMON_CONFIG_NAME)
+        bldinstallercommon.dump_config(CONFIG_PARSER_TARGET, MAIN_CONFIG_NAME)
 
 
 ##############################################################
@@ -242,36 +279,34 @@ def init_data():
 def clean_work_dirs():
     """Clean working directories."""
     print '----------------------------------------'
-    print 'Cleaning environment'
+    print ' Cleaning environment'
 
     # delete "/packages"
     if os.path.exists(PACKAGES_FULL_PATH_DST):
         bldinstallercommon.remove_tree(PACKAGES_FULL_PATH_DST)
-        print '-> deleted old existing directory: ' + PACKAGES_FULL_PATH_DST
+        print ' -> deleted old existing directory: ' + PACKAGES_FULL_PATH_DST
     # delete "/ifw-tools"
     if os.path.exists(IFW_TOOLS_DIR):
         bldinstallercommon.remove_tree(IFW_TOOLS_DIR)
-        print '-> deleted old existing directory: ' + IFW_TOOLS_DIR
+        print ' -> deleted old existing directory: ' + IFW_TOOLS_DIR
     # delete "/repositories"
     if os.path.exists(REPO_OUTPUT_DIR):
         bldinstallercommon.remove_tree(REPO_OUTPUT_DIR)
-        print '-> deleted old existing directory: ' + REPO_OUTPUT_DIR
+        print ' -> deleted old existing directory: ' + REPO_OUTPUT_DIR
     # delete "/config"
-    config_dir_dest = bldinstallercommon.config_section_map(CONFIG_TARGET,'ConfigDir')['target_dir']
-    config_dir_dest = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + config_dir_dest)
-    if os.path.exists(config_dir_dest):
-        bldinstallercommon.remove_tree(config_dir_dest)
-        print '-> deleted old existing directory: ' + config_dir_dest
+    if os.path.exists(CONFIG_DIR_DST):
+        bldinstallercommon.remove_tree(CONFIG_DIR_DST)
+        print ' -> deleted old existing directory: ' + CONFIG_DIR_DST
     # delete sdk binary files
     fileList = os.listdir(SCRIPT_ROOT_DIR)
     for fname in fileList:
         if fname.startswith(SDK_NAME_ROOT):
             full_fn = SCRIPT_ROOT_DIR + os.sep + fname
             if os.path.isdir(full_fn):
-                print '-> deleted ' + full_fn
+                print ' -> deleted ' + full_fn
                 bldinstallercommon.remove_tree(full_fn)
             else:
-                print '-> deleted ' + full_fn
+                print ' -> deleted ' + full_fn
                 os.remove(full_fn)
 
 
@@ -280,18 +315,15 @@ def clean_work_dirs():
 ##############################################################
 def set_config_directory():
     """Copy config directory into correct place."""
-    global CONFIG_XML_TARGET_DIR
-    config_dir_template = bldinstallercommon.config_section_map(CONFIG_TARGET,'ConfigDir')['template_name']
+    print '----------------------------------------'
+    print ' Set config directory'
+    config_dir_template = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'ConfigDir')['template_name']
     config_dir_template = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + config_dir_template)
 
-    config_dir_dest = bldinstallercommon.config_section_map(CONFIG_TARGET,'ConfigDir')['target_dir']
-    config_dir_dest = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + config_dir_dest)
-    CONFIG_XML_TARGET_DIR = config_dir_dest
-
-    if not os.path.exists(config_dir_dest):
-        bldinstallercommon.create_dirs(config_dir_dest)
-    bldinstallercommon.copy_tree(config_dir_template, config_dir_dest)
-
+    if not os.path.exists(CONFIG_DIR_DST):
+        bldinstallercommon.create_dirs(CONFIG_DIR_DST)
+    bldinstallercommon.copy_tree(config_dir_template, CONFIG_DIR_DST)
+    print ' -> copied [' + config_dir_template + '] into [' + CONFIG_DIR_DST + ']'
 
 ##############################################################
 # Set the config.xml
@@ -299,27 +331,30 @@ def set_config_directory():
 def set_config_xml():
     """Copy config.xml template into correct place."""
     print '----------------------------------------'
-    print 'Set config.xml'
+    print ' Set config.xml'
 
-    configxml_filename = bldinstallercommon.config_section_map(CONFIG_TARGET,'ConfigXml')['template_name']
+    configxml_filename = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'ConfigXml')['template_name']
     config_template_source = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + PLATFORM_IDENTIFIER + os.sep + configxml_filename
     # if no config.xml template, we assume the "config" template dir already contains it
     if not os.path.exists(config_template_source):
         return
 
     # name has to be config.xml for installer-framework
-    config_template_dest_dir = CONFIG_XML_TARGET_DIR
+    config_template_dest_dir = CONFIG_DIR_DST
     config_template_dest = config_template_dest_dir + os.sep + 'config.xml'
 
     if os.path.exists(config_template_dest):
         os.remove(config_template_dest)
-        print '-> deleted old existing config.xml: ' + config_template_dest
+        print ' -> deleted old existing config.xml: ' + config_template_dest
     if not os.path.exists(config_template_dest_dir):
         bldinstallercommon.create_dirs(config_template_dest_dir)
     shutil.copy(config_template_source, config_template_dest)
-    print '-> copied [' + config_template_source + '] into [' + config_template_dest + ']'
+    print ' -> copied [' + config_template_source + '] into [' + config_template_dest + ']'
 
-    update_repository_url = bldinstallercommon.config_section_map(CONFIG_TARGET,'SdkUpdateRepository')['repository_url']
+    if TESTCLIENT_MODE:
+        update_repository_url = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'SdkUpdateRepository')['repository_url_rnd']
+    else:
+        update_repository_url = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'SdkUpdateRepository')['repository_url_release']
 
     fileslist = [config_template_dest]
     bldinstallercommon.replace_in_files(fileslist, SDK_VERSION_NUM_TAG, SDK_VERSION_NUMBER)
@@ -331,10 +366,10 @@ def set_config_xml():
 ##############################################################
 def substitute_global_tags():
     """ Substitute common version numbers etc., match against tags """
-    print '      ----------------------------------------'
-    print '      Substituting global tags:'
-    print '      %PACKAGE_CREATION_DATE% = ' + BUILD_TIMESTAMP
-    print '      %SDK_VERSION_NUM%       = ' + SDK_VERSION_NUMBER
+    print ' ----------------------------------------'
+    print ' Substituting global tags:'
+    print '    %PACKAGE_CREATION_DATE% = ' + BUILD_TIMESTAMP
+    print '    %SDK_VERSION_NUM%       = ' + SDK_VERSION_NUMBER
 
     # initialize the file list
     fileslist = []
@@ -355,8 +390,8 @@ def substitute_component_tags(tag_pair_list, meta_dir_dest):
     """ Substitute component specific tags """
     if len(tag_pair_list) == 0:
         return
-    print '      ----------------------------------------'
-    print '      Substituting component specific tags:'
+    print '   ----------------------------------------'
+    print '   Substituting component specific tags'
     # initialize the file list
     fileslist = []
 
@@ -369,16 +404,16 @@ def substitute_component_tags(tag_pair_list, meta_dir_dest):
         tag = pair[0]
         value = pair[1]
         if tag and value:
-            print '      Matching [ ' + tag + ' ] and [ ' + value + ' ] in files list'
+            print '    Matching [ ' + tag + ' ] and [ ' + value + ' ] in files list'
             bldinstallercommon.replace_in_files(fileslist, tag, value)
         else:
-            print '      Warning! Ignoring incomplete tag pair [ ' + tag + ' ] for [ ' + value + ' ] pair'
+            print '    Warning! Ignoring incomplete tag pair [ ' + tag + ' ] for [ ' + value + ' ] pair'
 
 
 ##############################################################
 # Repackage content of the installable compoment
 ##############################################################
-def repackage_content_for_installation(install_dir, package_raw_name, rpath_target, package_strip_dirs, package_name, archive_name):
+def repackage_content_for_installation(install_dir, package_raw_name, target_install_base, rpath_target, package_strip_dirs, package_name, archive_name):
     """Repackage content into 7z archive."""
     # if no data to be installed, then just return
     if not package_raw_name:
@@ -386,18 +421,18 @@ def repackage_content_for_installation(install_dir, package_raw_name, rpath_targ
     if not package_strip_dirs:
         package_strip_dirs = '0'
 
-    print '        +++++++++++++++++++++++++++++++++++++++++'
-    print '        Repackage:             ' + package_raw_name
-    print '        Location:              ' + install_dir
-    print '        Dirst to be stripped:  ' + package_strip_dirs
-    if rpath_target == '':
-        print '        Relocate RPath:        No'
+    print '     +++++++++++++++++++++++++++++++++++++++++'
+    print '     Repackage:             ' + package_raw_name
+    print '     Location:              ' + install_dir
+    print '     Dirs to be stripped:   ' + package_strip_dirs
+    if not rpath_target:
+        print '     Relocate RPath:        No'
     else:
-        print '        Relocate RPath into:   ' + '(' + install_dir + ') '+ rpath_target
+        print '     Relocate RPath into:   ' + '(' + install_dir + ') '+ rpath_target
     print ''
 
-    if package_raw_name.endswith('.7z') and package_strip_dirs == '0' and not rpath_target:
-        print '        No repackaging actions requred for the package'
+    if package_raw_name.endswith('.7z') and package_strip_dirs == '0' and not rpath_target and target_install_base == '/':
+        print '     No repackaging actions requred for the package'
         return
 
     # extract contents
@@ -467,48 +502,6 @@ def archive_component(package, package_archive_name):
 
 
 ##############################################################
-# Create online components
-##############################################################
-def create_online_target_components(target_config):
-    """Create installable online installer."""
-    global GENERAL_TAG_SUBST_LIST
-    bldinstallercommon.create_dirs(PACKAGES_FULL_PATH_DST)
-
-    print '=================================================='
-    print '= Creating online SDK components'
-    print '=================================================='
-    print ''
-    for section in target_config.sections():
-        if section.startswith(PACKAGES_NAMESPACE):
-            print '--------------------------------------------------------------------------------'
-            is_root_component = bldinstallercommon.safe_config_key_fetch(target_config, section, 'root_component')
-            if is_root_component == 'yes':
-                meta_dir_dest = PACKAGES_FULL_PATH_DST + os.sep + section + os.sep + 'meta'
-                meta_dir_dest = os.path.normpath(meta_dir_dest)
-                bldinstallercommon.create_dirs(meta_dir_dest)
-                print '      Created:                ' + meta_dir_dest
-                # Copy meta data
-                metadata_content_source_root = PACKAGES_FULL_PATH_SRC + os.sep + section + os.sep + "meta"
-                metadata_content_source_root = os.path.normpath(metadata_content_source_root)
-                bldinstallercommon.copy_tree(metadata_content_source_root, meta_dir_dest)
-                # substitute required tags
-                GENERAL_TAG_SUBST_LIST.append(meta_dir_dest)
-                # check for downloadableArchiveName
-                archive_name = bldinstallercommon.safe_config_key_fetch(target_config, section, 'archive_name')
-                package_url  = bldinstallercommon.safe_config_key_fetch(target_config, section, 'package_url')
-                if len(package_url) > 0 and archive_name == '':
-                    print '*** Variable [archive_name] was empty? This is required if package content is used , check config file!'
-                    print '*** Abort!'
-                    sys.exit(-1)
-                tag_pair_list = []
-                tag_pair_list.append([IFW_DOWNLOADABLE_ARCHIVE_NAME_TAG, archive_name])
-                substitute_component_tags(tag_pair_list, meta_dir_dest)
-                return
-            else:
-                continue
-
-
-##############################################################
 # Create offline static component
 ##############################################################
 def create_offline_static_component(target_config, section, static_package_src):
@@ -529,174 +522,172 @@ def create_offline_static_component(target_config, section, static_package_src):
 
 
 ##############################################################
-# Construct archive
+# Handle archive
 ##############################################################
-def handle_archive(package_name, archive_uri, package_strip_dirs,
-                   target_install_base, target_install_dir,
-                   rpath_target, archive_name):
+def handle_archive(sdk_component, archive):
     """Handle single archive."""
-    print '      --------------------------------------------------------------'
-    print '      Handle archive:        '   + archive_name
-    print '        archive_uri:         '   + archive_uri
-    print '        package_strip_dirs:  '   + package_strip_dirs
-    print '        target_install_base: '   + target_install_base
-    print '        target_install_dir:  '   + target_install_dir
-    print '        rpath_target:        '   + rpath_target
+    print '   --------------------------------------------------------------'
+    print '   Handle archive:        '   + archive.archive_name
+    print '     archive_uri:         '   + archive.archive_uri
+    print '     package_strip_dirs:  '   + archive.package_strip_dirs
+    print '     target_install_base: '   + sdk_component.target_install_base
+    print '     target_install_dir:  '   + archive.target_install_dir
+    print '     rpath_target:        '   + archive.rpath_target
     print ''
 
-    # sanity check
-    if len(archive_uri) > 0 and not archive_name:
-        print '*** Variable [archive_name] was empty? This is required if [archive_uri] is used , check config file!'
-        print '*** Abort!'
-        sys.exit(-1)
-
     # Create needed data dirs
-    data_dir_dest = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + package_name + os.sep + 'data')
-    install_dir = os.path.normpath(data_dir_dest + os.sep + target_install_base + os.sep + target_install_dir)
+    data_dir_dest = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + sdk_component.package_name + os.sep + 'data')
+    install_dir = os.path.normpath(data_dir_dest + os.sep + sdk_component.target_install_base + os.sep + archive.target_install_dir)
     bldinstallercommon.create_dirs(install_dir)
-    print '        Created:             ' + install_dir
-
-    # transfer package from origin into destination
-    package_raw_name     = os.path.basename(archive_uri)
-    package_save_as_temp = os.path.normpath(install_dir + os.sep + os.path.basename(archive_uri))
-    if archive_uri.startswith('http'):
-        print '        Downloading:        ' + archive_uri
-        print '               into:        ' + package_save_as_temp
-        # validate url
-        res = bldinstallercommon.is_content_url_valid(archive_uri)
-        if not(res):
-            print '*** Package URL is invalid: [' + archive_uri + ']'
-            print '*** Abort!'
-            sys.exit(-1)
+    print '     -> Created:         ' + install_dir
+    # generate save as filename
+    package_raw_name     = os.path.basename(archive.archive_uri)
+    package_save_as_temp = os.path.normpath(install_dir + os.sep + os.path.basename(archive.archive_uri))
+    # if URI points to http location -> download it
+    if archive.archive_uri.startswith('http'):
+        print '     Downloading:        ' + archive.archive_uri
+        print '            into:        ' + package_save_as_temp
         # start download
-        urllib.urlretrieve(archive_uri, package_save_as_temp)
+        urllib.urlcleanup()
+        urllib.urlretrieve(archive.archive_uri, package_save_as_temp, reporthook=bldinstallercommon.dlProgress)
+        print '     Downloading completed'
     else:
-        data_content_source_root = os.path.normpath(PACKAGES_FULL_PATH_SRC + os.sep + package_name + os.sep + 'data')
-        # try first if the uri points to absolute file path
-        if os.path.isfile(archive_uri):
-            print '        Copying:             ' + archive_uri
-            print '           into:             ' + package_save_as_temp
-            shutil.copy(archive_uri, package_save_as_temp)
-        else:
-            # lastly try to check if the given file exists in the templates '/data' folder
-            temp = os.path.normpath(data_content_source_root + os.sep + archive_uri)
-            if os.path.isfile( temp ):
-                print '        Copying:             ' + temp
-                print '           into:             ' + package_save_as_temp
-                shutil.copy(temp, package_save_as_temp)
-            else:
-                print '*** Error! Unable to locate file defined by archive_uri: ' + archive_uri
-                sys.exit(-1)
+        print '     Copying:        ' + archive.archive_uri
+        print '        into:        ' + package_save_as_temp
+        # copy file on local file system or shared network drive
+        shutil.copy(archive.archive_uri, package_save_as_temp)
+        print '     Copying completed'
 
     # repackage content so that correct dir structure will get into the package
-    repackage_content_for_installation(install_dir, package_raw_name, rpath_target, package_strip_dirs, package_name, archive_name)
+    repackage_content_for_installation(install_dir, package_raw_name,
+                                       sdk_component.target_install_base,
+                                       archive.rpath_target,
+                                       archive.package_strip_dirs,
+                                       sdk_component.package_name,
+                                       archive.archive_name)
 
 
 ##############################################################
-# Generate java script code that is embedded into installscript.qs
+# Parse SDK components
 ##############################################################
-def generate_downloadable_archive_list(downloadable_archive_list):
-    """Generate java script code that is embedded into installscript.qs"""
-    output = ''
-    for item in downloadable_archive_list:
-        output = output + 'component.addDownloadableArchive(\"' + item + '\");'
+def parse_component_data(configuration_file, configurations_base_path):
+    """Parse SDK component data"""
+    global SDK_COMPONENT_LIST
+    global SDK_COMPONENT_IGNORE_LIST
+    print ' -> Reading target configuration file: ' + configuration_file
+    configuration = ConfigParser.ConfigParser()
+    configuration.readfp(open(configuration_file))
 
-    temp_list = []
-    temp_list.append([IFW_DOWNLOADABLE_ARCHIVE_NAMES_TAG, output])
-    return temp_list
+    # parse package ignore list first
+    sdk_component_exclude_list = bldinstallercommon.safe_config_key_fetch(configuration, 'PackageIgnoreList', 'packages')
+    if sdk_component_exclude_list:
+        sdk_component_exclude_list = sdk_component_exclude_list.replace(' ', '')
+        pkg_list = sdk_component_exclude_list.split(',')
+        for item in pkg_list:
+            SDK_COMPONENT_IGNORE_LIST.append(item)
+    # parse sdk components
+    for section in configuration.sections():
+        if section.startswith(PACKAGE_NAMESPACE):
+            if section not in SDK_COMPONENT_IGNORE_LIST:
+                sdk_component = SdkComponent(section, configuration, PACKAGES_DIR_NAME_LIST, ARCHIVE_LOCATION_RESOLVER)
+                SDK_COMPONENT_LIST.append(sdk_component)
+    # check for extra configuration files if defined
+    extra_conf_list = bldinstallercommon.safe_config_key_fetch(configuration, 'ExtraPackageConfigurationFiles', 'file_list')
+    if extra_conf_list:
+        extra_conf_list = extra_conf_list.replace(' ', '')
+        file_list = extra_conf_list.split(',')
+        for extra_conf_file in file_list:
+            extra_conf_file_path = os.path.normpath(configurations_base_path + os.sep + extra_conf_file)
+            if not os.path.isfile(extra_conf_file_path):
+                # then the file should exist in common (all-os) directory
+                extra_conf_file_path = os.path.normpath(CONFIGURATIONS_DIR + os.sep + COMMON_CONFIG_DIR_NAME + os.sep + extra_conf_file)
+                if not os.path.isfile(extra_conf_file_path):
+                    print '*** Error! Unable to locate configuration file: ' + extra_conf_file_path
+            # recursive call
+            parse_component_data(extra_conf_file_path, configurations_base_path)
 
 
 ##############################################################
-# Create all target components
+# Parse SDK components
 ##############################################################
-def create_offline_target_components(target_config):
-    """Create installable offline target components."""
+def parse_components(target_config):
+    """Parse SDK all components"""
+    print '----------------------------------------'
+    print ' Parse target configuration files'
+    conf_base_path = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + PLATFORM_IDENTIFIER + os.sep
+    main_conf_file = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + MAIN_CONFIG_NAME
+    parse_component_data(main_conf_file, conf_base_path)
+    return
+
+
+##############################################################
+# Create target components
+##############################################################
+def create_target_components(target_config, offline_mode):
+    """Create target components."""
     global ROOT_COMPONENT_NAME
     bldinstallercommon.create_dirs(PACKAGES_FULL_PATH_DST)
 
-    print '=================================================='
+    print '================================================================='
     print '= Creating offline SDK components'
-    print '=================================================='
+    print '================================================================='
     print ''
-    for section in target_config.sections():
-        if section.startswith(PACKAGES_NAMESPACE):
-            # check first for top level component
-            is_root_component = bldinstallercommon.safe_config_key_fetch(target_config, section, 'root_component')
-            if is_root_component == 'yes':
-                ROOT_COMPONENT_NAME = section
-            # check if static component or not
-            static_component = bldinstallercommon.safe_config_key_fetch(target_config, section, 'static_component')
-            if static_component:
-                create_offline_static_component(target_config, section, static_component)
-                continue
+    for sdk_component in SDK_COMPONENT_LIST:
+        # check first for top level component
+        if sdk_component.root_component == 'yes':
+            ROOT_COMPONENT_NAME = sdk_component.package_name
+        # for online installer handle only the root component, nothing else
+        if not offline_mode and not sdk_component.root_component == 'yes':
+            continue
 
-            # otherwise "build" the component
-            package_name            = section
-            archives                = bldinstallercommon.safe_config_key_fetch(target_config, section, 'archives')
-            target_install_base     = bldinstallercommon.safe_config_key_fetch(target_config, section, 'target_install_base')
-            version                 = bldinstallercommon.safe_config_key_fetch(target_config, section, 'version')
-            version_tag             = bldinstallercommon.safe_config_key_fetch(target_config, section, 'version_tag')
-            package_default         = bldinstallercommon.safe_config_key_fetch(target_config, section, 'package_default')
-            if (package_default != 'true') and (package_default != 'script'):
-                package_default = 'false'
+        # check if static component or not
+        if sdk_component.static_component:
+            create_offline_static_component(sdk_component)
+            continue
 
-            print '--------------------------------------------------------------------------------'
-            print '    '                             + package_name
-            print '      Package target_install_base:   '   + target_install_base
-            print '      Package version:               '   + version
-            print '      Package version_tag:           '   + version_tag
-            print '      Package package_default:       '   + package_default
-            print '      Package archives:              '   + archives
-
-            # create destination meta data folder
-            meta_dir_dest = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + package_name + os.sep + 'meta')
-            bldinstallercommon.create_dirs(meta_dir_dest)
-            print '      Created:                       ' + meta_dir_dest
-            # Copy Meta data
-            metadata_content_source_root = os.path.normpath(PACKAGES_FULL_PATH_SRC + os.sep + package_name + os.sep + 'meta')
-            bldinstallercommon.copy_tree(metadata_content_source_root, meta_dir_dest)
-            print '      Copied metadata'
-            # add files into tag substitution
-            GENERAL_TAG_SUBST_LIST.append(meta_dir_dest)
-            # create lists for component specific tag substitutions
-            component_metadata_tag_pair_list = []
-
-            # version tag exists
-            if version_tag or version:
-                component_metadata_tag_pair_list.append([version_tag, version])
-            # substitute default package info
-            if package_default == 'true':
-                component_metadata_tag_pair_list.append([PACKAGE_DEFAULT_TAG, 'true'])
-            elif package_default == 'script':
-                component_metadata_tag_pair_list.append([PACKAGE_DEFAULT_TAG, 'script'])
-            else:
-                component_metadata_tag_pair_list.append([PACKAGE_DEFAULT_TAG, 'false'])
-
-            #target install dir substitution
-            if target_install_base:
-                component_metadata_tag_pair_list.append([TARGET_INSTALL_DIR_NAME_TAG, target_install_base])
-
-            # check if package contains archives i.e. 7z packages to be included
-            if archives:
-                downloadable_archive_list = []
-                archives_list = archives.split(',')
-                for archive in archives_list:
-                    archive_uri             = bldinstallercommon.config_section_map(target_config, archive)['archive_uri']
-                    package_strip_dirs      = bldinstallercommon.safe_config_key_fetch(target_config, archive, 'package_strip_dirs')
-                    # TODO, check if target_install_dir is needed at all
-                    target_install_dir      = bldinstallercommon.safe_config_key_fetch(target_config, archive, 'target_install_dir')
-                    rpath_target            = bldinstallercommon.safe_config_key_fetch(target_config, archive, 'rpath_target')
-                    archive_name            = bldinstallercommon.safe_config_key_fetch(target_config, archive, 'archive_name')
-                    # add downloadable archive name
-                    downloadable_archive_list.append(archive_name)
-                    handle_archive(package_name, archive_uri, package_strip_dirs, target_install_base, target_install_dir,
-                                   rpath_target, archive_name)
-                # substitute downloadable archive names in installscript.qs
-                downloadableArchives_list = generate_downloadable_archive_list(downloadable_archive_list)
-                substitute_component_tags(downloadableArchives_list, meta_dir_dest)
-
-            # substitute tags
-            substitute_component_tags(component_metadata_tag_pair_list, meta_dir_dest)
+        # not a static component so "build" it
+        sdk_component.print_component_data()
+        # create destination meta data folder
+        meta_dir_dest = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + sdk_component.package_name + os.sep + 'meta')
+        bldinstallercommon.create_dirs(meta_dir_dest)
+        print '   -> Created:                 ' + meta_dir_dest
+        # Copy Meta data
+        metadata_content_source_root = os.path.normpath(sdk_component.pkg_template_dir + os.sep + 'meta')
+        bldinstallercommon.copy_tree(metadata_content_source_root, meta_dir_dest)
+        print '   -> Copied meta data from:   ' + metadata_content_source_root
+        # add files into tag substitution
+        GENERAL_TAG_SUBST_LIST.append(meta_dir_dest)
+        # create lists for component specific tag substitutions
+        component_metadata_tag_pair_list = []
+        # version tag substitution if exists
+        if sdk_component.version_tag or sdk_component.version:
+            component_metadata_tag_pair_list.append([sdk_component.version_tag, sdk_component.version])
+        # default package info substitution if exists
+        if sdk_component.package_default:
+            component_metadata_tag_pair_list.append([PACKAGE_DEFAULT_TAG, sdk_component.package_default])
+        # install priority info substitution if exists
+        if sdk_component.install_priority:
+            component_metadata_tag_pair_list.append([INSTALL_PRIORITY_TAG, sdk_component.install_priority])
+        # install priority info substitution if exists
+        if sdk_component.sorting_priority:
+            component_metadata_tag_pair_list.append([SORTING_PRIORITY_TAG, sdk_component.sorting_priority])
+        # target install dir substitution
+        if sdk_component.target_install_base:
+            component_metadata_tag_pair_list.append([TARGET_INSTALL_DIR_NAME_TAG, sdk_component.target_install_base])
+        # handle archives
+        if sdk_component.downloadable_archive_list:
+            downloadable_archive_list = []
+            # Copy archives into temporary build directory if exists
+            for archive in sdk_component.downloadable_archive_list:
+                downloadable_archive_list.append(archive.archive_name)
+                # fetch packages only if offline installer, for online installer just handle the metadata
+                if offline_mode:
+                    handle_archive(sdk_component, archive)
+            # substitute downloadable archive names in installscript.qs
+            downloadableArchives_list = sdk_component.generate_downloadable_archive_list(downloadable_archive_list)
+            substitute_component_tags(downloadableArchives_list, meta_dir_dest)
+        # substitute tags
+        substitute_component_tags(component_metadata_tag_pair_list, meta_dir_dest)
 
 
 ##############################################################
@@ -718,24 +709,25 @@ def install_ifw_tools():
         tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', PLATFORM_IDENTIFIER)
         tools_bin_path = SCRIPT_ROOT_DIR + os.sep + tools_dir_temp + os.sep + 'installerbuilder' + os.sep + 'bin' + os.sep
     else:
-        tools_dir_name = bldinstallercommon.config_section_map(CONFIG_TARGET,'InstallerFrameworkTools')['name']
+        tools_dir_name = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'InstallerFrameworkTools')['name']
         tools_dir_name = os.path.normpath(tools_dir_name)
-        package_url = bldinstallercommon.config_section_map(CONFIG_TARGET,'InstallerFrameworkTools')['package_url']
+        package_url = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'InstallerFrameworkTools')['package_url']
         # create needed dirs
         bldinstallercommon.create_dirs(IFW_TOOLS_DIR)
         package_save_as_temp = IFW_TOOLS_DIR + os.sep + os.path.basename(package_url)
         package_save_as_temp = os.path.normpath(package_save_as_temp)
-        print 'Source url: ' + package_url
-        print 'Install dest: ' + package_save_as_temp
+        print ' Source url:   ' + package_url
+        print ' Install dest: ' + package_save_as_temp
         # download IFW archive
         if not package_url == '':
-            print 'Downloading:  ' + package_url
+            print ' Downloading:  ' + package_url
             res = bldinstallercommon.is_content_url_valid(package_url)
             if not(res):
                 print '*** Package URL is invalid: [' + package_url + ']'
                 print '*** Abort!'
                 sys.exit(-1)
-            urllib.urlretrieve(package_url, package_save_as_temp)
+            urllib.urlcleanup()
+            urllib.urlretrieve(package_url, package_save_as_temp, reporthook=bldinstallercommon.dlProgress)
         if not (os.path.isfile(package_save_as_temp)):
             print '*** Downloading failed! Aborting!'
             sys.exit(-1)
@@ -777,10 +769,10 @@ def install_ifw_tools():
         print '*** Repogen tool not found: ' + REPOGEN_TOOL
         sys.exit(-1)
 
-    print 'ARCHIVEGEN_TOOL: ' + ARCHIVEGEN_TOOL
-    print 'BINARYCREATOR_TOOL: ' + BINARYCREATOR_TOOL
-    print 'INSTALLERBASE_TOOL: ' + INSTALLERBASE_TOOL
-    print 'REPOGEN_TOOL: ' + REPOGEN_TOOL
+    print ' ARCHIVEGEN_TOOL: ' + ARCHIVEGEN_TOOL
+    print ' BINARYCREATOR_TOOL: ' + BINARYCREATOR_TOOL
+    print ' INSTALLERBASE_TOOL: ' + INSTALLERBASE_TOOL
+    print ' REPOGEN_TOOL: ' + REPOGEN_TOOL
 
 
 ##############################################################
@@ -793,13 +785,11 @@ def create_installer_binary():
     print '=================================================='
     global SDK_NAME
 
-    instruction_set = bldinstallercommon.config_section_map(CONFIG_TARGET,'TargetArchitechture')['instruction_set']
+    instruction_set = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'TargetArchitechture')['instruction_set']
     cmd_args = []
     SDK_NAME += '-' + bldinstallercommon.get_platform_suffix()
     SDK_NAME += '-' + instruction_set
     tmp = SDK_VERSION_NUMBER
-    if bldinstallercommon.is_win_platform():
-        tmp = SDK_VERSION_NUMBER.replace('.', '_')
 
     SDK_NAME = SDK_NAME + '-v' + tmp
 
@@ -809,18 +799,18 @@ def create_installer_binary():
     cmd_args = [BINARYCREATOR_TOOL, '-t', INSTALLERBASE_TOOL, '-v', '-p', PACKAGES_FULL_PATH_DST]
     if OFFLINE_MODE:
         # check if package exclude list should be used for offline installer
-        package_exclude_list = bldinstallercommon.safe_config_key_fetch(CONFIG_TARGET, 'OfflinePackageExcludeList', 'package_list')
+        package_exclude_list = bldinstallercommon.safe_config_key_fetch(CONFIG_PARSER_TARGET, 'OfflinePackageExcludeList', 'package_list')
         package_exclude_list = package_exclude_list.replace('\n', '')
         if package_exclude_list:
             cmd_args = cmd_args + ['-e', package_exclude_list]
-    cmd_args = cmd_args + ['-c', CONFIG_XML_TARGET_DIR, SDK_NAME, ROOT_COMPONENT_NAME]
+    cmd_args = cmd_args + ['-c', CONFIG_DIR_DST, SDK_NAME, ROOT_COMPONENT_NAME]
 
     if OFFLINE_MODE:
         cmd_args = cmd_args + ['--offline-only']
         print 'Creating repository for the SDK ...'
         print '    Outputdir: ' + REPO_OUTPUT_DIR
         print '      pkg src: ' + PACKAGES_FULL_PATH_DST
-        repogen_args = [REPOGEN_TOOL, '-p', PACKAGES_FULL_PATH_DST, '-c', CONFIG_XML_TARGET_DIR, REPO_OUTPUT_DIR, ROOT_COMPONENT_NAME]
+        repogen_args = [REPOGEN_TOOL, '-p', PACKAGES_FULL_PATH_DST, '-c', CONFIG_DIR_DST, REPO_OUTPUT_DIR, ROOT_COMPONENT_NAME, '-v']
         bldinstallercommon.do_execute_sub_process(repogen_args, SCRIPT_ROOT_DIR, True)
         if not os.path.exists(REPO_OUTPUT_DIR):
             print '*** Fatal error! Unable to create repository directory: ' + REPO_OUTPUT_DIR
@@ -843,7 +833,7 @@ def create_mac_disk_image():
     print '= Create mac disk image'
     print '=================================================='
 
-    nib_archive_name = bldinstallercommon.safe_config_key_fetch(CONFIG_TARGET, 'qtmenunib', 'package_url')
+    nib_archive_name = bldinstallercommon.safe_config_key_fetch(CONFIG_PARSER_TARGET, 'qtmenunib', 'package_url')
     package_save_as_folder = SCRIPT_ROOT_DIR + os.sep + SDK_NAME + '.app' + os.sep + 'Contents' + os.sep + 'Resources'
     package_save_as_temp = package_save_as_folder + os.sep + os.path.basename(nib_archive_name)
     print ' package_url: ' + nib_archive_name
@@ -857,7 +847,8 @@ def create_mac_disk_image():
             print '*** Package URL is invalid: [' + nib_archive_name + ']'
             print '*** Abort!'
             sys.exit(-1)
-        urllib.urlretrieve(nib_archive_name, package_save_as_temp)
+        urllib.urlcleanup()
+        urllib.urlretrieve(nib_archive_name, package_save_as_temp, reporthook=bldinstallercommon.dlProgress)
 
     # extract contents
     bldinstallercommon.extract_file(package_save_as_temp, package_save_as_folder)
@@ -882,6 +873,8 @@ def create_installer():
     print '=================================================='
     # init
     bldinstallercommon.init_common_module(SCRIPT_ROOT_DIR)
+    # check required tools
+    check_required_tools()
     # init data
     init_data()
     # clean env before starting
@@ -891,11 +884,10 @@ def create_installer():
     set_config_xml()
     # install Installer Framework tools
     install_ifw_tools()
+    # parse SDK components
+    parse_components(CONFIG_PARSER_TARGET)
     # create components
-    if OFFLINE_MODE:
-        create_offline_target_components(CONFIG_TARGET)
-    else:
-        create_online_target_components(CONFIG_TARGET)
+    create_target_components(CONFIG_PARSER_TARGET, OFFLINE_MODE)
     # substitute global tags
     substitute_global_tags()
     # create the installer binary
@@ -909,3 +901,4 @@ def create_installer():
 # Start build process
 ##############################################################
 main()
+

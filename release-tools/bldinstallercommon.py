@@ -90,6 +90,17 @@ def is_content_url_valid(url):
 ###############################
 # function
 ###############################
+def dlProgress(count, blockSize, totalSize):
+    percent = int(count*blockSize*100/totalSize)
+    sys.stdout.write("\r" + "     Downloading: %d%%" % percent)
+    sys.stdout.flush()
+    if count*blockSize >= totalSize:
+        print '\n'
+
+
+###############################
+# function
+###############################
 def set_platform_specific_data():
     global PLATFORM_SUFFIX
     global IS_UNIX_PLATFORM
@@ -525,7 +536,7 @@ def do_execute_sub_process_2(args, execution_path, abort_on_fail):
 def do_execute_sub_process_get_std_out(args, execution_path, abort_on_fail, print_debug=True):
     if print_debug:
         print '      --------------------------------------------------------------------'
-        print '      Executing: [' + list_as_string(args) + ']'
+        print '      Executing:      [' + list_as_string(args) + ']'
         print '      Execution path: [' + execution_path + ']'
     theproc = None
     output = ''
@@ -577,7 +588,7 @@ def clone_repository(repo_url, repo_branch_or_tag, destination_folder):
 def extract_file(path, to_directory='.'):
     cmd_args = []
     if path.endswith('.zip'):
-        cmd_args = ['unzip', '-qq', path]
+        cmd_args = ['7z', 'x', path]
     elif path.endswith('.tar'):
         cmd_args = ['tar', '-xzf', path]
     elif path.endswith('.tar.gz') or path.endswith('.tgz'):

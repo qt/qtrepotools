@@ -41,11 +41,15 @@ import platform
 
 import bld_ifw_tools_impl
 
+
 if len(sys.argv) < 2:
     print '*** platform identifier is needed as parameter: linux/mac/windows'
     sys.exit(-1)
 
 platformIdentifier = sys.argv[1]
 bld_ifw_tools_impl.build_ifw('release', platformIdentifier)
+
+
+
 
 
