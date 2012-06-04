@@ -7,9 +7,11 @@
 #
 
 force=false
+remove=false
 while test $# != 0; do
     case $1 in
         -f) force=true;;
+        -r) remove=true;;
         -*) echo "Unrecognized option $1." >&2; exit 1;;
         *) break;;
     esac
@@ -18,7 +20,7 @@ done
 
 if test -z "$2"; then
     cat >&2 <<EOF
-Usage: $0 [-f] <user> <sha-1>...
+Usage: $0 [-f] [-r] <user> <sha-1>...
 
 git-note-review adds Reviewed-by: lines to the log messages of the
 named commits. Commits can be specified as either as a single sha1 or
@@ -28,6 +30,7 @@ already present in a given commit, the commit is skipped.
 If -f is specified, the check whether the commits were already pushed
 is omitted. This only makes sense if you are planning to make a forced
 push.
+If -r is specified, the named user's reviews are removed from the commits.
 EOF
     exit 1
 fi
@@ -75,8 +78,11 @@ for j in "$@"; do
             fail=true
             continue
         fi
-        if git log -1 --pretty=%b $i | egrep -q -i "^[-[:alpha:]]+-by: *$who\$"; then
+        git log -1 --pretty=%b $i | egrep -q -i "^[-[:alpha:]]+-by: *$who\$" && hit=true || hit=false
+        if $hit && ! $remove; then
             echo "Commit $i already noted as reviewed by $who."
+        elif ! $hit && $remove; then
+            echo "Commit $i not noted as reviewed by $who."
         else
             if test -z "$firstSHA1"; then
                 firstSHA1=`git rev-parse $i`
@@ -108,9 +114,8 @@ if ! $force && test -n "$(git rev-list -1 $firstSHA1^..@{upstream})"; then
     exit 1
 fi
 
-git filter-branch --force --original refs/note-review-backup --msg-filter '
-    if echo $GIT_COMMIT | egrep -q "^('"$SHA1s"')"; then
-        sed "s/^\\(Reviewed-by:\\) *\\(pending\\|tbd\\|TBD\\)\$/\\1 '"$who"'/;t nx
+if ! $remove; then
+    script='s/^\\(Reviewed-by:\\) *\\(pending\\|tbd\\|TBD\\)\$/\\1 '"$who"'/;t nx
 \${
 /^[-[:alpha:]]\+:/!a\\
 
@@ -118,7 +123,14 @@ a\\
 Reviewed-by: '"$who"'
 }
 b
-:nx;n;b nx"
+:nx;n;b nx'
+else
+    script='/^[-[:alpha:]]\\+-by: *'"$who"'\$/d'
+fi
+
+git filter-branch --force --original refs/note-review-backup --msg-filter '
+    if echo $GIT_COMMIT | egrep -q "^('"$SHA1s"')"; then
+        sed "'"$script"'"
     else
         cat
     fi
