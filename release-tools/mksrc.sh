@@ -22,9 +22,9 @@ QTVER=0.0.0
 QTSHORTVER=0.0
 QTGITTAG=.sha1s
 PACK_TIME=`date '+%Y-%m-%d'`
-DOCS=generate
+DOCS=skip
 MULTIPACK=no
-
+IGNORE_LIST=
 
 function tool_failure ()
 {
@@ -44,9 +44,12 @@ function tool_failure ()
 function usage()
 {
   echo "Usage:"
-  echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m]"
+  echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub]"
   echo "where -u is path to git repo and -v is version"
-  echo "with -m one is able to tar each sub module separately"
+  echo "Optional parameters:"
+  echo "-m one is able to tar each sub module separately"
+  echo "-d includes documentation ( NOT WORKING ATM)"
+  echo "-i submodule, will exclude the submodule from final package "
 }
 
 function cleanup()
@@ -54,6 +57,8 @@ function cleanup()
   echo "Cleaning all tmp artifacts"
   rm -f _txtfiles
   rm -f __files_to_zip
+  rm -f _tmp_mod
+  rm -f _tmp_shas
   rm -rf $PACKAGE_NAME
 }
 
@@ -61,6 +66,15 @@ function create_main_file()
 {
   echo " - Creating single tar.gz file - "
   tar czf $BIG_TAR $PACKAGE_NAME/
+
+  echo " - Creating single tar.bz2 file - "
+  tar cjf $PACKAGE_NAME.tar.bz2 $PACKAGE_NAME/
+
+  echo " - Creating single tar.xz file - "
+  tar cJf $PACKAGE_NAME.tar.xz $PACKAGE_NAME/
+
+  echo " - Creating single 7z file - "
+  7z a $PACKAGE_NAME.7z $PACKAGE_NAME/
 
   echo " - Creating single win zip - "
   # ZIP
@@ -97,7 +111,11 @@ function create_and_delete_submodule()
 # check that qmake can be found from path for generating docs
 export PATH=$QDOC_PATH:$PATH
 export LD_LIBRARY_PATH=$QDOC_LIBS:$LD_LIBRARY_PATH
-qmake -v >/dev/null 2>&1 || tool_failure
+
+# Check if we have qmake in path for docs, if needed
+if [ $DOCS = generate ]; then
+  qmake -v >/dev/null 2>&1 || tool_failure
+fi
 
 # read the arguments
 while test $# -gt 0; do
@@ -110,10 +128,16 @@ while test $# -gt 0; do
       shift
       MULTIPACK=yes
     ;;
-    -d|--no_docs)
+    -d|--docs)
       shift
-      DOCS=skip
-    ;;    -u|--url)
+      DOCS=copy
+    ;;
+    -i|--ignore)
+      shift
+      IGNORE_LIST=$IGNORE_LIST" "$1
+      shift
+    ;;
+    -u|--url)
       shift
       REPO_DIR=/$1
       if [ ! -d "$REPO_DIR/.git" ]; then
@@ -124,8 +148,8 @@ while test $# -gt 0; do
     ;;
     -v|--version)
       shift
-      QTVER=$1
-      QTSHORTVER=$(echo $QTVER | cut -d. -f1-2)
+        QTVER=$1
+        QTSHORTVER=$(echo $QTVER | cut -d. -f1-2)
       shift
     ;;
     *)
@@ -135,6 +159,8 @@ while test $# -gt 0; do
     ;;
     esac
 done
+
+# Check if the DIR is valid git repository
 if [ ! -d "$REPO_DIR/.git" ]; then
   echo "$REPO_DIR is not a valid git repo"
   exit 2
@@ -171,9 +197,8 @@ cd $_TMP_DIR
 tar xzf $BIG_TAR
 rm -f $BIG_TAR
 cd $REPO_DIR
-echo "Qt main repo sha1:" >$_TMP_DIR/$QTGITTAG
-cat .git/refs/heads/master >> $_TMP_DIR/$QTGITTAG
-echo "-----------------------------------------" >> $_TMP_DIR/$QTGITTAG
+_SHA=`cat .git/refs/heads/master`
+echo "qt5=$_SHA">$_TMP_DIR/$QTGITTAG
 
 #archive all the submodules and generate file from sha1's
 while read submodule; do
@@ -185,14 +210,13 @@ while read submodule; do
   #move it temp dir
   mv $CUR_DIR/$_file $_TMP_DIR
   #store the sha1
-  echo "$submodule sha1:" >> $_TMP_DIR/$QTGITTAG
   _SHA=`cat .git/HEAD | cut -d' ' -f2`
-  if [ $_SHA = refs/heads/master ]; then
-    cat .git/refs/heads/master >> $_TMP_DIR/$QTGITTAG
+  if [ $(echo $_SHA | cut -d/ -f1-2) = refs/heads ]; then
+    _SHA=`cat .git/$_SHA`
   else
-    cat .git/HEAD >> $_TMP_DIR/$QTGITTAG
+    _SHA=`cat .git/HEAD`
   fi
-  echo "-----------------------------------------" >> $_TMP_DIR/$QTGITTAG
+  echo "$(echo $(echo $submodule|sed 's/-/_/g') | cut -d/ -f1)=$_SHA" >>$_TMP_DIR/$QTGITTAG
   cd $_TMP_DIR
   #extract to tmp dir
   tar xzf $_file
@@ -200,32 +224,81 @@ while read submodule; do
   cd $REPO_DIR
 done < $MODULES
 mv $MODULES $CUR_DIR
-#------------------------------------------------------------------
-# Step x,  remove rest of the unnecessary files   TODO
-#------------------------------------------------------------------
 
 #------------------------------------------------------------------
-# Step x,  replace version strings with correct version, and
+# Step 2,  remove rest of the unnecessary files and ignored submodules
+# and its sha1 values from sha file
+#------------------------------------------------------------------
+rm -f $CUR_DIR/$PACKAGE_NAME/init-repository
+rm -f $CUR_DIR/$PACKAGE_NAME/.commit-template
+rm -f $CUR_DIR/$PACKAGE_NAME/.gitignore
+rm -f $CUR_DIR/$PACKAGE_NAME/.gitmodules
+# find ./ -type d -name "tests" -exec rm -rf {} \; > /dev/null 2>&1
+
+cd $CUR_DIR/$PACKAGE_NAME
+__skip_sub=no
+rm -f _tmp_mod
+rm -f _tmp_shas
+
+# read the shas
+. $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
+echo "The qt5 was archived from $qt5 sha" >$CUR_DIR/_tmp_shas
+echo "------------------------------------------------------------------------">>$CUR_DIR/_tmp_shas
+echo "Fixing shas"
+while read submodule; do
+  for ignore in $IGNORE_LIST; do
+    if [ _pre_$ignore"/" = _pre_$submodule ]; then
+      __skip_sub=yes
+      echo "removing $submodule"
+      rm -rf $submodule
+      break
+    fi
+  done
+  if [ $__skip_sub = no ]; then
+    __sub=$(echo $(echo $submodule|sed 's/-/_/g') | cut -d/ -f1)
+    echo "Fixing $__sub ${!__sub}"
+    echo $submodule >>$CUR_DIR/_tmp_mod
+    echo "The $(echo $__sub| sed 's/_/-/g') was archived from ${!__sub} sha" >>$CUR_DIR/_tmp_shas
+    echo "------------------------------------------------------------------------">>$CUR_DIR/_tmp_shas
+  fi
+  __skip_sub=no
+done < $CUR_DIR/$MODULES
+cat $CUR_DIR/_tmp_mod > $CUR_DIR/$MODULES
+cat $CUR_DIR/_tmp_shas > $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
+
+#------------------------------------------------------------------
+# Step 3,  replace version strings with correct version, and
 # patch Qt_PACKAGE_TAG and QT_PACKAGEDATE_STR defines
 #------------------------------------------------------------------
 echo " -- Patching %VERSION% etc. defines --"
 cd $CUR_DIR/$PACKAGE_NAME/
-find . -type f -print0 | xargs -0 sed -i -e "s/%VERSION%/$QTVER/g" -e "s/%SHORTVERSION%/$QTSHORTVER./g" -e "s/#define QT_PACKAGE_TAG \"\"/#define QT_PACKAGE_TAG \"\"/g" -e "s/#define QT_PACKAGEDATE_STR \"YYYY-MM-DD\"/#define QT_PACKAGEDATE_STR \"$PACK_TIME\"/g"
+find . -type f -print0 | xargs -0 sed -i -e "s/%VERSION%/$QTVER/g" -e "s/%SHORTVERSION%/$QTSHORTVER/g" -e "s/#define QT_PACKAGE_TAG \"\"/#define QT_PACKAGE_TAG \"\"/g" -e "s/#define QT_PACKAGEDATE_STR \"YYYY-MM-DD\"/#define QT_PACKAGEDATE_STR \"$PACK_TIME\"/g"
 
 #------------------------------------------------------------------
-# Step x,  generate docs TODO
+# Step 4,  generate docs
 #------------------------------------------------------------------
 if [ $DOCS = generate ]; then
-  echo " -- Creating online documentation -- "
-  cd $CUR_DIR/$PACKAGE_NAME/qtdoc
-  qmake
-  make online_docs
+  #copying ready made docs...
+  if [ ! -d "$DOC_DIR/html" ]; then
+    echo "Warning: Can't find online documentation from $DOC_DIR"
+    echo " -- Creating src files without generated online documentation --"
+  else
+    echo "Copying docs from $DOC_DIR"
+    cd $DOC_DIR
+    tar czf online_docs.tar.gz html
+    cd doc
+    mv online_docs.tar.gz $PACKAGE_NAME/qtdoc/doc
+    cd $PACKAGE_NAME/qtdoc/doc
+    tar xzf online_docs.tar.gz
+    rm -f online_docs.tar.gz
+    cd $CUR_DIR
+  fi
 else
   echo " -- Creating src files without generated online documentation --"
 fi
 
 #------------------------------------------------------------------
-# Step x,  create zip file and tar files
+# Step 5,  create zip file and tar files
 #------------------------------------------------------------------
 # list text file regexp keywords, if you find something obvious missing, feel free to add
 cd $CUR_DIR
@@ -239,7 +312,8 @@ text" > _txtfiles
 echo " -- Create B I G tars -- "
 create_main_file
 
-if [ $MULTIPACK=yes ]; then
+# Create tar/submodule
+if [ $MULTIPACK = yes ]; then
   mv $BIG_TAR $BIG_TAR.huge
   mv $BIG_ZIP $BIG_ZIP.huge
   echo " -- Creating tar per submodule -- "
