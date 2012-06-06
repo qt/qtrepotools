@@ -1,0 +1,24 @@
+#! /bin/sh
+
+# Copyright (C) 2012 Nokia Corporation and/or its subsidiary(-ies).
+# Contact: http://www.qt-project.org/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+# Run this once a day (from a cron job) to keep the sanity bot's
+# git clones performing well.
+
+root=$(git config sanitybot.gitbasedir)
+if test -z "$root"; then
+    echo "Error: sanitybot.gitbasedir not set" >&2
+    exit 1
+fi
+cd "$root" || exit
+find -name '*.git' -type d | while read dir; do (
+    echo "Entering $dir ..."
+    cd "$dir" || exit
+    find refs/changes -mindepth 1 -mtime +10 -delete
+    git gc
+); done
