@@ -1,0 +1,42 @@
+[PackageNamespace]
+name:                   qt.sdk
+
+[PlatformIdentifier]
+identifier:             linux
+
+[ArchiveRemoteLocation.dl241]
+base_url:               http://origin.releases.qt-project.org
+base_path:              qt5.0-beta-snapshots/linux_32_
+
+# for testing purposes
+[PackageIgnoreList]
+packages:               foo.bar, foo.bar2, foo.bar3
+
+[ExtraPackageConfigurationFiles]
+file_list:              sdk_root-conf, src-conf, x86_32_desktop-conf
+
+[OfflinePackageExcludeList]
+package_list:
+
+[SdkUpdateRepository]
+repository_url_release: http://releases.qt-project.org/does_not_exist_yet
+repository_url_rnd:     http://.......TODO......../qt5repository/linux/x32/online_qt5sdk_repo
+
+[TargetArchitechture]
+instruction_set:        x86_32
+
+[ConfigDir]
+template_name:          config_qt5
+
+[ConfigXml]
+template_name:          config.xml.template.linux
+
+[WorkingDirectories]
+packages_dir:           pkg
+
+[InstallerFrameworkTools]
+name:                   ifwt
+package_url:            http://origin.releases.qt-project.org/utils/bin_tools/pre_sdk_ifw/installer-framework-build-linux-32bit.7z
+version:                1.2.0
+
+

@@ -1,0 +1,20 @@
+[qt.sdk.desktop]
+version:                1.0.0
+version_tag:            %SDK_VERSION_NUM%
+
+[qt.sdk.desktop.500]
+version:                5.0.0
+version_tag:            %QT_VERSION_NUM%
+
+[qt.sdk.desktop.500.msvc2010]
+archives:               qt.500.msvc2010
+target_install_base:    /Desktop/Qt/5.0.0/msvc2010
+version:                5.0.0
+version_tag:            %QT_VERSION_NUM%
+package_default:        true
+[qt.500.msvc2010]
+archive_uri:            qt5_desktop_bin_win7.7z
+package_strip_dirs:     1
+target_install_dir:     /
+rpath_target:           /lib
+archive_name:           qt-5.0.0-desktop-msvc2010-windows-32bit.7z

@@ -1,0 +1,13 @@
+# for testing purposes
+[PackageIgnoreList]
+packages:
+
+[ExtraPackageConfigurationFiles]
+file_list:
+
+[qt.sdk]
+root_component:         yes
+version:                1.0.0
+version_tag:            %SDK_VERSION_NUM%
+
+

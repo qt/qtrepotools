@@ -1,0 +1,23 @@
+
+[make]
+make_cmd:                               make -j8
+
+[QtForInstallerFramework]
+qt_src_package_url:                     http://---------------TODO--------------------/qt-everywhere-opensource-src-4.8.2.tar.gz
+qt_source_dir:                          qt-everywhere-src
+qt_build_dir:                           qt-everywhere-build
+qt_installerfw_qt_configure_line:       -static -release -opensource -confirm-license -silent -nomake examples -nomake demos -nomake tests -nomake docs -nomake plugins -nomake translations -qt-zlib -qt-libtiff -qt-libpng -qt-libmng -qt-libjpeg -no-webkit -no-phonon -no-dbus -no-opengl -no-qt3support -no-xmlpatterns -no-svg -no-nis -no-cups -no-multimedia -no-audio-backend -no-phonon -no-phonon-backend -no-webkit -no-declarative -no-declarative-debug -no-accessibility --prefix=
+
+[InstallerFramework]
+installer_framework_url:                git://scm.dev.nokia.troll.no/installer-framework/mainline.git
+installer_framework_source_dir:         installer-framework-source
+installer_framework_build_dir:          installer-framework-build
+installer_framework_version_tag:        remotes/origin/master
+installer_framework_qmake_args:         -config release -config static -r
+
+[Output]
+installer_framework_archive_name:       installer-framework-build-linux-32bit.7z
+installerbase_archive_name:             installerbase-linux.7z
+macdeployqt_archive_name:
+qtmenunib_archive_name:
+qt_archive_name:                        qt-4.8.0-linux.7z

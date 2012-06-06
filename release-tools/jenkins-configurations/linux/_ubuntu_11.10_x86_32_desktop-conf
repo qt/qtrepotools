@@ -1,0 +1,20 @@
+[qt.sdk.desktop]
+version:                1.0.0
+version_tag:            %SDK_VERSION_NUM%
+
+[qt.sdk.desktop.500]
+version:                5.0.0
+version_tag:            %QT_VERSION_NUM%
+
+[qt.sdk.desktop.500.gcc]
+archives:               qt.500.gcc
+target_install_base:    /Desktop/Qt/5.0.0/gcc
+version:                5.0.0
+version_tag:            %QT_VERSION_NUM%
+package_default:        true
+[qt.500.gcc]
+archive_uri:            qt5_desktop_bin_linux32_1110.7z
+package_strip_dirs:     4
+target_install_dir:     /
+rpath_target:           /lib
+archive_name:           qt-5.0.0-desktop-gcc.7z
