@@ -72,6 +72,7 @@ my $verbose = getcfg 'verbose', 0;
 my @gerrit = ("ssh", $GERRIT_HOST, "gerrit");
 
 my %processed = ();
+my %skipfetch = ();
 
 sub printerr($)
 {
@@ -110,14 +111,15 @@ sub process_commit($$$)
         return;
       }
     }
-    if (system("git", "fetch", "origin")) { # Update refs, otherwise the selective fetches start from scratch each time.
-      printerr "GIT fetch from ".$project." failed";
-      return;
+    my @mainlines;
+    if (!defined $skipfetch{$project}) {
+      # Update refs, otherwise the selective fetches start from scratch each time.
+      chomp(@mainlines = `git config remote.origin.fetch`);
+      $skipfetch{$project} = 1;
     }
-    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== updated mainlines\n";
     my $dref = $ref;
     $dref =~ s,/[^/]+$,,;
-    if (system("git", "fetch", "-f", "origin", $ref.":".$dref)) {
+    if (system("git", "fetch", "-f", "origin", $ref.":".$dref, @mainlines)) {
       printerr "GIT fetch of ".$ref." from ".$project." failed";
       return;
     }
@@ -193,10 +195,15 @@ while (<UPDATES>) {
   my $update = decode_json($_);
   defined($update) or die "cannot decode JSON string '".chomp($_)."'\n";
   my $type = $$update{'type'};
-  if (defined($type) && $type eq 'patchset-created') {
-    my $chg = $$update{'change'};
-    my $ps = $$update{'patchSet'};
-    process_commit($$chg{'project'}, $$ps{'ref'}, $$ps{'revision'});
+  if (defined($type)) {
+    if ($type eq 'patchset-created') {
+      my $chg = $$update{'change'};
+      my $ps = $$update{'patchSet'};
+      process_commit($$chg{'project'}, $$ps{'ref'}, $$ps{'revision'});
+    } elsif ($type eq 'ref-updated') {
+      my $rup = $$update{'refUpdate'};
+      delete $skipfetch{$$rup{'project'}};
+    }
   }
 }
 close UPDATES;
