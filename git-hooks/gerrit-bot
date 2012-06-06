@@ -82,9 +82,9 @@ sub printerr($)
   print STDERR $msg.".\n";
 }
 
-sub process_commit($$$)
+sub process_commit($$$$)
 {
-  my ($project, $ref, $rev) = @_;
+  my ($number, $project, $ref, $rev) = @_;
 
   if (defined $processed{$ref}) {
     return;
@@ -117,9 +117,7 @@ sub process_commit($$$)
       chomp(@mainlines = `git config remote.origin.fetch`);
       $skipfetch{$project} = 1;
     }
-    my $dref = $ref;
-    $dref =~ s,/[^/]+$,,;
-    if (system("git", "fetch", "-f", "origin", $ref.":".$dref, @mainlines)) {
+    if (system("git", "fetch", "-f", "origin", $ref.":refs/changes/".$number, @mainlines)) {
       printerr "GIT fetch of ".$ref." from ".$project." failed";
       return;
     }
@@ -167,6 +165,7 @@ open STATUS, "-|", @gerrit, "query", "--format", "JSON", "--current-patch-set", 
 REVIEW: while (<STATUS>) {
   my $review = decode_json($_);
   defined($review) or die "cannot decode JSON string '".chomp($_)."'\n";
+  my $number = $$review{'number'};
   my $project = $$review{'project'};
   my $cps = $$review{'currentPatchSet'};
   if (defined $cps) {
@@ -186,7 +185,7 @@ REVIEW: while (<STATUS>) {
         }
       }
     }
-    process_commit($project, $ref, $revision);
+    process_commit($number, $project, $ref, $revision);
   }
 }
 close STATUS;
@@ -199,7 +198,7 @@ while (<UPDATES>) {
     if ($type eq 'patchset-created') {
       my $chg = $$update{'change'};
       my $ps = $$update{'patchSet'};
-      process_commit($$chg{'project'}, $$ps{'ref'}, $$ps{'revision'});
+      process_commit($$chg{'number'}, $$chg{'project'}, $$ps{'ref'}, $$ps{'revision'});
     } elsif ($type eq 'ref-updated') {
       my $rup = $$update{'refUpdate'};
       delete $skipfetch{$$rup{'project'}};
