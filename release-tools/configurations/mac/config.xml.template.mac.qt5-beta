@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<Installer>
+    <Name>Qt5 Beta Installer</Name>
+    <Version>%SDK_VERSION_NUM%</Version>
+    <Title>Qt5 Beta Installer</Title>
+    <MaintenanceTitle>Maintain Qt5 Beta</MaintenanceTitle>
+    <Publisher>Qt</Publisher>
+    <Logo>logo.png</Logo>
+    <LogoSmall>logo-small.png</LogoSmall>
+    <Icon>logo-small</Icon>
+    <License>license.txt</License>
+    <Watermark>watermark.png</Watermark>
+    <StartMenuDir>Qt5 Beta</StartMenuDir>
+    <ProductUrl>qt.nokia.com</ProductUrl>
+    <!--<Background>background.png</Background>-->
+    <UninstallerName>MaintenanceTool</UninstallerName>
+    <!--<RemoteRepositories>
+        <Repository>
+            <Url>%UPDATE_REPOSITORY_URL%</Url>
+            <Required>false</Required>
+        </Repository>
+    </RemoteRepositories>-->
+    <!-- @homeDir@ and @rootDir@ are some of the supported vars -->
+    <TargetDir>/opt/Qt5-beta</TargetDir>
+</Installer>
