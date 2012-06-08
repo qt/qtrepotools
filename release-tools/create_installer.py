@@ -707,7 +707,7 @@ def install_ifw_tools():
     # if "devmode" mode used, then build IFW from sources
     if DEVELOPMENT_MODE:
         tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', PLATFORM_IDENTIFIER)
-        tools_bin_path = SCRIPT_ROOT_DIR + os.sep + tools_dir_temp + os.sep + 'installerbuilder' + os.sep + 'bin' + os.sep
+        tools_bin_path = SCRIPT_ROOT_DIR + os.sep + tools_dir_temp
     else:
         tools_dir_name = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'InstallerFrameworkTools')['name']
         tools_dir_name = os.path.normpath(tools_dir_name)
@@ -746,15 +746,13 @@ def install_ifw_tools():
             print '*** Unsupported dir structure for installer-framework-tools package?!'
             print '*** Abort!'
             sys.exit(-1)
-
-        # todo, hard coded path used...
-        tools_bin_path = IFW_TOOLS_DIR + os.sep + 'installerbuilder' + os.sep + 'bin' + os.sep
+        tools_bin_path = IFW_TOOLS_DIR
 
     executable_suffix = bldinstallercommon.get_executable_suffix()
-    ARCHIVEGEN_TOOL = tools_bin_path + 'archivegen' + executable_suffix
-    BINARYCREATOR_TOOL = tools_bin_path + 'binarycreator' + executable_suffix
-    INSTALLERBASE_TOOL = tools_bin_path + 'installerbase' + executable_suffix
-    REPOGEN_TOOL = tools_bin_path + 'repogen' + executable_suffix
+    ARCHIVEGEN_TOOL = bldinstallercommon.locate_executable(tools_bin_path, 'archivegen' + executable_suffix)
+    BINARYCREATOR_TOOL = bldinstallercommon.locate_executable(tools_bin_path, 'binarycreator' + executable_suffix)
+    INSTALLERBASE_TOOL = bldinstallercommon.locate_executable(tools_bin_path, 'installerbase' + executable_suffix)
+    REPOGEN_TOOL = bldinstallercommon.locate_executable(tools_bin_path, 'repogen' + executable_suffix)
     # check
     if not (os.path.isfile(ARCHIVEGEN_TOOL)):
         print '*** Archivegen tool not found: ' + ARCHIVEGEN_TOOL

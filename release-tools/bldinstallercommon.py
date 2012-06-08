@@ -341,6 +341,18 @@ def create_dirs(path_to_be_created):
 ###############################
 # Function
 ###############################
+def locate_executable(directory, file_name):
+    for root, dirs, files in os.walk(directory):
+        for basename in files:
+            if fnmatch.fnmatch(basename, file_name):
+                filename = os.path.join(root, basename)
+                if is_executable(filename):
+                    return filename
+
+
+###############################
+# Function
+###############################
 def is_executable(path):
     plat = platform.system().lower()
     if IS_WIN_PLATFORM:
