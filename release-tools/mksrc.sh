@@ -74,7 +74,7 @@ function create_main_file()
   tar cJf $PACKAGE_NAME.tar.xz $PACKAGE_NAME/
 
   echo " - Creating single 7z file - "
-  7z a $PACKAGE_NAME.7z $PACKAGE_NAME/
+  7z a $PACKAGE_NAME.7z $PACKAGE_NAME/ > /dev/null
 
   echo " - Creating single win zip - "
   # ZIP
