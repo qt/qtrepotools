@@ -3,7 +3,7 @@
 make_cmd:                               nmake
 
 [QtForInstallerFramework]
-qt_src_package_url:                     http://download.qt.nokia.com/qt/source/qt-everywhere-opensource-src-4.8.0.tar.gz
+qt_src_package_url:                     http://download.qt.nokia.com/qt/source/qt-everywhere-opensource-src-4.8.0.zip
 qt_source_dir:                          qt-src
 qt_build_dir:                           qt-bld
 qt_installerfw_qt_configure_line:       -static -release -opensource -confirm-license -nomake examples -nomake demos -nomake tests -nomake docs -no-webkit -no-phonon -no-dbus -no-opengl -no-qt3support -no-xmlpatterns -no-multimedia -no-declarative -no-declarative-debug -qt-sql-sqlite -plugin-sql-sqlite -prefix
