@@ -561,6 +561,7 @@ def do_execute_sub_process_get_std_out(args, execution_path, abort_on_fail, prin
         output = theproc.stdout.read()
         theproc.communicate()
         if theproc.returncode:
+            print output
             print '*** Execution failed with code: %s' % str(theproc.returncode)
             if abort_on_fail:
                 sys.exit(-1)
