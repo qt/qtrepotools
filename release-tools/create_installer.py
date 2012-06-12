@@ -443,9 +443,10 @@ def repackage_content_for_installation(install_dir, package_raw_name, target_ins
         return
 
     # extract contents
-    bldinstallercommon.extract_file(install_dir + os.sep + package_raw_name, install_dir)
+    extracted = bldinstallercommon.extract_file(install_dir + os.sep + package_raw_name, install_dir)
     # remove old package
-    os.remove(install_dir + os.sep + package_raw_name)
+    if extracted:
+        os.remove(install_dir + os.sep + package_raw_name)
     # strip out unnecessary folder structure based on the configuration
     count = 0
     iterations = int(package_strip_dirs)
@@ -461,7 +462,7 @@ def repackage_content_for_installation(install_dir, package_raw_name, target_ins
             temp_path_name = 'a'
             os.rename(dir_name, temp_path_name)
             bldinstallercommon.move_tree(temp_path_name, '.')
-            bldinstallercommon.remove_tree(temp_path_name)
+            bldinstallercommon.remove_tree(install_dir + os.sep + temp_path_name)
             os.chdir(SCRIPT_ROOT_DIR)
         else:
             print '*** Error: unsupported folder structure encountered, abort!'
@@ -747,7 +748,7 @@ def install_ifw_tools():
             dir_name = dir_items[0]
             os.chdir(IFW_TOOLS_DIR)
             bldinstallercommon.move_tree(dir_name, '.')
-            bldinstallercommon.remove_tree(dir_name)
+            bldinstallercommon.remove_tree(IFW_TOOLS_DIR + os.sep + dir_name)
             os.chdir(SCRIPT_ROOT_DIR)
         else:
             print '*** Unsupported dir structure for installer-framework-tools package?!'

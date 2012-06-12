@@ -90,11 +90,17 @@ def is_content_url_valid(url):
 ###############################
 # function
 ###############################
+CURRENT_DOWNLOAD_PERCENT = 0
 def dlProgress(count, blockSize, totalSize):
+    global CURRENT_DOWNLOAD_PERCENT
     percent = int(count*blockSize*100/totalSize)
-    sys.stdout.write("\r" + "     Downloading: %d%%" % percent)
-    sys.stdout.flush()
+    # produce only reasonable amount of prints into stdout
+    if percent > CURRENT_DOWNLOAD_PERCENT:
+        CURRENT_DOWNLOAD_PERCENT = percent
+        sys.stdout.write("\r" + "     Downloading: %d%%" % percent)
+        sys.stdout.flush()
     if count*blockSize >= totalSize:
+        CURRENT_DOWNLOAD_PERCENT = 0
         print '\n'
 
 
@@ -188,6 +194,20 @@ def make_files_list(directory, rgxp):
 ###############################
 # function
 ###############################
+def findInSubdirectory(filename, subdirectory=''):
+    if subdirectory:
+        path = subdirectory
+    else:
+        path = os.getcwd()
+    for root, dirs, names in os.walk(path):
+        if filename in names:
+            return os.path.join(root, filename)
+    raise '*** Error! File not found!'
+
+
+###############################
+# function
+###############################
 def move_tree(srcdir, dstdir, pattern=None):
     # windows has length limit for path names so try to truncate them as much as possible
     global IS_WIN_PLATFORM
@@ -248,8 +268,10 @@ def handle_remove_readonly(func, path, exc):
 
 def remove_tree(source_dir):
     if IS_WIN_PLATFORM:
-        source_dir = win32api.GetShortPathName(source_dir)
-        shutil.rmtree(source_dir, ignore_errors=False, onerror=handle_remove_readonly)
+        if os.path.exists(source_dir):
+            source_dir = win32api.GetShortPathName(source_dir)
+            cmd_args = ['rmdir', source_dir, '/S', '/Q']
+            do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
     else:
         shutil.rmtree(source_dir)
 
@@ -612,13 +634,13 @@ def extract_file(path, to_directory='.'):
         cmd_args = ['7z', 'x', path]
         # 7z does not have silent operation so we do it the hard way....
         do_execute_sub_process_get_std_out(cmd_args, to_directory, False)
-        return
+        return True
     else:
-        print '*** Could not extract `%s` as no appropriate extractor is found' + path
-        sys.exit(-1)
+        print 'Did not extract the file! Not archived or no appropriate extractor was found: ' + path
+        return False
 
     do_execute_sub_process(cmd_args, to_directory, True)
-
+    return True
 
 ###############################
 # function

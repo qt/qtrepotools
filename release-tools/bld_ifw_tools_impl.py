@@ -291,13 +291,13 @@ def archive_installerbase():
 
     bin_temp = ''
     if bldinstallercommon.is_linux_platform() or bldinstallercommon.is_mac_platform():
-        bin_path = INSTALLER_FRAMEWORK_BUILD_DIR + os.sep + 'installerbuilder' + os.sep + 'bin' + os.sep + 'installerbase'
+        bin_path = bldinstallercommon.locate_executable(INSTALLER_FRAMEWORK_BUILD_DIR, 'installerbase')
         bin_temp = SCRIPT_ROOT_DIR + os.sep + '.tempSDKMaintenanceTool'
         shutil.copy(bin_path, bin_temp)
         cmd_args_archive = ['7z', 'a', INSTALLERBASE_ARCHIVE_NAME, bin_temp]
         cmd_args_clean = ['rm', bin_temp]
     if bldinstallercommon.is_win_platform():
-        bin_path = INSTALLER_FRAMEWORK_BUILD_DIR + os.sep + 'installerbuilder' + os.sep + 'bin' + os.sep + 'installerbase.exe'
+        bin_path = bldinstallercommon.locate_executable(INSTALLER_FRAMEWORK_BUILD_DIR, 'installerbase.exe')
         bin_temp = SCRIPT_ROOT_DIR + os.sep + 'temp'
         bldinstallercommon.create_dirs(bin_temp)
         shutil.copy(bin_path, bin_temp + os.sep + 'SDKMaintenanceToolBase.exe')
