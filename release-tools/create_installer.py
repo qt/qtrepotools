@@ -75,6 +75,7 @@ TESTCLIENT_MODE             = False
 ARCHIVE_LOCATION_RESOLVER   = None
 SDK_COMPONENT_LIST          = []
 SDK_COMPONENT_IGNORE_LIST   = []
+USE_OLD_REPOGEN_SYNTAX      = False
 
 TARGET_INSTALL_DIR_NAME_TAG         = '%TARGET_INSTALL_DIR%'
 PACKAGE_DEFAULT_TAG                 = '%PACKAGE_DEFAULT_TAG%'
@@ -175,6 +176,7 @@ def parse_cmd_line():
     global DEVELOPMENT_MODE
     global OFFLINE_MODE
     global TESTCLIENT_MODE
+    global USE_OLD_REPOGEN_SYNTAX
 
     MAIN_CONFIG_NAME = sys.argv[1]
     check_configuration_file(MAIN_CONFIG_NAME)
@@ -188,6 +190,8 @@ def parse_cmd_line():
                 OFFLINE_MODE = True
             elif 'testclient' == argument:
                 TESTCLIENT_MODE = True
+            elif 'legacy_repogen' == argument:
+                USE_OLD_REPOGEN_SYNTAX = True
             else:
                 print '*** Unsupported argument given: ' + argument
                 sys.exit(-1)
@@ -804,14 +808,22 @@ def create_installer_binary():
         package_exclude_list = package_exclude_list.replace('\n', '')
         if package_exclude_list:
             cmd_args = cmd_args + ['-e', package_exclude_list]
-    cmd_args = cmd_args + ['-c', CONFIG_DIR_DST, SDK_NAME, ROOT_COMPONENT_NAME]
+    if USE_OLD_REPOGEN_SYNTAX:
+        cmd_args = cmd_args + ['-c', CONFIG_DIR_DST, SDK_NAME, ROOT_COMPONENT_NAME]
+    else:
+        cmd_args = cmd_args + ['-c', CONFIG_DIR_DST + os.sep + 'config.xml', SDK_NAME]
 
     if OFFLINE_MODE:
         cmd_args = cmd_args + ['--offline-only']
         print 'Creating repository for the SDK ...'
         print '    Outputdir: ' + REPO_OUTPUT_DIR
         print '      pkg src: ' + PACKAGES_FULL_PATH_DST
-        repogen_args = [REPOGEN_TOOL, '-p', PACKAGES_FULL_PATH_DST, '-c', CONFIG_DIR_DST, REPO_OUTPUT_DIR, ROOT_COMPONENT_NAME, '-v']
+        if USE_OLD_REPOGEN_SYNTAX:
+            print '(legacy syntax)' + PACKAGES_FULL_PATH_DST
+            repogen_args = [REPOGEN_TOOL, '-p', PACKAGES_FULL_PATH_DST, '-c', CONFIG_DIR_DST, REPO_OUTPUT_DIR, ROOT_COMPONENT_NAME, '-v']
+        else:
+            repogen_args = [REPOGEN_TOOL, '-p', PACKAGES_FULL_PATH_DST, '-c', CONFIG_DIR_DST + os.sep + 'config.xml', REPO_OUTPUT_DIR]
+
         bldinstallercommon.do_execute_sub_process(repogen_args, SCRIPT_ROOT_DIR, True)
         if not os.path.exists(REPO_OUTPUT_DIR):
             print '*** Fatal error! Unable to create repository directory: ' + REPO_OUTPUT_DIR
