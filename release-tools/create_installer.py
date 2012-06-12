@@ -337,7 +337,10 @@ def set_config_xml():
     config_template_source = SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + PLATFORM_IDENTIFIER + os.sep + configxml_filename
     # if no config.xml template, we assume the "config" template dir already contains it
     if not os.path.exists(config_template_source):
-        return
+        print '*** Error!'
+        print '*** Given config.xml template does not exist: ' + config_template_source
+        print '*** Abort!'
+        sys.exit(-1)
 
     # name has to be config.xml for installer-framework
     config_template_dest_dir = CONFIG_DIR_DST
