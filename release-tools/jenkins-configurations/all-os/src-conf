@@ -17,7 +17,7 @@ version:                5.0.0
 version_tag:            %QT_VERSION_NUM%
 package_default:        false
 [qt.src.500]
-archive_uri:            ../src_snapshot/qt-everywhere-opensource-src-5.0.0.ARCHIVE_TAG
+archive_uri:            ../src_snapshot/qt-everywhere-opensource-src-5.0.0-beta.ARCHIVE_TAG
 package_strip_dirs:     1
 target_install_dir:     /
 rpath_target:
