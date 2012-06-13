@@ -62,10 +62,6 @@ archive_name:           qt-everywhere-opensource-src-5.0.0.7z
 
 [qt.sdk.desktop]
 
-[qt.sdk.desktop.500_beta]
-version:                5.0.0
-version_tag:            %QT_VERSION%
-
 [qt.sdk.desktop.500_beta.gcc]
 archives:               desktop.500_beta.gcc
 target_install_base:    /Desktop/Qt/5.0.0-beta/gcc

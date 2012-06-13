@@ -1,12 +1,12 @@
 <?xml version="1.0"?>
 <Package>
-    <DisplayName>Qt %QT_VERSION% (msvc2010 64-bit)</DisplayName>
-    <Description>Qt %QT_VERSION% (msvc2010 64-bit)</Description>
+    <DisplayName>Qt 5.0.0 Beta (msvc2010 64-bit)</DisplayName>
+    <Description>Qt 5.0.0 Beta (msvc2010 64-bit)</Description>
     <Version>%QT_VERSION%</Version>
     <ReleaseDate>%PACKAGE_CREATION_DATE%</ReleaseDate>
     <Name>qt.sdk.desktop.500_beta.msvc2010_64</Name>
     <!--<Dependencies></Dependencies>--> <!-- Comma-separated list of dependencies - optional -->
-    <!--<Default></Default>-->
+    <Default>%PACKAGE_DEFAULT_TAG%</Default>
     <!--<AutoSelectOn></AutoSelectOn>-->
     <Script>installscript.qs</Script>   <!-- File name of a script being loaded - optional. -->
     <!--<Forced></Forced>-->

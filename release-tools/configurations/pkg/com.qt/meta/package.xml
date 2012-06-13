@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Package>
-    <DisplayName>Qt Installer</DisplayName>
-    <Description>Qt Installer5</Description>
+    <DisplayName>Qt 5 Beta Installer</DisplayName>
+    <Description>Qt 5 Beta Installer</Description>
     <Version>%SDK_VERSION_NUM%</Version>
     <ReleaseDate>%PACKAGE_CREATION_DATE%</ReleaseDate>
     <Name>com.qt</Name>

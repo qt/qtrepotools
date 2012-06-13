@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Package>
-    <DisplayName>Qt Source Components</DisplayName>
-    <Description>Qt Source Components</Description>
+    <DisplayName>Source Components</DisplayName>
+    <Description>Source Components</Description>
     <Version>1.0.0</Version>
     <ReleaseDate>%PACKAGE_CREATION_DATE%</ReleaseDate>
     <Name>qt.sdk.src</Name>
