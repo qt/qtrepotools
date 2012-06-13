@@ -55,6 +55,8 @@ IS_SOLARIS_PLATFORM     = False
 IS_MAC_PLATFORM         = False
 IS_WIN_PLATFORM         = False
 DEBUG_RPATH             = False
+MAX_DEBUG_PRINT_LENGTH  = 10000
+
 
 ###############################
 # function
@@ -520,8 +522,10 @@ def do_execute_sub_process(args, execution_path, abort_on_fail):
             theproc = subprocess.Popen(args, shell=True, stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=False)
         else:
             theproc = subprocess.Popen(args)
-        theproc.communicate()
+        output = theproc.communicate()[0]
         if theproc.returncode:
+            output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
+            print output
             print '*** Execution failed with code: %s' % str(theproc.returncode)
             if abort_on_fail:
                 sys.exit(-1)
@@ -547,8 +551,10 @@ def do_execute_sub_process_2(args, execution_path, abort_on_fail):
     try:
         os.chdir(execution_path)
         theproc = subprocess.Popen(args, shell=True)
-        theproc.communicate()
+        output = theproc.communicate()[0]
         if theproc.returncode:
+            output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
+            print output
             print '*** Execution failed with code: %s' % str(theproc.returncode)
             if abort_on_fail:
                 sys.exit(-1)
@@ -580,9 +586,9 @@ def do_execute_sub_process_get_std_out(args, execution_path, abort_on_fail, prin
             theproc = subprocess.Popen(args, shell=True, stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=False)
         else:
             theproc = subprocess.Popen(args, shell=False, stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=True)
-        output = theproc.stdout.read()
-        theproc.communicate()
+        output = theproc.communicate()[0]
         if theproc.returncode:
+            output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
             print output
             print '*** Execution failed with code: %s' % str(theproc.returncode)
             if abort_on_fail:
