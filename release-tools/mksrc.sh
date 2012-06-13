@@ -231,8 +231,10 @@ mv $MODULES $CUR_DIR
 #------------------------------------------------------------------
 rm -f $CUR_DIR/$PACKAGE_NAME/init-repository
 rm -f $CUR_DIR/$PACKAGE_NAME/.commit-template
-rm -f $CUR_DIR/$PACKAGE_NAME/.gitignore
 rm -f $CUR_DIR/$PACKAGE_NAME/.gitmodules
+find $CUR_DIR/$PACKAGE_NAME -name .gitignore -exec rm -f {} \; > /dev/null 2>&1
+find $CUR_DIR/$PACKAGE_NAME -name .gitattributes -exec rm -f {} \; > /dev/null 2>&1
+rm -f $CUR_DIR/$PACKAGE_NAME/qtbase/header.*
 # find ./ -type d -name "tests" -exec rm -rf {} \; > /dev/null 2>&1
 
 cd $CUR_DIR/$PACKAGE_NAME
