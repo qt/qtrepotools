@@ -92,7 +92,8 @@ class SdkComponent:
                 else:
                     # sanity check, duplicate template should not exist to avoid
                     # problems!
-                    print '*** Found duplicate template for: ' + item
+                    print '*** Found duplicate template for: ' + section_name
+                    print '*** Only one template for package should exist!'
                     print '*** Fix your configuration! Abort!'
                     sys.exit(-1)
         self.parse_archives(target_config, archive_location_resolver)
