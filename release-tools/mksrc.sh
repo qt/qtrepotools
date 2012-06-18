@@ -22,24 +22,9 @@ QTVER=0.0.0
 QTSHORTVER=0.0
 QTGITTAG=.sha1s
 PACK_TIME=`date '+%Y-%m-%d'`
-DOCS=skip
+DOCS=generate
 MULTIPACK=no
 IGNORE_LIST=
-
-function tool_failure ()
-{
-  echo
-  echo "*******************************************************"
-  echo "* *************************************************** *"
-  echo "* *                   NOTICE!!!                     * *"
-  echo "* *                 SKIPPING DOCS                   * *"
-  echo "* * Make sure you have correct path to working      * *"
-  echo "* * qmake in default_src.config OR add it directly  * *"
-  echo "* * into your PATH                                  * *"
-  echo "* *************************************************** *"
-  echo "*******************************************************"
-  DOCS=skip
-}
 
 function usage()
 {
@@ -47,9 +32,9 @@ function usage()
   echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub]"
   echo "where -u is path to git repo and -v is version"
   echo "Optional parameters:"
-  echo "-m one is able to tar each sub module separately"
-  echo "-d includes documentation ( NOT WORKING ATM)"
-  echo "-i submodule, will exclude the submodule from final package "
+  echo "-m             one is able to tar each sub module separately"
+  echo "-no-docs       skip generating documentation"
+  echo "-i submodule   will exclude the submodule from final package "
 }
 
 function cleanup()
@@ -108,15 +93,6 @@ function create_and_delete_submodule()
 #read machine config
 . $(dirname $0)/default_src.config
 
-# check that qmake can be found from path for generating docs
-export PATH=$QDOC_PATH:$PATH
-export LD_LIBRARY_PATH=$QDOC_LIBS:$LD_LIBRARY_PATH
-
-# Check if we have qmake in path for docs, if needed
-if [ $DOCS = generate ]; then
-  qmake -v >/dev/null 2>&1 || tool_failure
-fi
-
 # read the arguments
 while test $# -gt 0; do
   case "$1" in
@@ -128,9 +104,9 @@ while test $# -gt 0; do
       shift
       MULTIPACK=yes
     ;;
-    -d|--docs)
+    --no-docs)
       shift
-      DOCS=copy
+      DOCS=skip
     ;;
     -i|--ignore)
       shift
@@ -169,7 +145,7 @@ fi
 PACKAGE_NAME=qt-everywhere-opensource-src-$QTVER
 BIG_TAR=$PACKAGE_NAME.tar.gz
 BIG_ZIP=$PACKAGE_NAME.zip
-MODULES=submodules.txt
+MODULES=$CUR_DIR/submodules.txt
 _TMP_DIR=$CUR_DIR/$PACKAGE_NAME
 
 #------------------------------------------------------------------
@@ -280,23 +256,34 @@ find . -type f -print0 | xargs -0 sed -i -e "s/%VERSION%/$QTVER/g" -e "s/%SHORTV
 # Step 4,  generate docs
 #------------------------------------------------------------------
 if [ $DOCS = generate ]; then
-  #copying ready made docs...
-  if [ ! -d "$DOC_DIR/html" ]; then
-    echo "Warning: Can't find online documentation from $DOC_DIR"
-    echo " -- Creating src files without generated online documentation --"
-  else
-    echo "Copying docs from $DOC_DIR"
-    cd $DOC_DIR
-    tar czf online_docs.tar.gz html
-    cd doc
-    mv online_docs.tar.gz $PACKAGE_NAME/qtdoc/doc
-    cd $PACKAGE_NAME/qtdoc/doc
-    tar xzf online_docs.tar.gz
-    rm -f online_docs.tar.gz
-    cd $CUR_DIR
-  fi
+  # Make a copy of the source tree
+  DOC_BUILD=$CUR_DIR/doc-build
+  mkdir -p $DOC_BUILD
+  cp -R $CUR_DIR/$PACKAGE_NAME $DOC_BUILD
+  cd $DOC_BUILD/$PACKAGE_NAME
+  # Build bootstrapped qdoc
+  ./configure -developer-build -opensource -confirm-license -nomake examples -nomake tests -release
+  (cd qtbase && make -j30 sub-tools-bootstrap && make -j30 sub-qdoc)
+  # Run qmake in each module, as this generates the .pri files that tell qdoc what docs to generate
+  QMAKE=$PWD/qtbase/bin/qmake
+#  for i in q* ; do if [ -d $i -a -e $i/*.pro ] ; then (cd $i ; $QMAKE ; cp module-paths/modules/*.pri ../qtbase/module-paths/modules ) ; fi ; done
+  for i in `cat $MODULES` ; do if [ -d $i -a -e $i/*.pro ] ; then (cd $i ; $QMAKE ; cp module-paths/modules/*.pri ../qtbase/module-paths/modules ) ; fi ; done
+  # Build libQtHelp.so and qhelpgenerator
+  (cd qtbase && make -j30)
+  (cd qtxmlpatterns ; make -j30)
+  (cd qttools ; make -j30)
+  (cd qttools/src/assistant/help ; make -j30)
+  (cd qttools/src/assistant/qhelpgenerator ; make -j30)
+  # Generate the offline docs and qt.qch
+  (cd qtdoc ; LD_LIBRARY_PATH=$PWD/../qttools/lib make -j30 qch_docs)
+  # Put the generated docs back into the clean source directory
+  mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/html $CUR_DIR/$PACKAGE_NAME/qtdoc/doc
+  mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/qch $CUR_DIR/$PACKAGE_NAME/qtdoc/qch
+  # Cleanup
+  cd $CUR_DIR/$PACKAGE_NAME/
+  #rm -rf $DOC_BUILD
 else
-  echo " -- Creating src files without generated online documentation --"
+  echo " -- Creating src files without generated offline documentation --"
 fi
 
 #------------------------------------------------------------------
