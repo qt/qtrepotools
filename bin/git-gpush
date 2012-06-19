@@ -43,6 +43,9 @@ Description:
     An alias may contain multiple comma-separated email addresses;
     for example, to set a single alias for an entire team.
 
+    Inside .git-gpush-aliases, each alias may also be a comma-separated
+    list, in case a user uses multiple handles.
+
     If no sha1 or ref-from is specified or configured, 'HEAD' is used.
     You may configure a ref-from like this
         git config gpush.ref-from <ref-from value>
@@ -146,7 +149,9 @@ sub load_aliases
         chomp $line;
         $line =~ s,(#|//).*$,,;             # Remove any comments
         if ($line =~ /([^ ]+)\s*=\s*(\S+)/) {  # Capture the alias
-            $self->{'aliases'}->{$1} = $2;
+            for my $alias (split(/,/, $1)) {
+                $self->{'aliases'}->{$alias} = $2;
+            }
         }
     }
 
