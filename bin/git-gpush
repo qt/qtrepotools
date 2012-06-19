@@ -35,10 +35,13 @@ Description:
     have aliases set either locally in the current repository,
     globally (in your ~/.gitconfig), or system-wide.
 
-    You can and alias in your global git config like this:
+    You can add aliases to your global git config like this:
         git config --global gpush.alias.<alias key> <alias value>
-    and if you only want it local in the current repository, just drop
-    the --global option.
+    and if you only want it to be local to the current repository,
+    just drop the --global option.
+    Note that git config keys are constrained regarding allowed
+    characters, so it is impossible to map some IRC nicks via git
+    configuration.
 
     An alias may contain multiple comma-separated email addresses;
     for example, to set a single alias for an entire team.
