@@ -71,7 +71,7 @@ package_default:        true
 archive_uri:            /qt/5.0.0/linux_gcc_64/qt5_all.7z
 package_strip_dirs:     4
 target_install_dir:     /
-rpath_target:
+rpath_target:           /lib
 archive_name:           gcc_64_qt5_all.7z
 
 
