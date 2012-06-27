@@ -45,6 +45,19 @@ version:                1.2.0
 [qt.sdk]
 root_component:         yes
 
+[qt.sdk.readme]
+archives:               sdk.readme
+target_install_base:    /
+version:                5.0.0
+version_tag:            %QT_VERSION%
+package_default:        true
+[sdk.readme]
+archive_uri:            https://qt.gitorious.org/qt/qt5/blobs/raw/master/README
+package_strip_dirs:     0
+target_install_dir:     /
+rpath_target:
+archive_name:           readme.7z
+
 [qt.sdk.src]
 
 [qt.sdk.src.qt.500_beta]

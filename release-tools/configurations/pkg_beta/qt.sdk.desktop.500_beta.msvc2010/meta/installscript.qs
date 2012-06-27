@@ -5,13 +5,20 @@
 // constructor
 function Component()
 {
-    if (installer.value("os") == "win")
-    {
-    }
     if (component.fromOnlineRepository)
     {
+        // Commented line below used by the packaging scripts
         //%IFW_DOWNLOADABLE_ARCHIVE_NAMES%
     }
+}
+
+
+Component.prototype.isDefault = function()
+{
+    if (installer.environmentVariable("VS100COMNTOOLS")) {
+        return true;
+    }
+    return false;
 }
 
 
@@ -23,6 +30,7 @@ createShortcuts = function()
 {
     var qtStringVersion = "%QT_VERSION%";
     // Create a batch file with the development environment
+    var component_root_path = installer.value("TargetDir") + "%TARGET_INSTALL_DIR%";
     var batchFileName = component_root_path + "/" + "bin" + "/" + "qtenv2.bat";
     var contentString = "echo off\r\n";
     contentString += "echo Setting up environment for Qt usage...\r\n";
@@ -58,17 +66,6 @@ createShortcuts = function()
     component.addOperation( "CreateShortcut",
                             component_root_path + "/bin/linguist.exe",
                             "@StartMenuDir@/%QT_VERSION%/MSVC 2010/Linguist.lnk");
-
-    // README
-    //var notePadLocation = windir + "\\notepad.exe";
-    //component.addOperation( "CreateShortcut",
-    //                        notePadLocation,
-    //                        "@StartMenuDir@/%QT_VERSION%/MSVC 2010/Linguist.lnk");
-
-    // Examples & Demos
-    //component.addOperation( "CreateShortcut",
-    //                        component_root_path + "/bin/qtdemo.exe",
-    //                        "@StartMenuDir@/%QT_VERSION%/MSVC 2010/Examples & Demos.lnk");
 }
 
 Component.prototype.createOperations = function()
@@ -107,8 +104,5 @@ Component.prototype.createOperations = function()
 
 Component.prototype.installationFinished = function()
 {
-    if (installer.isInstaller() && component.selected)
-        {
-        }
 }
 

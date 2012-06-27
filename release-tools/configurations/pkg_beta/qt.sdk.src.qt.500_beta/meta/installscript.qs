@@ -5,11 +5,9 @@
 // constructor
 function Component()
 {
-    if (installer.value("os") == "win")
-    {
-    }
     if (component.fromOnlineRepository)
     {
+        // Commented line below used by the packaging scripts
         //%IFW_DOWNLOADABLE_ARCHIVE_NAMES%
     }
 }

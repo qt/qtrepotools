@@ -5,11 +5,9 @@
 // constructor
 function Component()
 {
-    if (installer.value("os") == "win")
-    {
-    }
     if (component.fromOnlineRepository)
     {
+        // Commented line below used by the packaging scripts
         //%IFW_DOWNLOADABLE_ARCHIVE_NAMES%
     }
 }
@@ -53,8 +51,5 @@ Component.prototype.createOperations = function()
 
 Component.prototype.installationFinished = function()
 {
-    if (installer.isInstaller() && component.selected)
-        {
-        }
 }
 
