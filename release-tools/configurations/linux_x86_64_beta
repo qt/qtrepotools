@@ -5,7 +5,7 @@ name:                   qt.sdk
 identifier:             linux
 
 [ArchiveRemoteLocation.some_server_nickname_here]
-base_url:               http://<server_address_here>/packages/
+base_url:               http://origin.releases.qt-project.org
 base_path:
 
 # for testing purposes
@@ -53,7 +53,7 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [src.qt.500_beta]
-archive_uri:            /qt/5.0.0/src/qt-everywhere-opensource-src-5.0.0.tar.gz
+archive_uri:            /qt5.0-beta-snapshots/src_snapshot/qt-everywhere-opensource-src-5.0.0-beta.tar.gz
 package_strip_dirs:     1
 target_install_dir:     /
 rpath_target:
@@ -68,7 +68,7 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [desktop.500_beta.gcc_64]
-archive_uri:            /qt/5.0.0/linux_gcc_64/qt5_all.7z
+archive_uri:            /qt5.0-beta-snapshots/linux_64_release/qt5_desktop_bin_linux64_1110.7z
 package_strip_dirs:     4
 target_install_dir:     /
 rpath_target:           /lib

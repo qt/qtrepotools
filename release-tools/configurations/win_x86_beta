@@ -5,7 +5,7 @@ name:                   qt.sdk
 identifier:             windows
 
 [ArchiveRemoteLocation.some_server_nickname_here]
-base_url:               http://<server_address_here>/packages/
+base_url:               http://origin.releases.qt-project.org
 base_path:
 
 # for testing purposes
@@ -36,7 +36,7 @@ packages_dir:           pkg_beta
 
 [InstallerFrameworkTools]
 name:                   ifwt
-package_url:            http://<server_address_here>/packages/.../installer-framework-build-win.7z
+package_url:            http://origin.releases.qt-project.org/utils/bin_tools/pre_sdk_ifw/installer-framework-build-win.7z
 version:                1.2.0
 
 
@@ -55,7 +55,7 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [src.qt.500_beta]
-archive_uri:            /qt/5.0.0/src/qt-everywhere-opensource-src-5.0.0.zip
+archive_uri:            /qt5.0-beta-snapshots/src_snapshot/qt-everywhere-opensource-src-5.0.0-beta.zip
 package_strip_dirs:     1
 target_install_dir:     /
 rpath_target:
@@ -70,8 +70,8 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [desktop.500_beta.msvc2010_64]
-archive_uri:            /qt/5.0.0/windows_vs2010_64/qt5_all.7z
-package_strip_dirs:     5
+archive_uri:            /qt5.0-beta-snapshots/win_release/qt5_desktop_bin_win7.7z
+package_strip_dirs:     1
 target_install_dir:     /
 rpath_target:
 archive_name:           msvc2010_64_all.7z
@@ -83,8 +83,8 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [desktop.500_beta.msvc2010]
-archive_uri:            /qt/5.0.0/windows_vs2010_32/qt5_all.7z
-package_strip_dirs:     5
+archive_uri:            /qt5.0-beta-snapshots/win_release/qt5_desktop_bin_win7.7z
+package_strip_dirs:     1
 target_install_dir:     /
 rpath_target:
 archive_name:           msvc2010_all.7z

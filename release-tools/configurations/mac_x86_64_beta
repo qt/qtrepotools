@@ -5,7 +5,7 @@ name:                   qt.sdk
 identifier:             mac
 
 [ArchiveRemoteLocation.some_server_nickname_here]
-base_url:               http://<server_address_here>/packages/
+base_url:               http://origin.releases.qt-project.org
 base_path:
 
 # for testing purposes
@@ -19,7 +19,7 @@ file_list:
 package_list:
 
 [qtmenunib]
-package_url:            http://<server_address_here>/packages/.../ifw/qt_menu.nib.7z
+package_url:            http://origin.releases.qt-project.org/utils/bin_tools/qt_menu.nib.7z
 
 [SdkUpdateRepository]
 repository_url_release: http://../qt5repository/macx/x64/online_qt5sdk_repo
@@ -39,7 +39,7 @@ packages_dir:           pkg_beta
 
 [InstallerFrameworkTools]
 name:                   ifwt
-package_url:            http://<server_address_here>/.../ifw/1.2.0/installer-framework-build-mac.7z
+package_url:            http://origin.releases.qt-project.org/utils/bin_tools/pre_sdk_ifw/installer-framework-build-mac.7z
 version:                1.2.0
 
 
@@ -58,7 +58,7 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [src.qt.500_beta]
-archive_uri:            /qt/5.0.0/src/qt-everywhere-opensource-src-5.0.0.tar.gz
+archive_uri:            /qt5.0-beta-snapshots/src_snapshot/qt-everywhere-opensource-src-5.0.0-beta.tar.gz
 package_strip_dirs:     1
 target_install_dir:     /
 rpath_target:
@@ -73,8 +73,8 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [desktop.500_beta.gcc_64]
-archive_uri:            /qt/5.0.0/mac_cocoa_10.7/qt5_all.7z
-package_strip_dirs:     4
+archive_uri:            /qt5.0-beta-snapshots/mac_64_release/qt-5.0.0-desktop-mac-cocoa-64bit.7z
+package_strip_dirs:     1
 target_install_dir:     /
 rpath_target:
 archive_name:           gcc_64_mac_qt5_all.7z
