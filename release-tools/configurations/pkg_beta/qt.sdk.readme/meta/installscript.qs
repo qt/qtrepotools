@@ -34,12 +34,17 @@ Component.prototype.createOperations = function()
             return;
         }
 
-        // README       Qt Readme - C:\Windows\notepad.exe <installdir>\README
+        // README
         var notePadLocation = windir + "\\notepad.exe";
         component.addOperation( "CreateShortcut",
                                 notePadLocation,
                                 "@StartMenuDir@/README.lnk",
                                 component_root_path + "/README");
+
+        // shortcut to qt-project web page
+        component.addOperation( "CreateShortcut",
+                                "@TargetDir@/qt-project.org.html",
+                                "@StartMenuDir@/qt-project.org.lnk");
     }
 }
 

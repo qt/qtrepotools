@@ -47,7 +47,7 @@ version:                1.2.0
 root_component:         yes
 
 [qt.sdk.readme]
-archives:               sdk.readme
+archives:               sdk.readme, sdk.qt_project_url
 target_install_base:    /
 version:                5.0.0
 version_tag:            %QT_VERSION%
@@ -58,6 +58,12 @@ package_strip_dirs:     0
 target_install_dir:     /
 rpath_target:
 archive_name:           readme.7z
+[sdk.qt_project_url]
+archive_uri:            qt-project-url.7z
+package_strip_dirs:     0
+target_install_dir:     /
+rpath_target:
+archive_name:           qt-project-url.7z
 
 [qt.sdk.src]
 
