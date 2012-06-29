@@ -49,12 +49,12 @@
 OLD_PATH=$PATH
 export PATH=$PWD/Desktop/Qt/5.0.0/gcc/bin:$PWD/qtbase/bin:$PWD/../qt-everywhere-opensource-src-5.0.0/qtbase/bin:$PATH
 CUR_DIR=$PWD
+export QMAKEPATH=$PWD/Desktop/Qt/5.0.0/gcc
 # Configuring shadow build.
 ../qt-everywhere-opensource-src-5.0.0/configure -opensource -confirm-license -prefix $PWD/Desktop/Qt/5.0.0/gcc -make examples -nomake tests -release -no-gtkstyle
 
-CUR_DIR=$PWD
 # Reading the build order from Makefile.
-MODULES=$(grep "^make_default:" Makefile| cut -d: -f2)
+MODULES=$(grep "^make_first:" Makefile| cut -d: -f2)
 
 export IFS=" "
 
@@ -69,7 +69,7 @@ function failure_i()
 }
 
 for MODULE in $MODULES; do
-    if [ $MODULE == sub-qtwebkit-pri-make_default ]; then
+    if [ $MODULE == sub-qtwebkit-pri-make_first ]; then
         MODULE=qtwebkit
     else
         mod=${MODULE:7}
@@ -83,10 +83,6 @@ for MODULE in $MODULES; do
         if [ $MODULE == qtwebkit ]; then
             make module-$MODULE -j4 || failure_m $MODULE
             # we can't install webkit just yet
-        elif [ $MODULE == qtwebkit-examples-and-demos ]; then
-            echo "***************************************"
-            echo "Skipping $MODULE"
-            echo "***************************************"
         else
             make module-$MODULE -j4 || failure_m $MODULE
             pushd $MODULE

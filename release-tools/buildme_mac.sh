@@ -50,11 +50,11 @@ export PATH=$PWD/qtbase/bin:$PATH
 export DYLD_FRAMEWORK_PATH=$PWD/qtbase/lib:$DYLD_FRAMEWORK_PATH
 export IFS=" "
 CUR_DIR=$PWD
-
+export LDFLAGS="-L$PWD/qtbase/lib"
 ./configure -opensource -confirm-license -prefix $PWD/qtbase -make examples -make libs -nomake tests -release
 
 # Reading correct build order from Makefile.
-MODULES=$(grep "^make_default:" Makefile| cut -d: -f2)
+MODULES=$(grep "^make_first:" Makefile| cut -d: -f2)
 
 function failure_m()
 {
@@ -69,19 +69,18 @@ function failure_i()
 }
 
 for MODULE in $MODULES; do
-    if [ $MODULE == sub-qtwebkit-pri-make_default ]; then
+    if [ $MODULE == sub-qtwebkit-pri-make_first ]; then
         MODULE=qtwebkit
     else
         mod=${MODULE:7}
-        MODULE=${mod%%-make_default}
+        MODULE=${mod%%-make_first}
     fi
 
     if [ "$MODULE" != "" ]; then
         echo "***************************************"
         echo "Now making and installing $MODULE"
         echo "***************************************"
-        if [ $MODULE == qtwebkit ]; then
-            # Remove this once we have webkit building nicely in mac.
+        if [ $MODULE == something_you_dont_want_to_build ]; then
             echo "***************************************"
             echo "Skipping $MODULE"
             echo "***************************************"
@@ -95,8 +94,8 @@ for MODULE in $MODULES; do
     fi
 done
 
-# install all
-make install INSTALL_ROOT=$PWD/Desktop || failure_i "All modules"
+# Disble install all for now
+# make install INSTALL_ROOT=$PWD/Desktop || failure_i "All modules"
 
 export PATH=$OLD_PATH
 
