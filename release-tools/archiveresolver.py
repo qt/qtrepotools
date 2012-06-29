@@ -67,11 +67,12 @@ class ArchiveLocationResolver:
     ###############################
     # Constructor
     ###############################
-    def __init__(self, target_config, testclient_mode):
+    def __init__(self, target_config, testclient_mode, configurations_root_dir):
         """Init data based on the target configuration"""
         self.server_list = []
         self.pkg_templates_dir = ''
         self.default_server = None
+        self.configurations_root_dir = configurations_root_dir
         # get packages tempalates src dir first
         self.pkg_templates_dir = os.path.normpath(bldinstallercommon.config_section_map(target_config,'WorkingDirectories')['packages_dir'])
         server_namespace = os.path.normpath(bldinstallercommon.config_section_map(target_config,'WorkingDirectories')['packages_dir'])
@@ -133,7 +134,7 @@ class ArchiveLocationResolver:
         if os.path.isfile(archive_uri):
             return archive_uri
         # 2. check if given archive_uri denotes a package under package templates directory
-        temp = os.path.normpath(self.pkg_templates_dir + os.sep + package_name + os.sep + 'data' + os.sep + archive_uri)
+        temp = os.path.normpath(self.configurations_root_dir + os.sep + self.pkg_templates_dir + os.sep + package_name + os.sep + 'data' + os.sep + archive_uri)
         if os.path.isfile(temp):
             return temp
         # 3. check if given URI is valid full URL

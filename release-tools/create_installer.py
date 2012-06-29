@@ -269,7 +269,7 @@ def init_data():
         IFW_TOOLS_DIR = os.path.normpath(IFW_TOOLS_DIR)
 
     # init data for archive locator
-    ARCHIVE_LOCATION_RESOLVER = ArchiveLocationResolver(CONFIG_PARSER_TARGET, TESTCLIENT_MODE)
+    ARCHIVE_LOCATION_RESOLVER = ArchiveLocationResolver(CONFIG_PARSER_TARGET, TESTCLIENT_MODE, SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR)
     ARCHIVE_LOCATION_RESOLVER.print_server_list()
 
     if DUMP_CONFIG:
