@@ -859,7 +859,9 @@ if ( $UPDATE !=  0 ) {
 if ( $BUILD !=  0 ) {
     print 'Building Qt 5 in ',$rootDir,"\n";
     winRemoveGitFromPath() if $minGW;
-    my @configureArguments = ('-prefix', File::Spec->catfile($rootDir, 'qtbase'));
+    my $developerBuild = readQt5ToolConfigBool($developerBuildConfigKey);
+    my @configureArguments;
+    push(@configureArguments, '-prefix', File::Spec->catfile($rootDir, 'qtbase')) unless $developerBuild;
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
 #   --- Shadow builds: Remove and re-create directory
@@ -875,24 +877,6 @@ if ( $BUILD !=  0 ) {
 #   ---- Configure and build
     my $brc = execute(File::Spec->catfile($rootDir, 'configure'), @configureArguments);
     die 'Configure failed'  if ($brc);
-#   --- Workaround: The module .pri files are currently (as of 30.9.2011) not copied to their
-#       target location on Windows.
-    if ($os == $OS_WINDOWS) {
-        my $targetProfileFolder = File::Spec->catfile($rootDir, 'qtbase', 'mkspecs', 'modules');
-        foreach my $module (@MODULES) {
-            my $sourceProfilePattern = File::Spec->catfile($rootDir, $module, 'modules' , '*.pri');
-            foreach my $sourceProfile (glob($sourceProfilePattern)) {
-                my $baseName = basename($sourceProfile);
-                if (index($baseName, 'jsondb') < 0 && index($baseName, 'compositor') < 0) {
-                    my $target = File::Spec->catfile($targetProfileFolder, basename($sourceProfile));
-                    if ( ! -f $target) {
-                        print 'Workaround: Copying ', $sourceProfile, ' to ',$target,"\n";
-                        File::Copy::copy($sourceProfile, $targetProfileFolder) or die ('Copy error '. $!);
-                    }
-                }
-            }
-        }
-   }
 } # BUILD
 
 if ( $BUILD + $MAKE !=  0) {
@@ -904,12 +888,7 @@ if ( $BUILD + $MAKE !=  0) {
         }
     }
 #   Run a global make for non-shadow developer build, else call 'build'.
-    if (readQt5ToolConfigBool($developerBuildConfigKey) && $makeShadowBuildDir eq '') {
-        executeCheck($make, @makeArgs);
-    } else {
-        setMakeEnvironment($make, @makeArgs);
-        executeCheck('perl', 'build');
-    }
+    executeCheck($make, @makeArgs);
 } # MAKE
 
 if ( $BUILD_WEBKIT !=  0) {
