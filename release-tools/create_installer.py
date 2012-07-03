@@ -56,6 +56,8 @@ COMMON_CONFIG_NAME          = 'common'
 COMMON_CONFIG_DIR_NAME      = 'all-os'
 REPO_OUTPUT_DIR             = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + 'repository')
 SDK_VERSION_NUMBER          = ''
+SDK_VERSION_TAG             = ''
+LICENSE_TYPE                = 'opensource'
 PACKAGES_DIR_NAME_LIST      = []
 PACKAGES_FULL_PATH_DST      = 'pkg'
 ROOT_COMPONENT_NAME         = ''
@@ -76,6 +78,9 @@ ARCHIVE_LOCATION_RESOLVER   = None
 SDK_COMPONENT_LIST          = []
 SDK_COMPONENT_IGNORE_LIST   = []
 USE_OLD_REPOGEN_SYNTAX      = False
+
+INSTALLER_NAMING_SCHEME_COMPILER    = ''
+INSTALLER_NAMING_SCHEME_TARGET_ARCH = ''
 
 TARGET_INSTALL_DIR_NAME_TAG         = '%TARGET_INSTALL_DIR%'
 PACKAGE_DEFAULT_TAG                 = '%PACKAGE_DEFAULT_TAG%'
@@ -177,6 +182,8 @@ def parse_cmd_line():
     global OFFLINE_MODE
     global TESTCLIENT_MODE
     global USE_OLD_REPOGEN_SYNTAX
+    global INSTALLER_NAMING_SCHEME_COMPILER
+    global INSTALLER_NAMING_SCHEME_TARGET_ARCH
 
     MAIN_CONFIG_NAME = sys.argv[1]
     check_configuration_file(MAIN_CONFIG_NAME)
@@ -192,6 +199,14 @@ def parse_cmd_line():
                 TESTCLIENT_MODE = True
             elif 'legacy_repogen' == argument:
                 USE_OLD_REPOGEN_SYNTAX = True
+            elif argument.find('target_architecture') >= 0:
+                values = argument.split('=')
+                if values[1] != '':
+                    INSTALLER_NAMING_SCHEME_TARGET_ARCH = values[1]
+            elif argument.find('compiler') >= 0:
+                values = argument.split('=')
+                if values[1] != '':
+                    INSTALLER_NAMING_SCHEME_COMPILER = values[1]
             else:
                 print '*** Unsupported argument given: ' + argument
                 sys.exit(-1)
@@ -210,7 +225,9 @@ def init_data():
     global CONFIG_PARSER_TARGET
     global PACKAGES_DIR_NAME_LIST
     global SDK_VERSION_NUMBER
+    global SDK_VERSION_TAG
     global SDK_NAME
+    global LICENSE_TYPE
     global SDK_NAME_ROOT
     global PACKAGE_NAMESPACE
     global PACKAGES_FULL_PATH_DST
@@ -239,7 +256,9 @@ def init_data():
     PACKAGES_DIR_NAME   = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'WorkingDirectories')['packages_dir']
     PACKAGES_DIR_NAME   = os.path.normpath(PACKAGES_DIR_NAME)
     SDK_VERSION_NUMBER  = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['version']
+    SDK_VERSION_TAG     = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['tag']
     SDK_NAME            = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['name']
+    LICENSE_TYPE        = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['license']
     SDK_NAME_ROOT       = SDK_NAME
     PACKAGE_NAMESPACE   = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'PackageNamespace')['name']
 
@@ -257,12 +276,6 @@ def init_data():
         else:
             PACKAGES_DIR_NAME_LIST.append(os.path.normpath(SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR + os.sep + package_template_dir))
 
-    if OFFLINE_MODE:
-        SDK_NAME = SDK_NAME + '-offline'
-    else:
-        SDK_NAME = SDK_NAME + '-online'
-    if TESTCLIENT_MODE:
-        SDK_NAME = SDK_NAME + '-RnD_testclient'
     if not DEVELOPMENT_MODE:
         tools_dir_name = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'InstallerFrameworkTools')['name']
         IFW_TOOLS_DIR = SCRIPT_ROOT_DIR + os.sep + tools_dir_name
@@ -791,16 +804,27 @@ def create_installer_binary():
     print '=================================================='
     global SDK_NAME
 
-    instruction_set = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'TargetArchitechture')['instruction_set']
-    cmd_args = []
-    SDK_NAME += '-' + bldinstallercommon.get_platform_suffix()
-    SDK_NAME += '-' + instruction_set
-    tmp = SDK_VERSION_NUMBER
+    # naming scheme: qt-<platform>-<license>-<version>-<tag>-<compiler>-<target_arch>-<offline/online>.<extension>
+    #    license is opensource or commercial
+    #    extension is exe, dmg, or run
+    #    tag is alpha1, beta2, rc1, etc (no tag for final).
+    #    platform is win, linux, mac, etc.
+    platform        = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'PlatformIdentifier')['identifier']
+    installer_type  = 'offline' if OFFLINE_MODE else 'online'
+    extension       = '.run' if bldinstallercommon.is_linux_platform() else ''
 
-    SDK_NAME = SDK_NAME + '-v' + tmp
+    SDK_NAME = SDK_NAME + '-' + platform + '-' + LICENSE_TYPE + '-' + SDK_VERSION_NUMBER
+    # optional
+    if SDK_VERSION_TAG:
+        SDK_NAME = SDK_NAME + '-' + SDK_VERSION_TAG
+    # optional
+    if INSTALLER_NAMING_SCHEME_COMPILER:
+        SDK_NAME = SDK_NAME + '-' + INSTALLER_NAMING_SCHEME_COMPILER
+    # optional
+    if INSTALLER_NAMING_SCHEME_TARGET_ARCH:
+        SDK_NAME = SDK_NAME + '-' + INSTALLER_NAMING_SCHEME_TARGET_ARCH
 
-    if bldinstallercommon.is_linux_platform():
-        SDK_NAME = SDK_NAME + '.run'
+    SDK_NAME = SDK_NAME + '-' + installer_type + extension
 
     cmd_args = [BINARYCREATOR_TOOL, '-t', INSTALLERBASE_TOOL, '-v', '-p', PACKAGES_FULL_PATH_DST]
     if OFFLINE_MODE:

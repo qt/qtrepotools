@@ -1,5 +1,7 @@
 [SdkCommon]
-version:                            5.0.0-beta
-name:                               Qt-Installer
+version:                            5.0.0
+tag:                                beta1
+name:                               qt
+license:                            opensource
 
 
