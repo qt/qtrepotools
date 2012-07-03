@@ -56,7 +56,7 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [sdk.readme]
-archive_uri:            https://qt.gitorious.org/qt/qt5/blobs/raw/master/README
+archive_uri:            http://origin.releases.qt-project.org/prebuilt/readme_unix_line-endings.7z
 package_strip_dirs:     0
 target_install_dir:     /
 rpath_target:
