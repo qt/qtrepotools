@@ -57,7 +57,7 @@ COMMON_CONFIG_DIR_NAME      = 'all-os'
 REPO_OUTPUT_DIR             = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + 'repository')
 SDK_VERSION_NUMBER          = ''
 SDK_VERSION_TAG             = ''
-LICENSE_TYPE                = 'opensource'
+LICENSE_TYPE                = ''
 PACKAGES_DIR_NAME_LIST      = []
 PACKAGES_FULL_PATH_DST      = 'pkg'
 ROOT_COMPONENT_NAME         = ''
@@ -184,6 +184,7 @@ def parse_cmd_line():
     global USE_OLD_REPOGEN_SYNTAX
     global INSTALLER_NAMING_SCHEME_COMPILER
     global INSTALLER_NAMING_SCHEME_TARGET_ARCH
+    global LICENSE_TYPE
 
     MAIN_CONFIG_NAME = sys.argv[1]
     check_configuration_file(MAIN_CONFIG_NAME)
@@ -207,6 +208,10 @@ def parse_cmd_line():
                 values = argument.split('=')
                 if values[1] != '':
                     INSTALLER_NAMING_SCHEME_COMPILER = values[1]
+            elif argument.find('licence_type') >= 0:
+                values = argument.split('=')
+                if values[1] != '':
+                    LICENSE_TYPE = values[1]
             else:
                 print '*** Unsupported argument given: ' + argument
                 sys.exit(-1)
@@ -258,7 +263,8 @@ def init_data():
     SDK_VERSION_NUMBER  = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['version']
     SDK_VERSION_TAG     = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['tag']
     SDK_NAME            = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['name']
-    LICENSE_TYPE        = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['license']
+    if not LICENSE_TYPE:
+        LICENSE_TYPE        = bldinstallercommon.config_section_map(CONFIG_PARSER_COMMON,'SdkCommon')['license']
     SDK_NAME_ROOT       = SDK_NAME
     PACKAGE_NAMESPACE   = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'PackageNamespace')['name']
 
