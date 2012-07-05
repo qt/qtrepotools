@@ -496,6 +496,14 @@ def repackage_content_for_installation(install_dir, package_raw_name, target_ins
 
     # lastly compress the component back to .7z archive
     archive_component(package_name, archive_name)
+    # move archive in temporary path
+    tmp_path = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + package_name + os.sep + 'tmp')
+    bldinstallercommon.create_dirs(tmp_path)
+    src_file = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + package_name + os.sep + 'data' + os.sep + archive_name)
+    dst_file = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + package_name + os.sep + 'tmp' + os.sep + archive_name)
+    print '     Moving: ' + src_file
+    print '       Into: ' + dst_file
+    shutil.move(src_file, dst_file)
 
 
 ##############################################################
@@ -592,6 +600,29 @@ def handle_archive(sdk_component, archive):
                                        archive.package_strip_dirs,
                                        sdk_component.package_name,
                                        archive.archive_name)
+
+
+##############################################################
+# Finalize package archives
+##############################################################
+def finalize_package_archives(sdk_component):
+    """Finalize package archives"""
+    print '     Finalize package archives for: ' + sdk_component.package_name
+    # move arhives from tmp under data
+    src_path = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + sdk_component.package_name + os.sep + 'tmp')
+    if not os.path.exists(src_path):
+        return
+
+    dst_path = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + sdk_component.package_name + os.sep + 'data')
+    ldir = os.listdir(src_path)
+    for item in ldir:
+        src_file = src_path + os.sep + item
+        dst_file = dst_path + os.sep + item
+        print '     Moving: ' + src_file
+        print '       Into: ' + dst_file
+        shutil.move(src_file, dst_file)
+    # lastly remove tmp dir
+    bldinstallercommon.remove_tree(src_path)
 
 
 ##############################################################
@@ -710,6 +741,8 @@ def create_target_components(target_config, offline_mode):
                 # fetch packages only if offline installer, for online installer just handle the metadata
                 if offline_mode:
                     handle_archive(sdk_component, archive)
+            # finalize archives
+            finalize_package_archives(sdk_component)
             # substitute downloadable archive names in installscript.qs
             downloadableArchives_list = sdk_component.generate_downloadable_archive_list(downloadable_archive_list)
             substitute_component_tags(downloadableArchives_list, meta_dir_dest)
