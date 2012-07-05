@@ -120,3 +120,29 @@ target_install_dir:     /bin
 rpath_target:
 archive_name:           icu_49_win_32.7z
 
+[qt.sdk.misc.vcredist_x86]
+archives:               sdk.misc.vcredist_x86
+target_install_base:    /vcredist
+version:                2010-12-4
+version_tag:            %VCREDIST_X86_VERSION%
+package_default:        false
+[sdk.misc.vcredist_x86]
+archive_uri:            http://origin.releases.qt-project.org/prebuilt/vcredist_x86.7z
+package_strip_dirs:     0
+target_install_dir:     /
+rpath_target:
+archive_name:           vcredist_x86.7z
+
+[qt.sdk.misc.vcredist_x64]
+archives:               sdk.misc.vcredist_x64
+target_install_base:    /vcredist
+version:                2010-12-4
+version_tag:            %VCREDIST_X64_VERSION%
+package_default:        false
+[sdk.misc.vcredist_x64]
+archive_uri:            http://origin.releases.qt-project.org/prebuilt/vcredist_x64.7z
+package_strip_dirs:     0
+target_install_dir:     /
+rpath_target:
+archive_name:           vcredist_x64.7z
+
