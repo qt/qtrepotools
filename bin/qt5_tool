@@ -156,25 +156,36 @@ sub msysGitUtility
 }
 
 my $qmakeSpec = $ENV{'QMAKESPEC'};
-my $minGW = $os == $OS_WINDOWS && defined($qmakeSpec) && index($qmakeSpec,'g++') > 0;
 my $make = 'make';
-$make = $minGW ?  'mingw32-make' : 'nmake' if ($os == $OS_WINDOWS);
+my @makeArgs = ('-s');
+my $makeForceArg = '-k';
+my $minGW = 0;
 
-my @makeArgs = $os == $OS_WINDOWS && !$minGW ? ('/s', '/l') : ('-s');
-
-if ($os == $OS_WINDOWS) {  # Switch cl compiler to multicore
-    my $oldCL = $ENV{'CL'};
-    if (defined $oldCL) {
-        $ENV{'CL'} = $oldCL . ' /MP'
+if ($os == $OS_WINDOWS) {
+    $minGW = defined($qmakeSpec) && index($qmakeSpec,'g++') > 0;
+    if ($minGW) {
+        $make = 'mingw32-make';
     } else {
-        $ENV{'CL'} = '/MP'
-    }
+        @makeArgs = ('/s', '/l');
+        $makeForceArg = '/k';
+        my $jom = which('jom');
+        if (defined $jom) {
+            $make = $jom;
+        } else {
+            $make = 'nmake';
+            # Switch cl compiler to multicore
+            my $oldCL = $ENV{'CL'};
+            if (defined $oldCL) {
+                $ENV{'CL'} = $oldCL . ' /MP'
+            } else {
+                $ENV{'CL'} = '/MP'
+            }
+        } # jom
+    } # !MinGW
 }
 
 my $git = which('git'); # TODO: Mac, Windows special cases?
 die ('Unable to locate git') unless defined $git;
-
-my $makeForceArg = $os == $OS_WINDOWS && !$minGW ? '/k' : '-k';
 
 my $rootDir = '';
 my $baseDir = '';
@@ -856,14 +867,15 @@ if ( $UPDATE !=  0 ) {
 
 # ---- Configure and build
 
+my $makeInstallRequired = 0;
+
 if ( $BUILD !=  0 ) {
     print 'Building Qt 5 in ',$rootDir,"\n";
     winRemoveGitFromPath() if $minGW;
-    my $developerBuild = readQt5ToolConfigBool($developerBuildConfigKey);
     my @configureArguments;
-    push(@configureArguments, '-prefix', File::Spec->catfile($rootDir, 'qtbase')) unless $developerBuild;
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
+    $makeInstallRequired = grep(/^-prefix$/, @configureArguments);
 #   --- Shadow builds: Remove and re-create directory
     my $shadowBuildDir = shadowBuildFolder();
     if ($shadowBuildDir ne '') {
@@ -893,6 +905,11 @@ if ( $BUILD + $MAKE !=  0) {
 
 if ( $BUILD_WEBKIT !=  0) {
     buildWebKit();
+}
+
+if ( $BUILD && $makeInstallRequired ) {
+    print 'Installing Qt 5 from ',$rootDir,"\n";
+    executeCheck($make, (@makeArgs, 'install'));
 }
 
 # ---- Build documentation. Note: qch_docs may fail on Windows.
