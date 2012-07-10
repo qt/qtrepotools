@@ -174,6 +174,7 @@ tar xzf $BIG_TAR
 rm -f $BIG_TAR
 cd $REPO_DIR
 _SHA=`cat .git/refs/heads/master`
+rm -f $_TMP_DIR/$QTGITTAG
 echo "qt5=$_SHA">$_TMP_DIR/$QTGITTAG
 
 #archive all the submodules and generate file from sha1's
@@ -199,7 +200,7 @@ while read submodule; do
   rm -f $_file
   cd $REPO_DIR
 done < $MODULES
-mv $MODULES $CUR_DIR
+#mv $MODULES $CUR_DIR
 
 #------------------------------------------------------------------
 # Step 2,  remove rest of the unnecessary files and ignored submodules
@@ -240,10 +241,10 @@ while read submodule; do
     echo "------------------------------------------------------------------------">>$CUR_DIR/_tmp_shas
   fi
   __skip_sub=no
-done < $CUR_DIR/$MODULES
-cat $CUR_DIR/_tmp_mod > $CUR_DIR/$MODULES
+done < $MODULES
+cat $CUR_DIR/_tmp_mod > $MODULES
+rm -f $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
 cat $CUR_DIR/_tmp_shas > $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
-
 #------------------------------------------------------------------
 # Step 3,  replace version strings with correct version, and
 # patch Qt_PACKAGE_TAG and QT_PACKAGEDATE_STR defines
