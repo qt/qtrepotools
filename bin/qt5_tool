@@ -909,7 +909,11 @@ if ( $BUILD_WEBKIT !=  0) {
 
 if ( $BUILD && $makeInstallRequired ) {
     print 'Installing Qt 5 from ',$rootDir,"\n";
-    executeCheck($make, (@makeArgs, 'install'));
+    my @installArgs = @makeArgs;
+    # Turn of parallelization for make install, which is known to fail with jom.
+    push (@installArgs, '-j', '1') unless (index($make, 'nmake') >= 0);
+    push (@installArgs, 'install');
+    executeCheck($make, @installArgs);
 }
 
 # ---- Build documentation. Note: qch_docs may fail on Windows.
