@@ -37,7 +37,7 @@ createShortcuts = function()
     contentString += "set QTDIR=" + component_root_path + "\r\n";
     contentString += "set PATH=%QTDIR%\\bin;%PATH%\r\n";
     contentString += "cd /D %QTDIR%\r\n";
-    contentString += "echo Remember to call vcvarsall.bat amd64 to complete environment setup!\r\n";
+    contentString += "echo Remember to call vcvarsall.bat to complete environment setup!\r\n";
     // Dump batch file
     component.addOperation("AppendFile", batchFileName, contentString);
 
