@@ -69,7 +69,7 @@ archive_name:           qt-project-url.7z
 
 [qt.sdk.src.qt.500_beta]
 archives:               src.qt.500_beta
-target_install_base:    /Src/Qt/5.0.0-beta/
+target_install_base:    /Src/Qt/5.0.0-beta1/
 version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
@@ -84,7 +84,7 @@ archive_name:           qt-everywhere-opensource-src-5.0.0.7z
 
 [qt.sdk.desktop.500_beta.msvc2010_64]
 archives:               desktop.500_beta.msvc2010_64, icu_49.win_64
-target_install_base:    /Desktop/Qt/5.0.0-beta/msvc2010_64
+target_install_base:    /Desktop/Qt/5.0.0-beta1/msvc2010_64
 version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
@@ -103,7 +103,7 @@ archive_name:           icu_49_win_64.7z
 
 [qt.sdk.desktop.500_beta.msvc2010]
 archives:               desktop.500_beta.msvc2010, icu_49.win_32
-target_install_base:    /Desktop/Qt/5.0.0-beta/msvc2010
+target_install_base:    /Desktop/Qt/5.0.0-beta1/msvc2010
 version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true

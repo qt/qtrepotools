@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Package>
-    <DisplayName>Qt 5 Beta Desktop Qt Components</DisplayName>
-    <Description>Desktop Qt 5 Beta Components</Description>
+    <DisplayName>Qt 5 Beta 1 Desktop Qt Components</DisplayName>
+    <Description>Desktop Qt 5 Beta 1 Components</Description>
     <Version>%SDK_VERSION_NUM%</Version>
     <ReleaseDate>%PACKAGE_CREATION_DATE%</ReleaseDate>
     <Name>com.qt.desktop.qt</Name>

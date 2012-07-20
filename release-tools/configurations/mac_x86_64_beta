@@ -66,7 +66,7 @@ archive_name:           readme.7z
 
 [qt.sdk.src.qt.500_beta]
 archives:               src.qt.500_beta
-target_install_base:    /Src/Qt/5.0.0-beta/
+target_install_base:    /Src/Qt/5.0.0-beta1/
 version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
@@ -81,7 +81,7 @@ archive_name:           qt-everywhere-opensource-src-5.0.0.7z
 
 [qt.sdk.desktop.500_beta.gcc_64]
 archives:               desktop.500_beta.gcc_64
-target_install_base:    /Desktop/Qt/5.0.0-beta/gcc_64
+target_install_base:    /Desktop/Qt/5.0.0-beta1/gcc_64
 version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true

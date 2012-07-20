@@ -1,16 +1,16 @@
 <?xml version="1.0"?>
 <Installer>
-    <Name>Qt 5.0.0 Beta Installer</Name>
+    <Name>Qt 5.0.0 Beta 1 Installer</Name>
     <Version>%SDK_VERSION_NUM%</Version>
-    <Title>Qt 5.0.0 Beta</Title>
-    <MaintenanceTitle>Maintain Qt 5.0.0 Beta</MaintenanceTitle>
+    <Title>Qt 5.0.0 Beta 1</Title>
+    <MaintenanceTitle>Maintain Qt 5.0.0 Beta 1</MaintenanceTitle>
     <Publisher>Qt</Publisher>
     <Logo>logo.png</Logo>
     <LogoSmall>logo-small.png</LogoSmall>
     <Icon>logo-small</Icon>
     <License>license.txt</License>
     <Watermark>watermark.png</Watermark>
-    <StartMenuDir>Qt 5.0.0 Beta</StartMenuDir>
+    <StartMenuDir>Qt 5.0.0 Beta 1</StartMenuDir>
     <ProductUrl>qt.nokia.com</ProductUrl>
     <!--<Background>background.png</Background>-->
     <UninstallerName>MaintenanceTool</UninstallerName>
@@ -21,5 +21,5 @@
         </Repository>
     </RemoteRepositories>-->
     <!-- @homeDir@ and @rootDir@ are some of the supported vars -->
-    <TargetDir>@homeDir@/Qt5.0.0beta</TargetDir>
+    <TargetDir>@homeDir@/Qt5.0.0beta1</TargetDir>
 </Installer>

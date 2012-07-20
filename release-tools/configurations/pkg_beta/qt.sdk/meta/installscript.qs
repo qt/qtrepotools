@@ -22,7 +22,7 @@ Component.prototype.createOperations = function()
 
             component.addOperation( "CreateShortcut",
                                     win_application,
-                                    "@StartMenuDir@/Uninstall Qt 5.0.0 Beta.lnk",
+                                    "@StartMenuDir@/Uninstall Qt 5.0.0 Beta 1.lnk",
                                     " --uninstall");
         } catch( e ) {
             print( e );
