@@ -196,6 +196,14 @@ def make_files_list(directory, rgxp):
 ###############################
 # function
 ###############################
+def delete_files_by_type_recursive(directory, rgxp):
+    file_list = make_files_list(directory, rgxp)
+    for item in file_list:
+        os.remove(item)
+
+###############################
+# function
+###############################
 def findInSubdirectory(filename, subdirectory=''):
     if subdirectory:
         path = subdirectory
@@ -220,7 +228,13 @@ def move_tree(srcdir, dstdir, pattern=None):
     srcnames = os.listdir(srcdir)
     for name in srcnames:
         srcfname = os.path.join(srcdir, name)
+        if not srcfname:
+            print '*** Fatal error! Unable to create source file path, too long path name!'
+            sys.exit(-1)
         dstfname = os.path.join(dstdir, name)
+        if not dstfname:
+            print '*** Fatal error! Unable to create destination file path, too long path name!'
+            sys.exit(-1)
         if is_win_platform():
             if len(srcfname) > 255:
                 print 'given srcfname length (' + len(srcfname) + ') too long for Windows: ' + srcfname
@@ -246,6 +260,10 @@ def copy_tree(source_dir, dest_dir):
     src_files = os.listdir(source_dir)
     for file_name in src_files:
         full_file_name = os.path.join(source_dir, file_name)
+
+        if not full_file_name:
+            print '*** Fatal error! Unable to create source file path, too long path name!'
+            sys.exit(-1)
         if is_win_platform():
             if len(full_file_name) > 255:
                 print 'given full_file_name length (' + len(full_file_name) + ') too long for Windows: ' + full_file_name
@@ -275,7 +293,9 @@ def remove_tree(source_dir):
             cmd_args = ['rmdir', source_dir, '/S', '/Q']
             do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
     else:
-        shutil.rmtree(source_dir)
+        #shutil.rmtree(source_dir)
+        cmd_args = ['rm' , '-rf', source_dir]
+        do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
 
 
 ###############################
@@ -371,7 +391,24 @@ def locate_executable(directory, file_name):
             if fnmatch.fnmatch(basename, file_name):
                 filename = os.path.join(root, basename)
                 if is_executable(filename):
+                    # return the first match
                     return filename
+    print '*** Warning! Unable to locate: [' + file_name + '] from:' + directory
+    return ''
+
+
+###############################
+# Function
+###############################
+def locate_directory(base_dir, dir_name):
+    for root, dirs, files in os.walk(base_dir):
+        for basename in dirs:
+            if fnmatch.fnmatch(basename, dir_name):
+                fulldirname = os.path.join(root, basename)
+                # return the first match
+                return fulldirname
+    print '*** Warning! Unable to locate: [' + dir_name + '] from:' + base_dir
+    return ''
 
 
 ###############################
@@ -503,7 +540,7 @@ def handle_component_rpath(component_root_path, destination_lib_path):
                 if requires_rpath(file_full_path):
                     dst = os.path.normpath(component_root_path + os.sep + destination_lib_path)
                     rp = calculate_rpath(file_full_path, dst)
-                    #print '         RPath value: [' + rp + '] for file: [' + file_full_path + ']'
+                    #print '        RPath value: [' + rp + '] for file: [' + file_full_path + ']'
                     cmd_args = ['chrpath', '-r', rp, file_full_path]
                     #force silent operation
                     do_execute_sub_process_get_std_out(cmd_args, SCRIPT_ROOT_DIR, True, False)
@@ -523,7 +560,8 @@ def do_execute_sub_process(args, execution_path, abort_on_fail):
         else:
             theproc = subprocess.Popen(args)
         output = theproc.communicate()[0]
-        if theproc.returncode:
+        if theproc.returncode and output:
+            print '  -*-*-*-*-*-  Error!!  do_execute_sub_process() failed! theproc.returncode: ' + str(theproc.returncode) + ' output: ' + output
             output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
             print output
             print '*** Execution failed with code: %s' % str(theproc.returncode)
@@ -552,7 +590,8 @@ def do_execute_sub_process_2(args, execution_path, abort_on_fail):
         os.chdir(execution_path)
         theproc = subprocess.Popen(args, shell=True)
         output = theproc.communicate()[0]
-        if theproc.returncode:
+        if theproc.returncode and output:
+            print '  -*-*-*-*-*-  Error!!  do_execute_sub_process_2() failed! theproc.returncode: ' + str(theproc.returncode) + ' output: ' + output
             output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
             print output
             print '*** Execution failed with code: %s' % str(theproc.returncode)
@@ -587,7 +626,8 @@ def do_execute_sub_process_get_std_out(args, execution_path, abort_on_fail, prin
         else:
             theproc = subprocess.Popen(args, shell=False, stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=True)
         output = theproc.communicate()[0]
-        if theproc.returncode:
+        if theproc.returncode and output:
+            print '  -*-*-*-*-*-  Error!!  do_execute_sub_process_get_std_out() failed! theproc.returncode: ' + str(theproc.returncode) + ' output: ' + output
             output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
             print output
             print '*** Execution failed with code: %s' % str(theproc.returncode)
@@ -647,6 +687,7 @@ def extract_file(path, to_directory='.'):
 
     do_execute_sub_process(cmd_args, to_directory, True)
     return True
+
 
 ###############################
 # function
