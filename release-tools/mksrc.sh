@@ -25,16 +25,20 @@ PACK_TIME=`date '+%Y-%m-%d'`
 DOCS=generate
 MULTIPACK=no
 IGNORE_LIST=
+LICENSE=opensource
+PATCH_FILE=''
 
 function usage()
 {
   echo "Usage:"
-  echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub]"
+  echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub][-l lic][-p patch]"
   echo "where -u is path to git repo and -v is version"
   echo "Optional parameters:"
   echo "-m             one is able to tar each sub module separately"
   echo "-no-docs       skip generating documentation"
   echo "-i submodule   will exclude the submodule from final package "
+  echo "-l license     license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
+  echo "-p patch file  patch file (.sh) to execute, example: change_licenses.sh"
 }
 
 function cleanup()
@@ -128,6 +132,16 @@ while test $# -gt 0; do
         QTSHORTVER=$(echo $QTVER | cut -d. -f1-2)
       shift
     ;;
+    -l|--license)
+      shift
+      LICENSE=$1
+      shift
+    ;;
+    -p|--patch_file)
+      shift
+      PATCH_FILE=$1
+      shift
+    ;;
     *)
       echo "Error: Unknown option $1"
       usage
@@ -142,7 +156,7 @@ if [ ! -d "$REPO_DIR/.git" ]; then
   exit 2
 fi
 
-PACKAGE_NAME=qt-everywhere-opensource-src-$QTVER
+PACKAGE_NAME=qt-everywhere-$LICENSE-src-$QTVER
 BIG_TAR=$PACKAGE_NAME.tar.gz
 BIG_ZIP=$PACKAGE_NAME.zip
 MODULES=$CUR_DIR/submodules.txt
@@ -182,7 +196,7 @@ while read submodule; do
   echo " -- From dir $PWD/$submodule, lets pack $submodule --"
   cd $submodule
   _file=$(echo "$submodule" | cut -d'/' -f1).tar.gz
-  #archive submodule to $CUR_DIR/$BIG_TAR
+  #archive submodule to $CUR_DIR/$_file
   git archive --format=tar --prefix=$submodule/ HEAD | gzip -4 > $CUR_DIR/$_file
   #move it temp dir
   mv $CUR_DIR/$_file $_TMP_DIR
@@ -245,6 +259,7 @@ done < $MODULES
 cat $CUR_DIR/_tmp_mod > $MODULES
 rm -f $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
 cat $CUR_DIR/_tmp_shas > $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
+
 #------------------------------------------------------------------
 # Step 3,  replace version strings with correct version, and
 # patch Qt_PACKAGE_TAG and QT_PACKAGEDATE_STR defines
@@ -288,7 +303,18 @@ else
 fi
 
 #------------------------------------------------------------------
-# Step 5,  create zip file and tar files
+# Step 5,  check which license type is selected, and run patches
+# if needed
+#------------------------------------------------------------------
+if [ $LICENSE = commercial ]; then
+  echo " -- Making Qt commercial, run $PATCH_FILE"
+  $PATCH_FILE $CUR_DIR/$PACKAGE_NAME/ $QTVER
+else
+  echo " -- Not a commercial run"
+fi
+
+#------------------------------------------------------------------
+# Step 6,  create zip file and tar files
 #------------------------------------------------------------------
 # list text file regexp keywords, if you find something obvious missing, feel free to add
 cd $CUR_DIR
