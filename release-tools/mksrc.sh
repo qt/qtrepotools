@@ -306,11 +306,13 @@ fi
 # Step 5,  check which license type is selected, and run patches
 # if needed
 #------------------------------------------------------------------
-if [ $LICENSE = commercial ]; then
-  echo " -- Making Qt commercial, run $PATCH_FILE"
-  $PATCH_FILE $CUR_DIR/$PACKAGE_NAME/ $QTVER
-else
-  echo " -- Not a commercial run"
+if [ $PATCH_FILE ]; then
+  if [ $LICENSE = commercial]; then
+    # when doing commercial build, patch file needs src folder and qt version no as parameters
+    $PATCH_FILE $CUR_DIR/$PACKAGE_NAME/ $QTVER
+  else
+    $PATCH_FILE
+  fi
 fi
 
 #------------------------------------------------------------------

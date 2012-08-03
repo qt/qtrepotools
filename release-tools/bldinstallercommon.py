@@ -560,10 +560,12 @@ def do_execute_sub_process(args, execution_path, abort_on_fail):
         else:
             theproc = subprocess.Popen(args)
         output = theproc.communicate()[0]
-        if theproc.returncode and output:
-            print '  -*-*-*-*-*-  Error!!  do_execute_sub_process() failed! theproc.returncode: ' + str(theproc.returncode) + ' output: ' + output
-            output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
-            print output
+        if theproc.returncode:
+            if output:
+                output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
+                print output
+            else:
+                print '    Note, no output from the sub process!'
             print '*** Execution failed with code: %s' % str(theproc.returncode)
             if abort_on_fail:
                 sys.exit(-1)
@@ -590,10 +592,12 @@ def do_execute_sub_process_2(args, execution_path, abort_on_fail):
         os.chdir(execution_path)
         theproc = subprocess.Popen(args, shell=True)
         output = theproc.communicate()[0]
-        if theproc.returncode and output:
-            print '  -*-*-*-*-*-  Error!!  do_execute_sub_process_2() failed! theproc.returncode: ' + str(theproc.returncode) + ' output: ' + output
-            output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
-            print output
+        if theproc.returncode:
+            if output:
+                output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
+                print output
+            else:
+                print '    Note, no output from the sub process!'
             print '*** Execution failed with code: %s' % str(theproc.returncode)
             if abort_on_fail:
                 sys.exit(-1)
@@ -626,10 +630,12 @@ def do_execute_sub_process_get_std_out(args, execution_path, abort_on_fail, prin
         else:
             theproc = subprocess.Popen(args, shell=False, stdin=PIPE, stdout=PIPE, stderr=STDOUT, close_fds=True)
         output = theproc.communicate()[0]
-        if theproc.returncode and output:
-            print '  -*-*-*-*-*-  Error!!  do_execute_sub_process_get_std_out() failed! theproc.returncode: ' + str(theproc.returncode) + ' output: ' + output
-            output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
-            print output
+        if theproc.returncode:
+            if output:
+                output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
+                print output
+            else:
+                print '    Note, no output from the sub process!'
             print '*** Execution failed with code: %s' % str(theproc.returncode)
             if abort_on_fail:
                 sys.exit(-1)
