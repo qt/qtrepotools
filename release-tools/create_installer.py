@@ -185,9 +185,9 @@ def parse_cmd_line():
     global INSTALLER_NAMING_SCHEME_COMPILER
     global INSTALLER_NAMING_SCHEME_TARGET_ARCH
     global LICENSE_TYPE
+    global CONFIGURATIONS_DIR
 
     MAIN_CONFIG_NAME = sys.argv[1]
-    check_configuration_file(MAIN_CONFIG_NAME)
     if(arg_count > 2):
         counter = 2
         while(counter < arg_count):
@@ -212,10 +212,17 @@ def parse_cmd_line():
                 values = argument.split('=')
                 if values[1] != '':
                     LICENSE_TYPE = values[1]
+            elif argument.find('configurations_dir') >= 0:
+                values = argument.split('=')
+                if values[1] != '':
+                    CONFIGURATIONS_DIR = values[1]
             else:
                 print '*** Unsupported argument given: ' + argument
                 sys.exit(-1)
             counter = counter + 1
+
+    # check that given configuration exits
+    check_configuration_file(MAIN_CONFIG_NAME)
     return True
 
 
@@ -766,7 +773,7 @@ def install_ifw_tools():
 
     # if "devmode" mode used, then build IFW from sources
     if DEVELOPMENT_MODE:
-        tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', PLATFORM_IDENTIFIER)
+        tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', CONFIGURATIONS_DIR, PLATFORM_IDENTIFIER)
         tools_bin_path = SCRIPT_ROOT_DIR + os.sep + tools_dir_temp
     else:
         tools_dir_name = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'InstallerFrameworkTools')['name']

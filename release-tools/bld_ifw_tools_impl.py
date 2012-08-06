@@ -60,7 +60,7 @@ INSTALLERBASE_ARCHIVE_NAME          = ''
 ###############################
 # function
 ###############################
-def init_config():
+def init_config(configurations_dir):
     global CONFIG_IFW
     global MAKE_CMD
     global QT_QMAKE_BIN
@@ -78,7 +78,7 @@ def init_config():
     global INSTALLER_FRAMEWORK_ARCHIVE_NAME
     global INSTALLERBASE_ARCHIVE_NAME
 
-    conf_path = SCRIPT_ROOT_DIR + os.sep + 'configurations' + os.sep + PLATFORM_IDENTIFIER + os.sep + 'installer-framework'
+    conf_path = SCRIPT_ROOT_DIR + os.sep + configurations_dir + os.sep + PLATFORM_IDENTIFIER + os.sep + 'installer-framework'
     CONFIG_IFW = ConfigParser.ConfigParser()
     CONFIG_IFW.readfp(open(conf_path))
 
@@ -392,7 +392,7 @@ def archive_qt():
 ###############################
 # main
 ###############################
-def build_ifw(build_mode, platform):
+def build_ifw(build_mode, configurations_dir, platform):
     global DEVELOPMENT_MODE
     global PLATFORM_IDENTIFIER
 
@@ -402,7 +402,7 @@ def build_ifw(build_mode, platform):
 
     # init
     bldinstallercommon.init_common_module(SCRIPT_ROOT_DIR)
-    init_config()
+    init_config(configurations_dir)
     #clean environment first
     clean_build_environment()
     #checkout sources

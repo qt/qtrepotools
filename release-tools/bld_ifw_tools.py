@@ -43,11 +43,18 @@ import bld_ifw_tools_impl
 
 
 if len(sys.argv) < 2:
-    print '*** platform identifier is needed as parameter: linux/mac/windows'
+    print '*** platform identifier is needed as parameter 1: linux/mac/windows'
     sys.exit(-1)
 
 platformIdentifier = sys.argv[1]
-bld_ifw_tools_impl.build_ifw('release', platformIdentifier)
+# default configurations directory
+configurations_dir = 'configurations'
+# check for custom configurations directory
+arg_count = len(sys.argv)
+if arg_count > 2:
+    configurations_dir = sys.argv[2]
+# build ifw tools
+bld_ifw_tools_impl.build_ifw('release', configurations_dir, platformIdentifier)
 
 
 
