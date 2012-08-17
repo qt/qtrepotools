@@ -307,7 +307,7 @@ fi
 # if needed
 #------------------------------------------------------------------
 if [ $PATCH_FILE ]; then
-  if [ $LICENSE = commercial]; then
+  if [ $LICENSE = commercial ]; then
     # when doing commercial build, patch file needs src folder and qt version no as parameters
     $PATCH_FILE $CUR_DIR/$PACKAGE_NAME/ $QTVER
   else

@@ -260,7 +260,6 @@ def copy_tree(source_dir, dest_dir):
     src_files = os.listdir(source_dir)
     for file_name in src_files:
         full_file_name = os.path.join(source_dir, file_name)
-
         if not full_file_name:
             print '*** Fatal error! Unable to create source file path, too long path name!'
             sys.exit(-1)
@@ -681,7 +680,7 @@ def extract_file(path, to_directory='.'):
     elif path.endswith('.tar.gz') or path.endswith('.tgz'):
         cmd_args = ['tar', '-xzf', path]
     elif path.endswith('.tar.bz2') or path.endswith('.tbz'):
-        cmd_args = ['tar', '-xzf', path]
+        cmd_args = ['tar', '-xjf', path]
     elif path.endswith('.7z'):
         cmd_args = ['7z', 'x', path]
         # 7z does not have silent operation so we do it the hard way....

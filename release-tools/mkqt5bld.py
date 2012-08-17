@@ -57,15 +57,15 @@ SUBMODULE_INSTALL_BASE_DIR_NAME     = "submodule_install_"
 
 QT5_MODULES_LIST                    = [ 'qt3d', 'qlalr', 'qtactiveqt', 'qtbase',     \
                                         'qtconnectivity', 'qtdeclarative', 'qtdoc', \
-                                        'qtdocgallery', 'qtfeedback', 'qtgraphicaleffects', \
+                                        'qtfeedback', 'qtgraphicaleffects', \
                                         'qtimageformats', 'qtjsondb', 'qtjsbackend', \
-                                        'qtlocation', 'qtmultimedia', 'qtphonon', 'qtpim', \
+                                        'qtlocation', 'qtmultimedia', 'qtpim', \
                                         'qtqa', 'qtquick1', 'qtrepotools', 'qtscript', \
                                         'qtsensors', 'qtsvg', 'qtsystems', 'qttools', \
                                         'qttranslations', 'qtwayland', 'webkit', \
                                         'qtwebkit-examples-and-demos', 'qtxmlpatterns']
 
-CONFIGURE_OPTIONS                   = '-opensource -nomake tests -confirm-license' #-make examples
+CONFIGURE_OPTIONS                   = '-opensource -debug-and-release -release -nomake tests -confirm-license' #-make examples
 DEVEL_MODE                          = 0
 FORCE_MAKE                          = 0
 RUN_RPATH                           = False
@@ -73,6 +73,7 @@ ORIGINAL_QMAKE_QT_PRFXPATH          = ''
 BUILD_WEBKIT                        = True
 BUILD_TRANSLATIONS                  = False
 PADDING                             = "______________________________PADDING______________________________"
+FILES_TO_REMOVE_LIST                = ['Makefile', '.o', '.moc', '.pro', '.init-repository', '.cpp', '.gitignore']
 
 
 ###############################
@@ -237,6 +238,11 @@ def build_qt():
                         index = submodule_name.index('-make_first')
                         submodule_list.append(submodule_name[:index])
                         modules_found = 1
+                    #webkit is listed with different syntax: sub-webkit-pri-make_first
+                    elif item.startswith('sub-') and BUILD_WEBKIT:
+                        submodule_name = item[4:]   #4 <- sub-
+                        index = submodule_name.index('-pri-make_first')
+                        submodule_list.append(submodule_name[:index])
 
         if modules_found == 1:
             QT5_MODULES_LIST = submodule_list
@@ -246,6 +252,7 @@ def build_qt():
     else:
         print_wrap('*** Error! Main Makefile not found. Build failed!')
         sys.exit(-1)
+
     #remove if old dir exists
     if os.path.exists(MAKE_INSTALL_ROOT_DIR):
         shutil.rmtree(MAKE_INSTALL_ROOT_DIR)
@@ -295,7 +302,7 @@ def install_qt():
     cmd_args += MAKE_INSTALL_CMD + ' INSTALL_ROOT=' + install_root_path
     print_wrap('    Running main level make install with install root ' + install_root_path)
     bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_SOURCE_DIR, True)
-#end - main level install with install root
+    #end - main level install with install root
 
     #make install for each module with INSTALL_ROOT
     print_wrap('    Install modules to INSTALL_ROOT')
@@ -357,16 +364,30 @@ def save_original_qt_prfxpath():
 # function
 ###############################
 def replace_build_paths(path_to_checked):
-    print_wrap('---------------- Replacing build paths -----------------------------')
+    print_wrap('------------ Replacing build paths in ' + path_to_checked + '----------------')
+    qt_source_dir_delimeter_2 = QT_SOURCE_DIR.replace('/', os.sep)
     for root, dirs, files in os.walk(path_to_checked):
         for name in files:
             if name.endswith('.prl') or name.endswith('.la') or name.endswith('.pc') or name.endswith('.pri'):
                 path = os.path.join(root, name)
                 print_wrap('---> Replacing build path in: ' + path)
                 print_wrap('--->         String to match: ' + QT_SOURCE_DIR)
+                print_wrap('--->         String to match: ' + qt_source_dir_delimeter_2)
                 print_wrap('--->             Replacement: ' + ORIGINAL_QMAKE_QT_PRFXPATH)
                 for line in fileinput.FileInput(path,inplace=1):
-                   line = line.replace(QT_SOURCE_DIR, ORIGINAL_QMAKE_QT_PRFXPATH)
+                    output1 = line.replace(QT_SOURCE_DIR, ORIGINAL_QMAKE_QT_PRFXPATH)
+                    if line != output1:
+                        # we had a match
+                        print output1.rstrip('\n')
+                        continue
+                    else:
+                        output2 = line.replace(qt_source_dir_delimeter_2, ORIGINAL_QMAKE_QT_PRFXPATH)
+                        if line != output2:
+                            # we had a match for the second replacement
+                            print output2.rstrip('\n')
+                            continue
+                    # no match so write original line back to file
+                    print line.rstrip('\n')
     print_wrap('--------------------------------------------------------------------')
 
 
@@ -375,10 +396,9 @@ def replace_build_paths(path_to_checked):
 ###############################
 def clean_up(install_dir):
     print_wrap('---------------- Cleaning unnecessary files from ' + install_dir + '----------')
-    file_list = ['Makefile', '.o', '.moc', '.pro', '.pri', '.init-repository', '.cpp', '.h', '.gitignore', '.qmlproject']
     for root, dirs, files in os.walk(install_dir):
         for name in files:
-            if name in file_list:
+            if name in FILES_TO_REMOVE_LIST:
                 path = os.path.join(root, name)
                 print_wrap('    ---> Deleting file: ' + name)
                 os.remove(path)
