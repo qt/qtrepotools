@@ -106,7 +106,7 @@ def fetch_key(qmake_file_name, key):
 
     text = text[end_index:]
     end_index_2 = re.search('\0', text)
-    value = text[0:end_index_2.end()]
+    value = text[0:end_index_2.end() - 1]
     return value
 
 
