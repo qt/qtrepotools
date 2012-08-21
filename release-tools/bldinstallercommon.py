@@ -41,6 +41,7 @@ import stat
 import tarfile
 import urllib2
 import zipfile
+import string
 
 # need to include this for win platforms as long path names
 # cause problems
@@ -439,6 +440,31 @@ def is_executable(path):
 
     return False
 
+
+###############################
+# Function
+###############################
+# original snippet: http://code.activestate.com/recipes/173220-test-if-a-file-or-string-is-text-or-binary/
+
+text_characters = "".join(map(chr, range(32, 127)) + list("\n\r\t\b"))
+_null_trans     = string.maketrans("", "")
+
+def is_text(s):
+    if "\0" in s:
+        return 0
+    if not s:  # Empty files are considered text
+        return 1
+    # Get the non-text characters (maps a character to itself then
+    # use the 'remove' option to get rid of the text characters.)
+    t = s.translate(_null_trans, text_characters)
+    # If more than 30% non-text characters, then
+    # this is considered a binary file
+    if len(t)/len(s) > 0.30:
+        return 0
+    return 1
+
+def is_text_file(filename, blocksize = 512):
+    return is_text(open(filename).read(blocksize))
 
 ###############################
 # Function

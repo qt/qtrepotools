@@ -368,26 +368,27 @@ def replace_build_paths(path_to_checked):
     qt_source_dir_delimeter_2 = QT_SOURCE_DIR.replace('/', os.sep)
     for root, dirs, files in os.walk(path_to_checked):
         for name in files:
-            if name.endswith('.prl') or name.endswith('.la') or name.endswith('.pc') or name.endswith('.pri'):
-                path = os.path.join(root, name)
-                print_wrap('---> Replacing build path in: ' + path)
-                print_wrap('--->         String to match: ' + QT_SOURCE_DIR)
-                print_wrap('--->         String to match: ' + qt_source_dir_delimeter_2)
-                print_wrap('--->             Replacement: ' + ORIGINAL_QMAKE_QT_PRFXPATH)
-                for line in fileinput.FileInput(path,inplace=1):
-                    output1 = line.replace(QT_SOURCE_DIR, ORIGINAL_QMAKE_QT_PRFXPATH)
-                    if line != output1:
-                        # we had a match
-                        print output1.rstrip('\n')
-                        continue
-                    else:
-                        output2 = line.replace(qt_source_dir_delimeter_2, ORIGINAL_QMAKE_QT_PRFXPATH)
-                        if line != output2:
-                            # we had a match for the second replacement
-                            print output2.rstrip('\n')
+            path = os.path.join(root, name)
+            if not os.path.isdir(path) and not os.path.islink(path):
+                if bldinstallercommon.is_text_file(path):
+                    print_wrap('---> Replacing build path in: ' + path)
+                    print_wrap('--->         String to match: ' + QT_SOURCE_DIR)
+                    print_wrap('--->         String to match: ' + qt_source_dir_delimeter_2)
+                    print_wrap('--->             Replacement: ' + ORIGINAL_QMAKE_QT_PRFXPATH)
+                    for line in fileinput.FileInput(path,inplace=1):
+                        output1 = line.replace(QT_SOURCE_DIR, ORIGINAL_QMAKE_QT_PRFXPATH)
+                        if line != output1:
+                            # we had a match
+                            print output1.rstrip('\n')
                             continue
-                    # no match so write original line back to file
-                    print line.rstrip('\n')
+                        else:
+                            output2 = line.replace(qt_source_dir_delimeter_2, ORIGINAL_QMAKE_QT_PRFXPATH)
+                            if line != output2:
+                                # we had a match for the second replacement
+                                print output2.rstrip('\n')
+                                continue
+                        # no match so write original line back to file
+                        print line.rstrip('\n')
     print_wrap('--------------------------------------------------------------------')
 
 
