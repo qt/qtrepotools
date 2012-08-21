@@ -327,17 +327,6 @@ def clean_work_dirs():
     if os.path.exists(CONFIG_DIR_DST):
         bldinstallercommon.remove_tree(CONFIG_DIR_DST)
         print ' -> deleted old existing directory: ' + CONFIG_DIR_DST
-    # delete sdk binary files
-    fileList = os.listdir(SCRIPT_ROOT_DIR)
-    for fname in fileList:
-        if fname.startswith(SDK_NAME_ROOT):
-            full_fn = SCRIPT_ROOT_DIR + os.sep + fname
-            if os.path.isdir(full_fn):
-                print ' -> deleted ' + full_fn
-                bldinstallercommon.remove_tree(full_fn)
-            else:
-                print ' -> deleted ' + full_fn
-                os.remove(full_fn)
 
 
 ##############################################################
