@@ -69,6 +69,12 @@ my @mappings = (
     ] ],
     [ [ "qtcreator", "qt5/qttools" ], [
         [ 'src/shared/proparser', 'src/linguist/shared' ],
+    ], 1 ],
+    [ [ "qtcreator", "qt5/qtbase" ], [
+        [ 'src/shared/proparser', 'qmake/library' ],
+    ], 1 ],
+    [ [ "qt5/qtbase", "qt5/qttools" ], [
+        [ 'qmake/library', 'src/linguist/shared' ],
     ], 1 ]
 );
 
