@@ -217,6 +217,8 @@ if (!$push) {
     $dst_cd = $cd_other;
 }
 
+my $short_src = $$cand[0][$inv];
+$short_src =~ s,^.*/,,;
 my $needid = -1;
 for my $commit (@commits) {
     my @revs;
@@ -240,7 +242,7 @@ for my $commit (@commits) {
                 } elsif (s/^(--- \@old\@|\+\+\+ \@new\@)\/([^\n]+)/$1."\/".map_name($2)/e) {
                 } elsif ($_ eq "---\n") {
                     $patch .= "\n" if (!$empty);
-                    $patch .= "(cherry picked from commit ".$sha1.")\n";
+                    $patch .= "(cherry picked from ".$short_src."/".$sha1.")\n";
                     if (!$haveid) {
                         $needid = int(grep /codereview/, `${dst_cd}git remote -v`) if ($needid < 0);
                         $patch .= "Change-Id: I".$sha1."\n" if ($needid);
