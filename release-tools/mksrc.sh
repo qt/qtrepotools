@@ -55,14 +55,18 @@ function cleanup()
 
 function create_main_file()
 {
-  echo " - Creating single tar.gz file - "
-  tar czf $BIG_TAR $PACKAGE_NAME/
-
-  echo " - Creating single tar.bz2 file - "
-  tar cjf $PACKAGE_NAME.tar.bz2 $PACKAGE_NAME/
-
-  echo " - Creating single tar.xz file - "
-  tar cJf $PACKAGE_NAME.tar.xz $PACKAGE_NAME/
+  echo " - Creating tarballs -"
+  # The trick below uses tee to feed the output of tar to
+  # two additional files, which are actually bash/zsh
+  # "Process substitution"
+  # This will cause it to compress simultaneously, though
+  # at the rate of the slowest of the processes (e.g.,
+  # with xz at 100% CPU, bzip2 takes 25% and gzip 15%)
+  tar cf - $PACKAGE_NAME/ | \
+      tee \
+         >(bzip2 -9 > $PACKAGE_NAME.tar.bz2) \
+         >(xz -9 > $PACKAGE_NAME.tar.xz) | \
+      gzip -9 > $BIG_TAR
 
   echo " - Creating single 7z file - "
   7z a $PACKAGE_NAME.7z $PACKAGE_NAME/ > /dev/null
@@ -83,8 +87,10 @@ function create_and_delete_submodule()
   while read submodule; do
     _file=$(echo "$submodule" | cut -d'/' -f1)-$QTVER
     echo " - tarring $_file -"
-    tar czf $_file.tar.gz $PACKAGE_NAME/$submodule
-    mv $_file.tar.gz submodules_tar/
+    tar c $PACKAGE_NAME/$submodule | tee \
+        >(xz -9 > $_file.tar.xz) | \
+        gzip -9 > $_file.tar.gz
+    mv $_file.tar.* submodules_tar/
     find $PACKAGE_NAME/$submodule > __files_to_zip
     echo "- zippinging $_file -"
     # zip binfiles
