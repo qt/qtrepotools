@@ -147,6 +147,7 @@ while test $# -gt 0; do
 done
 
 # Check if the DIR is valid git repository
+cd $REPO_DIR
 if ! git rev-parse --git-dir >/dev/null 2>/dev/null; then
   echo "$REPO_DIR is not a valid git repo"
   exit 2
@@ -170,11 +171,22 @@ rm -f $BIG_ZIP
 rm -rf $_TMP_DIR
 mkdir $_TMP_DIR
 
-cd $REPO_DIR
-
 # detect the submodules to be archived
 rm -f $MODULES
-find . -name '.git' -type d -print | sed -e 's/^\.\///' -e 's/\.git$//' | grep -v '^$' >> $MODULES
+git ls-tree HEAD | while read mode type sha1 name; do
+    test "$type" = "commit" || continue
+    test -d "$name" || {
+        echo >&2 "Warning: submodule '$name' is not present"
+        continue
+    }
+    case " $IGNORE_LIST " in
+        *" $name "*)
+            # Ignored module, skip
+            continue
+            ;;
+    esac
+    echo $name
+done >> $MODULES
 
 #archive the main repo
 git archive --format=tar  HEAD | gzip -4 > $CUR_DIR/$BIG_TAR
@@ -230,22 +242,11 @@ echo "The qt5 was archived from $qt5 sha" >$CUR_DIR/_tmp_shas
 echo "------------------------------------------------------------------------">>$CUR_DIR/_tmp_shas
 echo "Fixing shas"
 while read submodule; do
-  for ignore in $IGNORE_LIST; do
-    if [ _pre_$ignore"/" = _pre_$submodule ]; then
-      __skip_sub=yes
-      echo "removing $submodule"
-      rm -rf $submodule
-      break
-    fi
-  done
-  if [ $__skip_sub = no ]; then
     __sub=$(echo $(echo $submodule|sed 's/-/_/g') | cut -d/ -f1)
     echo "Fixing $__sub ${!__sub}"
     echo $submodule >>$CUR_DIR/_tmp_mod
     echo "The $(echo $__sub| sed 's/_/-/g') was archived from ${!__sub} sha" >>$CUR_DIR/_tmp_shas
     echo "------------------------------------------------------------------------">>$CUR_DIR/_tmp_shas
-  fi
-  __skip_sub=no
 done < $MODULES
 cat $CUR_DIR/_tmp_mod > $MODULES
 rm -f $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
