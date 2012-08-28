@@ -202,26 +202,22 @@ git ls-tree $REPO_TAG | while read mode type sha1 name; do
 done >> $MODULES
 
 #archive the main repo
-git archive --format=tar $REPO_TAG | gzip -4 > $CUR_DIR/$BIG_TAR
-mv $CUR_DIR/$BIG_TAR $_TMP_DIR
-cd $_TMP_DIR
-tar xzf $BIG_TAR
-rm -f $BIG_TAR
-cd $REPO_DIR
+git archive --format=tar $REPO_TAG | tar -x -C $_TMP_DIR
 _SHA=`git rev-parse $REPO_TAG`
 MASTER_SHA=$_SHA
 rm -f $_TMP_DIR/$QTGITTAG
 echo "qt5=$_SHA">$_TMP_DIR/$QTGITTAG
+
+echo " -- From dir $PWD, let's pack the master repo at $MASTER_SHA --"
 
 #archive all the submodules and generate file from sha1's
 while read submodule _SHA; do
   echo " -- From dir $PWD/$submodule, lets pack $submodule at $_SHA --"
   cd $submodule
   _file=$(echo "$submodule" | cut -d'/' -f1).tar.gz
-  #archive submodule to $CUR_DIR/$_file
-  git archive --format=tar --prefix=$submodule/ $_SHA | gzip -4 > $CUR_DIR/$_file
-  #move it temp dir
-  mv $CUR_DIR/$_file $_TMP_DIR
+  #export the repository contents
+  git archive --format=tar --prefix=$submodule/ $_SHA | \
+      tar -x -C $_TMP_DIR
   #store the sha1
   echo "$(echo $(echo $submodule|sed 's/-/_/g') | cut -d/ -f1)=$_SHA" >>$_TMP_DIR/$QTGITTAG
   cd $_TMP_DIR
