@@ -36,7 +36,7 @@ function usage()
   echo "where -u is path to git repo and -v is version"
   echo "Optional parameters:"
   echo "-m             one is able to tar each sub module separately"
-  echo "-no-docs       skip generating documentation"
+  echo "--no-docs      skip generating documentation"
   echo "-i submodule   will exclude the submodule from final package "
   echo "-l license     license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
   echo "-p patch file  patch file (.sh) to execute, example: change_licenses.sh"
