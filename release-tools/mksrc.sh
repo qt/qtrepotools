@@ -147,7 +147,7 @@ while test $# -gt 0; do
 done
 
 # Check if the DIR is valid git repository
-if [ ! -d "$REPO_DIR/.git" ]; then
+if ! git rev-parse --git-dir >/dev/null 2>/dev/null; then
   echo "$REPO_DIR is not a valid git repo"
   exit 2
 fi
@@ -183,7 +183,7 @@ cd $_TMP_DIR
 tar xzf $BIG_TAR
 rm -f $BIG_TAR
 cd $REPO_DIR
-_SHA=`cat .git/refs/heads/master`
+_SHA=`git rev-parse master`
 rm -f $_TMP_DIR/$QTGITTAG
 echo "qt5=$_SHA">$_TMP_DIR/$QTGITTAG
 
@@ -197,12 +197,7 @@ while read submodule; do
   #move it temp dir
   mv $CUR_DIR/$_file $_TMP_DIR
   #store the sha1
-  _SHA=`cat .git/HEAD | cut -d' ' -f2`
-  if [ $(echo $_SHA | cut -d/ -f1-2) = refs/heads ]; then
-    _SHA=`cat .git/$_SHA`
-  else
-    _SHA=`cat .git/HEAD`
-  fi
+  _SHA=`git rev-parse HEAD`
   echo "$(echo $(echo $submodule|sed 's/-/_/g') | cut -d/ -f1)=$_SHA" >>$_TMP_DIR/$QTGITTAG
   cd $_TMP_DIR
   #extract to tmp dir
