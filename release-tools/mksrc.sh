@@ -284,17 +284,17 @@ if [ $DOCS = generate ]; then
   # Run qmake in each module, as this generates the .pri files that tell qdoc what docs to generate
   QMAKE=$PWD/qtbase/bin/qmake
   echo "DOC: running $QMAKE and qmake_all for submodules"
-  for i in `cat $MODULES` ; do if [ -d $i -a -e $i/*.pro ] ; then (cd $i ; $QMAKE ; make -j12 qmake_all ) ; fi ; done
+  for i in `cat $MODULES` ; do if [ -d $i -a -e $i/*.pro ] ; then (cd $i ; $QMAKE ; make qmake_all ) ; fi ; done
   # Build libQtHelp.so and qhelpgenerator
   echo "DOC: Build libQtHelp.so and qhelpgenerator"
-  (cd qtbase && make -j12)
-  (cd qtxmlpatterns ; make -j12)
-  (cd qttools ; make -j12)
-  (cd qttools/src/assistant/help ; make -j12)
-  (cd qttools/src/assistant/qhelpgenerator ; make -j12)
+  (cd qtbase && make)
+  (cd qtxmlpatterns ; make)
+  (cd qttools ; make)
+  (cd qttools/src/assistant/help ; make)
+  (cd qttools/src/assistant/qhelpgenerator ; make)
   # Generate the offline docs and qt.qch
   echo "DOC: Generate the offline docs and qt.qch"
-  (cd qtdoc ; $QMAKE ; make -j12 qmake_all ; LD_LIBRARY_PATH=$PWD/../qttools/lib make -j12 qch_docs)
+  (cd qtdoc ; $QMAKE ; make qmake_all ; LD_LIBRARY_PATH=$PWD/../qttools/lib make qch_docs)
   # Put the generated docs back into the clean source directory
   echo "DOC: Put the generated docs back into the clean source directory"
   mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/html $CUR_DIR/$PACKAGE_NAME/qtdoc/doc
