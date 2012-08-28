@@ -27,11 +27,12 @@ MULTIPACK=no
 IGNORE_LIST=
 LICENSE=opensource
 PATCH_FILE=''
+REPO_TAG=HEAD
 
 function usage()
 {
   echo "Usage:"
-  echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub][-l lic][-p patch]"
+  echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub][-l lic][-p patch][-t revision]"
   echo "where -u is path to git repo and -v is version"
   echo "Optional parameters:"
   echo "-m             one is able to tar each sub module separately"
@@ -39,6 +40,7 @@ function usage()
   echo "-i submodule   will exclude the submodule from final package "
   echo "-l license     license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
   echo "-p patch file  patch file (.sh) to execute, example: change_licenses.sh"
+  echo "-t revision    committish to pack (tag name, branch name or SHA-1)"
 }
 
 function cleanup()
@@ -138,6 +140,11 @@ while test $# -gt 0; do
       PATCH_FILE=$1
       shift
     ;;
+    -t|--tag)
+      shift
+      REPO_TAG=$1
+      shift
+    ;;
     *)
       echo "Error: Unknown option $1"
       usage
@@ -173,7 +180,7 @@ mkdir $_TMP_DIR
 
 # detect the submodules to be archived
 rm -f $MODULES
-git ls-tree HEAD | while read mode type sha1 name; do
+git ls-tree $REPO_TAG | while read mode type sha1 name; do
     test "$type" = "commit" || continue
     test -d "$name" || {
         echo >&2 "Warning: submodule '$name' is not present"
@@ -189,13 +196,13 @@ git ls-tree HEAD | while read mode type sha1 name; do
 done >> $MODULES
 
 #archive the main repo
-git archive --format=tar  HEAD | gzip -4 > $CUR_DIR/$BIG_TAR
+git archive --format=tar $REPO_TAG | gzip -4 > $CUR_DIR/$BIG_TAR
 mv $CUR_DIR/$BIG_TAR $_TMP_DIR
 cd $_TMP_DIR
 tar xzf $BIG_TAR
 rm -f $BIG_TAR
 cd $REPO_DIR
-_SHA=`git rev-parse master`
+_SHA=`git rev-parse $REPO_TAG`
 rm -f $_TMP_DIR/$QTGITTAG
 echo "qt5=$_SHA">$_TMP_DIR/$QTGITTAG
 
