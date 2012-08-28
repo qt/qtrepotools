@@ -84,7 +84,7 @@ function create_and_delete_submodule()
 {
   mkdir submodules_tar
   mkdir submodules_zip
-  while read submodule; do
+  while read submodule submodule_sha1; do
     _file=$(echo "$submodule" | cut -d'/' -f1)-$QTVER
     echo " - tarring $_file -"
     tar c $PACKAGE_NAME/$submodule | tee \
@@ -198,7 +198,7 @@ git ls-tree $REPO_TAG | while read mode type sha1 name; do
             continue
             ;;
     esac
-    echo $name
+    echo $name $sha1
 done >> $MODULES
 
 #archive the main repo
@@ -209,20 +209,20 @@ tar xzf $BIG_TAR
 rm -f $BIG_TAR
 cd $REPO_DIR
 _SHA=`git rev-parse $REPO_TAG`
+MASTER_SHA=$_SHA
 rm -f $_TMP_DIR/$QTGITTAG
 echo "qt5=$_SHA">$_TMP_DIR/$QTGITTAG
 
 #archive all the submodules and generate file from sha1's
-while read submodule; do
-  echo " -- From dir $PWD/$submodule, lets pack $submodule --"
+while read submodule _SHA; do
+  echo " -- From dir $PWD/$submodule, lets pack $submodule at $_SHA --"
   cd $submodule
   _file=$(echo "$submodule" | cut -d'/' -f1).tar.gz
   #archive submodule to $CUR_DIR/$_file
-  git archive --format=tar --prefix=$submodule/ HEAD | gzip -4 > $CUR_DIR/$_file
+  git archive --format=tar --prefix=$submodule/ $_SHA | gzip -4 > $CUR_DIR/$_file
   #move it temp dir
   mv $CUR_DIR/$_file $_TMP_DIR
   #store the sha1
-  _SHA=`git rev-parse HEAD`
   echo "$(echo $(echo $submodule|sed 's/-/_/g') | cut -d/ -f1)=$_SHA" >>$_TMP_DIR/$QTGITTAG
   cd $_TMP_DIR
   #extract to tmp dir
@@ -250,17 +250,14 @@ rm -f _tmp_mod
 rm -f _tmp_shas
 
 # read the shas
-. $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
-echo "The qt5 was archived from $qt5 sha" >$CUR_DIR/_tmp_shas
+echo "qt5 was archived from $MASTER_SHA" >$CUR_DIR/_tmp_shas
 echo "------------------------------------------------------------------------">>$CUR_DIR/_tmp_shas
 echo "Fixing shas"
-while read submodule; do
-    __sub=$(echo $(echo $submodule|sed 's/-/_/g') | cut -d/ -f1)
-    echo "Fixing $__sub ${!__sub}"
+while read submodule submodule_sha1; do
     echo $submodule >>$CUR_DIR/_tmp_mod
-    echo "The $(echo $__sub| sed 's/_/-/g') was archived from ${!__sub} sha" >>$CUR_DIR/_tmp_shas
-    echo "------------------------------------------------------------------------">>$CUR_DIR/_tmp_shas
-done < $MODULES
+    echo "$submodule was archived from $submodule_sha1"
+    echo "------------------------------------------------------------------------"
+done < $MODULES >>$CUR_DIR/_tmp_shas
 cat $CUR_DIR/_tmp_mod > $MODULES
 rm -f $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
 cat $CUR_DIR/_tmp_shas > $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
