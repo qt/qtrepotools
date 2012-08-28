@@ -120,10 +120,6 @@ while test $# -gt 0; do
     -u|--url)
       shift
       REPO_DIR=/$1
-      if [ ! -d "$REPO_DIR/.git" ]; then
-        echo "Error: $REPO_DIR is not a valid git repo ($1)"
-        exit 1
-      fi
       shift
     ;;
     -v|--version)
