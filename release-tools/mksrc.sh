@@ -84,22 +84,23 @@ function create_and_delete_submodule()
 {
   mkdir submodules_tar
   mkdir submodules_zip
+  cd $PACKAGE_NAME
   while read submodule submodule_sha1; do
-    _file=$(echo "$submodule" | cut -d'/' -f1)-$QTVER
+    _file=$submodule-$LICENSE-src-$QTVER
     echo " - tarring $_file -"
-    tar c $PACKAGE_NAME/$submodule | tee \
-        >(xz -9 > $_file.tar.xz) | \
-        gzip -9 > $_file.tar.gz
-    mv $_file.tar.* submodules_tar/
-    find $PACKAGE_NAME/$submodule > __files_to_zip
+    mv $submodule $_file
+    tar c $_file | tee \
+        >(xz -9 > ../submodules_tar/$_file.tar.xz) | \
+        gzip -9 > ../submodules_tar/$_file.tar.gz
     echo "- zippinging $_file -"
+    find $_file > __files_to_zip
     # zip binfiles
-    file -f __files_to_zip | fgrep -f _txtfiles -v | cut -d: -f1 | zip -9q $_file.zip -@
+    file -f __files_to_zip | fgrep -f ../_txtfiles -v | cut -d: -f1 | zip -9q ../submodules_zip/$_file.zip -@
     #zip ascii files with win line endings
-    file -f __files_to_zip | fgrep -f _txtfiles | cut -d: -f1 | zip -l9q $_file.zip -@
-    mv $_file.zip submodules_zip/
-    rm -rf $PACKAGE_NAME/$submodule
+    file -f __files_to_zip | fgrep -f ../_txtfiles | cut -d: -f1 | zip -l9q ../submodules_zip/$_file.zip -@
+    rm -rf $_file
   done < $MODULES
+  cd ..
 }
 
 #read machine config
