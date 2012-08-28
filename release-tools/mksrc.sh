@@ -23,6 +23,7 @@ QTSHORTVER=0.0
 QTGITTAG=.sha1s
 PACK_TIME=`date '+%Y-%m-%d'`
 DOCS=generate
+DO_TAG=false
 MULTIPACK=no
 IGNORE_LIST=
 LICENSE=opensource
@@ -37,6 +38,7 @@ function usage()
   echo "Optional parameters:"
   echo "-m             one is able to tar each sub module separately"
   echo "--no-docs      skip generating documentation"
+  echo "--tag          also tag the repository"
   echo "-i submodule   will exclude the submodule from final package "
   echo "-l license     license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
   echo "-p patch file  patch file (.sh) to execute, example: change_licenses.sh"
@@ -121,6 +123,10 @@ while test $# -gt 0; do
       shift
       DOCS=skip
     ;;
+    --tag)
+      shift
+      DO_TAG=true
+    ;;
     -i|--ignore)
       shift
       IGNORE_LIST=$IGNORE_LIST" "$1
@@ -202,6 +208,13 @@ git ls-tree $REPO_TAG | while read mode type sha1 name; do
     echo $name $sha1
 done >> $MODULES
 
+#tag the master repo, maybe
+if $DO_TAG && test "v$QTVER" != "$REPO_TAG"; then
+    git tag -f -a -m "Qt release $QTVER" v$QTVER $REPO_TAG || \
+        { echo >&2 "Unable to tag master repository"; exit 1; }
+    REPO_TAG=v$QTVER
+fi
+
 #archive the main repo
 git archive --format=tar $REPO_TAG | tar -x -C $_TMP_DIR
 _SHA=`git rev-parse $REPO_TAG`
@@ -216,15 +229,17 @@ while read submodule _SHA; do
   echo " -- From dir $PWD/$submodule, lets pack $submodule at $_SHA --"
   cd $submodule
   _file=$(echo "$submodule" | cut -d'/' -f1).tar.gz
+  #tag me, maybe
+  if $DO_TAG; then
+      git tag -f -a -m "Qt release $QTVER" v$QTVER $_SHA || \
+          { echo >&2 "Unable to tag submodule $submodule"; exit 1; }
+      _SHA=v$QTVER
+  fi
   #export the repository contents
   git archive --format=tar --prefix=$submodule/ $_SHA | \
       tar -x -C $_TMP_DIR
   #store the sha1
   echo "$(echo $(echo $submodule|sed 's/-/_/g') | cut -d/ -f1)=$_SHA" >>$_TMP_DIR/$QTGITTAG
-  cd $_TMP_DIR
-  #extract to tmp dir
-  tar xzf $_file
-  rm -f $_file
   cd $REPO_DIR
 done < $MODULES
 #mv $MODULES $CUR_DIR
