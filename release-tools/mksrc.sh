@@ -342,15 +342,14 @@ create_main_file
 
 # Create tar/submodule
 if [ $MULTIPACK = yes ]; then
-  mv $BIG_TAR $BIG_TAR.huge
-  mv $BIG_ZIP $BIG_ZIP.huge
+  mkdir single
+  mv $PACKAGE_NAME.* single/
   echo " -- Creating tar per submodule -- "
   create_and_delete_submodule
   create_main_file
-  mv $BIG_TAR submodules_tar/qt5-$QTVER.tar.gz
-  mv $BIG_ZIP submodules_zip/qt5-$QTVER.zip
-  mv $BIG_TAR.huge $BIG_TAR
-  mv $BIG_ZIP.huge $BIG_ZIP
+  mv $PACKAGE_NAME.tar.xz submodules_tar/qt5-$LICENSE-src-$QTVER.tar.xz
+  mv $BIG_TAR submodules_tar/qt5-$LICENSE-src-$QTVER.tar.gz
+  mv $BIG_ZIP submodules_zip/qt5-$LICENSE-src-$QTVER.zip
 fi
 cleanup
 
