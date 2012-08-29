@@ -63,10 +63,9 @@ function create_main_file()
   # "Process substitution"
   # This will cause it to compress simultaneously, though
   # at the rate of the slowest of the processes (e.g.,
-  # with xz at 100% CPU, bzip2 takes 25% and gzip 15%)
+  # with xz at 100% CPU, and gzip 15%)
   tar cf - $PACKAGE_NAME/ | \
       tee \
-         >(bzip2 -9 > $PACKAGE_NAME.tar.bz2) \
          >(xz -9 > $PACKAGE_NAME.tar.xz) | \
       gzip -9 > $BIG_TAR
 
