@@ -294,7 +294,7 @@ cat $CUR_DIR/_tmp_shas > $CUR_DIR/$PACKAGE_NAME/$QTGITTAG
 #------------------------------------------------------------------
 echo " -- Patching %VERSION% etc. defines --"
 cd $CUR_DIR/$PACKAGE_NAME/
-find . -type f -print0 | xargs -0 sed -i -e "s/%VERSION%/$QTVER/g" -e "s/%SHORTVERSION%/$QTSHORTVER/g" -e "s/#define QT_PACKAGE_TAG \"\"/#define QT_PACKAGE_TAG \"\"/g" -e "s/#define QT_PACKAGEDATE_STR \"YYYY-MM-DD\"/#define QT_PACKAGEDATE_STR \"$PACK_TIME\"/g"
+find . -type f -print0 | xargs -0 sed -i -e "s/%VERSION%/$QTVER/g" -e "s/%SHORTVERSION%/$QTSHORTVER/g"
 
 #------------------------------------------------------------------
 # Step 4,  generate docs
