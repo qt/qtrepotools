@@ -24,6 +24,7 @@ QTGITTAG=.sha1s
 PACK_TIME=`date '+%Y-%m-%d'`
 DOCS=generate
 DO_TAG=false
+DO_FETCH=true
 MULTIPACK=no
 IGNORE_LIST=
 LICENSE=opensource
@@ -39,6 +40,7 @@ function usage()
   echo "-m             one is able to tar each sub module separately"
   echo "--no-docs      skip generating documentation"
   echo "--tag          also tag the repository"
+  echo "-N             don't use git fetch to update submodules"
   echo "-i submodule   will exclude the submodule from final package "
   echo "-l license     license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
   echo "-p patch file  patch file (.sh) to execute, example: change_licenses.sh"
@@ -126,6 +128,10 @@ while test $# -gt 0; do
       shift
       DO_TAG=true
     ;;
+    -N|--no-fetch)
+      shift
+      DO_FETCH=false
+      ;;
     -i|--ignore)
       shift
       IGNORE_LIST=$IGNORE_LIST" "$1
@@ -228,6 +234,15 @@ while read submodule _SHA; do
   echo " -- From dir $PWD/$submodule, lets pack $submodule at $_SHA --"
   cd $submodule
   _file=$(echo "$submodule" | cut -d'/' -f1).tar.gz
+  #check that _SHA exists
+  if ! git cat-file -e $_SHA; then
+      $DO_FETCH && git fetch >/dev/null
+      if ! git cat-file -e $_SHA; then
+          echo >&2 "Commit $_SHA does not exist in submodule $submodule"
+          echo >&2 "and could not be fetched. Cannot continue."
+          exit 1
+      fi
+  fi
   #tag me, maybe
   if $DO_TAG; then
       git tag -f -a -m "Qt $QTVER Release" v$QTVER $_SHA || \
