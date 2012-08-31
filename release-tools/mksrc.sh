@@ -31,22 +31,25 @@ IGNORE_LIST=
 LICENSE=opensource
 PATCH_FILE=''
 REPO_TAG=HEAD
+STRICT=0
 
 function usage()
 {
   echo "Usage:"
-  echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub][-l lic][-p patch][-t revision]"
+  echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub][-l lic][-p patch][-t revision][--strict][--silent]"
   echo "where -u is path to git repo and -v is version"
   echo "Optional parameters:"
-  echo "-m                  one is able to tar each sub module separately"
-  echo "--no-docs           skip generating documentation"
-  echo "--tag               also tag the repository"
-  echo "-N                  don't use git fetch to update submodules"
-  echo "-i submodule        will exclude the submodule from final package "
-  echo "-l license          license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
-  echo "-p patch file       patch file (.sh) to execute, example: change_licenses.sh"
-  echo "-t revision         committish to pack (tag name, branch name or SHA-1)"
-  echo "--exit-after-docs   exit after creating doc arhives (without creating src archives)"
+  echo "-m             one is able to tar each sub module separately"
+  echo "--no-docs      skip generating documentation"
+  echo "--tag          also tag the repository"
+  echo "-N             don't use git fetch to update submodules"
+  echo "--strict       strict mode, execution will fail on any error"
+  echo "--silent       silent mode"
+  echo "-i submodule   will exclude the submodule from final package "
+  echo "-l license     license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
+  echo "-p patch file  patch file (.sh) to execute, example: change_licenses.sh"
+  echo "-t revision    committish to pack (tag name, branch name or SHA-1)"
+  echo "-j             make thread count"
 }
 
 function cleanup()
@@ -71,7 +74,7 @@ function create_main_file()
   tar cf - $PACKAGE_NAME/ | \
       tee \
          >(xz -9 > $PACKAGE_NAME.tar.xz) | \
-      gzip -9 > $BIG_TAR
+      gzip -9 > $PACKAGE_NAME.tar.gz
 
   echo " - Creating single 7z file - "
   7z a $PACKAGE_NAME.7z $PACKAGE_NAME/ > /dev/null
@@ -80,9 +83,9 @@ function create_main_file()
   # ZIP
   find $PACKAGE_NAME/ > __files_to_zip
   # zip binfiles
-  file -f __files_to_zip | fgrep -f _txtfiles -v | cut -d: -f1 | zip -9q $BIG_ZIP -@
+  file -f __files_to_zip | fgrep -f _txtfiles -v | cut -d: -f1 | zip -9q $PACKAGE_NAME.zip -@
   #zip ascii files with win line endings
-  file -f __files_to_zip | fgrep -f _txtfiles | cut -d: -f1 | zip -l9q $BIG_ZIP -@
+  file -f __files_to_zip | fgrep -f _txtfiles | cut -d: -f1 | zip -l9q $PACKAGE_NAME.zip -@
 }
 
 function create_and_delete_submodule()
@@ -104,6 +107,7 @@ function create_and_delete_submodule()
     #zip ascii files with win line endings
     file -f __files_to_zip | fgrep -f ../_txtfiles | cut -d: -f1 | zip -l9q ../submodules_zip/$_file.zip -@
     rm -rf $_file
+    rm -rf __files_to_zip
   done < $MODULES
   cd ..
 }
@@ -168,6 +172,19 @@ while test $# -gt 0; do
     --exit-after-docs)
       shift
       EXIT_AFTER_DOCS=true
+    -j|--jobs)
+      shift
+      MAKEARGS=$MAKEARGS+' -j'$1
+      shift
+    ;;
+    --strict)
+      shift
+      STRICT=1
+      shift
+    ;;
+    --silent)
+      shift
+      MAKEARGS=$MAKEARGS+' -s'
       shift
     ;;
     *)
@@ -186,8 +203,6 @@ if ! git rev-parse --git-dir >/dev/null 2>/dev/null; then
 fi
 
 PACKAGE_NAME=qt-everywhere-$LICENSE-src-$QTVER
-BIG_TAR=$PACKAGE_NAME.tar.gz
-BIG_ZIP=$PACKAGE_NAME.zip
 MODULES=$CUR_DIR/submodules.txt
 _TMP_DIR=$CUR_DIR/$PACKAGE_NAME
 
@@ -198,13 +213,10 @@ _TMP_DIR=$CUR_DIR/$PACKAGE_NAME
 echo " -- Finding submodules from $REPO_DIR -- "
 
 rm -f $MODULES
-rm -f $BIG_TAR
-rm -f $BIG_ZIP
 rm -rf $_TMP_DIR
 mkdir $_TMP_DIR
 
 # detect the submodules to be archived
-rm -f $MODULES
 git ls-tree $REPO_TAG | while read mode type sha1 name; do
     test "$type" = "commit" || continue
     test -d "$name" || {
@@ -226,6 +238,8 @@ if $DO_TAG && test "v$QTVER" != "$REPO_TAG"; then
         { echo >&2 "Unable to tag master repository"; exit 1; }
     REPO_TAG=v$QTVER
 fi
+
+cd $REPO_DIR
 
 #archive the main repo
 git archive --format=tar $REPO_TAG | tar -x -C $_TMP_DIR
@@ -336,8 +350,24 @@ if [ $DOCS = generate ]; then
 
 # Put the generated docs back into the clean source directory
   echo "DOC: Put the generated docs back into the clean source directory"
-  mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/html $CUR_DIR/$PACKAGE_NAME/qtdoc/doc
-  mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/qch $CUR_DIR/$PACKAGE_NAME/qtdoc/qch
+  if [ ! -d $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/html ]; then
+    echo "DOC: *** Error: $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/html not found!"
+    if [ $STRICT -eq 1 ]; then
+      echo "  -> exiting.."
+      exit 2
+    fi
+  else
+    mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/html $CUR_DIR/$PACKAGE_NAME/qtdoc/doc
+  fi
+  if [ ! -d $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/qch ]; then
+    echo "DOC: *** Error: $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/qch not found"
+    if [ $STRICT -eq 1 ]; then
+      echo "  -> exiting.."
+      exit 2
+    fi
+  else
+    mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/qch $CUR_DIR/$PACKAGE_NAME/qtdoc/qch
+  fi
   # Cleanup
   cd $CUR_DIR/$PACKAGE_NAME/
   #rm -rf $DOC_BUILD
@@ -381,13 +411,10 @@ if [ $MULTIPACK = yes ]; then
   create_and_delete_submodule
   create_main_file
   mv $PACKAGE_NAME.tar.xz submodules_tar/qt5-$LICENSE-src-$QTVER.tar.xz
-  mv $BIG_TAR submodules_tar/qt5-$LICENSE-src-$QTVER.tar.gz
-  mv $BIG_ZIP submodules_zip/qt5-$LICENSE-src-$QTVER.zip
+  mv $PACKAGE_NAME.tar.gz submodules_tar/qt5-$LICENSE-src-$QTVER.tar.gz
+  mv $PACKAGE_NAME.zip submodules_zip/qt5-$LICENSE-src-$QTVER.zip
 fi
 cleanup
 
 echo "Done!"
-
-
-
 
