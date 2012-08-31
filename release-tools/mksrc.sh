@@ -209,7 +209,7 @@ done >> $MODULES
 
 #tag the master repo, maybe
 if $DO_TAG && test "v$QTVER" != "$REPO_TAG"; then
-    git tag -f -a -m "Qt release $QTVER" v$QTVER $REPO_TAG || \
+    git tag -f -a -m "Qt $QTVER Release" v$QTVER $REPO_TAG || \
         { echo >&2 "Unable to tag master repository"; exit 1; }
     REPO_TAG=v$QTVER
 fi
@@ -230,7 +230,7 @@ while read submodule _SHA; do
   _file=$(echo "$submodule" | cut -d'/' -f1).tar.gz
   #tag me, maybe
   if $DO_TAG; then
-      git tag -f -a -m "Qt release $QTVER" v$QTVER $_SHA || \
+      git tag -f -a -m "Qt $QTVER Release" v$QTVER $_SHA || \
           { echo >&2 "Unable to tag submodule $submodule"; exit 1; }
       _SHA=v$QTVER
   fi
