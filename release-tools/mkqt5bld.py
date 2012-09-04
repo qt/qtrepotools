@@ -54,26 +54,27 @@ MODULE_ARCHIVE_DIR_NAME             = 'module_archives'
 MODULE_ARCHIVE_DIR                  = SCRIPT_ROOT_DIR + os.sep + MODULE_ARCHIVE_DIR_NAME
 MAIN_INSTALL_DIR_NAME               = 'main_install'
 SUBMODULE_INSTALL_BASE_DIR_NAME     = "submodule_install_"
-
+#list of modules, only a backup list, this list will be updated during script execution
 QT5_MODULES_LIST                    = [ 'qt3d', 'qlalr', 'qtactiveqt', 'qtbase',     \
                                         'qtconnectivity', 'qtdeclarative', 'qtdoc', \
                                         'qtfeedback', 'qtgraphicaleffects', \
-                                        'qtimageformats', 'qtjsondb', 'qtjsbackend', \
+                                        'qtimageformats', 'qtjsbackend', \
                                         'qtlocation', 'qtmultimedia', 'qtpim', \
                                         'qtqa', 'qtquick1', 'qtrepotools', 'qtscript', \
                                         'qtsensors', 'qtsvg', 'qtsystems', 'qttools', \
                                         'qttranslations', 'qtwayland', 'webkit', \
                                         'qtwebkit-examples-and-demos', 'qtxmlpatterns']
-
-CONFIGURE_OPTIONS                   = '-opensource -debug-and-release -release -nomake tests -confirm-license' #-make examples
-DEVEL_MODE                          = 0
-FORCE_MAKE                          = 0
-RUN_RPATH                           = False
+QT5_MODULES_IGNORE_LIST             = []
+CONFIGURE_OPTIONS                   = '-opensource -debug-and-release -release -nomake tests -confirm-license'
+DEVEL_MODE                          = False
+FORCE_MAKE                          = False
 ORIGINAL_QMAKE_QT_PRFXPATH          = ''
-BUILD_WEBKIT                        = True
-BUILD_TRANSLATIONS                  = False
+SILENT_BUILD                        = False
 PADDING                             = "______________________________PADDING______________________________"
-FILES_TO_REMOVE_LIST                = ['Makefile', '.o', '.moc', '.pro', '.init-repository', '.cpp', '.gitignore']
+FILES_TO_REMOVE_LIST                = ['Makefile', 'Makefile.Release', 'Makefile.Debug', \
+                                       '.o', '.moc', '.init-repository', \
+                                       '.gitignore', '.obj']
+IGNORE_PATCH_LIST                   = ['.png', '.jpg', '.gif', '.bmp', '.exe', '.dll', '.lib', '.pdb', '.qph']
 
 
 ###############################
@@ -113,19 +114,25 @@ def init_mkqt5bld():
     # make cmd
     if MAKE_CMD == '':  #if not given in commandline param, use nmake or make according to the os
         if bldinstallercommon.is_win_platform():        #win
-            MAKE_CMD = 'nmake /l /s'
-            MAKE_INSTALL_CMD = 'nmake /l /s install'
-        elif bldinstallercommon.is_linux_platform():    #linux
-            MAKE_CMD = 'make -s'
-            MAKE_INSTALL_CMD = 'make -s install'
-        elif bldinstallercommon.is_mac_platform():      #mac
-            MAKE_CMD = 'make -s'
-            MAKE_INSTALL_CMD = 'make -s install'
-
-    if FORCE_MAKE == 1:
-        if bldinstallercommon.is_linux_platform() or bldinstallercommon.is_mac_platform():    #linux&mac
-            MAKE_CMD = MAKE_CMD + ' -i'
-            MAKE_INSTALL_CMD = MAKE_INSTALL_CMD + ' -i'
+            MAKE_CMD = 'nmake'
+            MAKE_INSTALL_CMD = 'nmake'
+            if SILENT_BUILD:
+                MAKE_CMD += ' /s'
+                MAKE_INSTALL_CMD += ' /s'
+            if FORCE_MAKE:
+                MAKE_CMD += ' /l'
+                MAKE_INSTALL_CMD += ' \l'
+            MAKE_INSTALL_CMD += ' install'
+        elif bldinstallercommon.is_linux_platform() or bldinstallercommon.is_mac_platform():    #linux & mac
+            MAKE_CMD = 'make'
+            MAKE_INSTALL_CMD = 'make'
+            if SILENT_BUILD:
+                MAKE_CMD += ' -s'
+                MAKE_INSTALL_CMD += ' -s'
+            if FORCE_MAKE:
+                MAKE_CMD += ' -i'
+                MAKE_INSTALL_CMD += ' -i'
+            MAKE_INSTALL_CMD += ' install'
 
     #remove old working dirs
     if os.path.exists(WORK_DIR):
@@ -190,18 +197,11 @@ def extract_src_package():
         print_wrap('*** Unsupported directory structure!!!')
         sys.exit(-1)
 
-    #remove not working dirs
-    if not BUILD_TRANSLATIONS:
-        if os.path.exists(QT_SOURCE_DIR + os.sep + 'qttranslations'):
-            print_wrap('    Removing qttranslations')
-            bldinstallercommon.remove_tree(QT_SOURCE_DIR + os.sep + 'qttranslations')
-    if not BUILD_WEBKIT:
-        if os.path.exists(QT_SOURCE_DIR + os.sep + 'qtwebkit'):
-            print_wrap('    Removing qtwebkit')
-            bldinstallercommon.remove_tree(QT_SOURCE_DIR + os.sep + 'qtwebkit')
-        if os.path.exists(QT_SOURCE_DIR + os.sep + 'qtwebkit-examples-and-demos'):
-            print_wrap('    Removing qtwebkit-examples-and-demos')
-            bldinstallercommon.remove_tree(QT_SOURCE_DIR + os.sep + 'qtwebkit-examples-and-demos')
+    #Remove the modules to be ignored
+    for ignore in QT5_MODULES_IGNORE_LIST:
+        if os.path.exists(QT_SOURCE_DIR + os.sep + ignore):
+            print_wrap('    Removing ' + ignore)
+            bldinstallercommon.remove_tree(QT_SOURCE_DIR + os.sep + ignore)
 
     print_wrap('--------------------------------------------------------------------')
 
@@ -216,6 +216,7 @@ def build_qt():
     cmd_args = CONFIGURE_CMD + ' ' + CONFIGURE_OPTIONS
     print_wrap('    Configure line: ' + cmd_args)
     bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_SOURCE_DIR, True)
+
     # build
     print_wrap('---------------- Building Qt ---------------------------------------')
     #create list of modules in default make order
@@ -239,7 +240,7 @@ def build_qt():
                         submodule_list.append(submodule_name[:index])
                         modules_found = 1
                     #webkit is listed with different syntax: sub-webkit-pri-make_first
-                    elif item.startswith('sub-') and BUILD_WEBKIT:
+                    elif item.startswith('sub-'):
                         submodule_name = item[4:]   #4 <- sub-
                         index = submodule_name.index('-pri-make_first')
                         submodule_list.append(submodule_name[:index])
@@ -258,24 +259,17 @@ def build_qt():
         shutil.rmtree(MAKE_INSTALL_ROOT_DIR)
     #create install dirs
     bldinstallercommon.create_dirs(MAKE_INSTALL_ROOT_DIR)
-    #main level make
-    cmd_args = MAKE_CMD
-    if bldinstallercommon.is_linux_platform():
-        cmd_args += ' -j' + MAKE_THREAD_COUNT
-    print_wrap('    Running make on root level')
-    bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_SOURCE_DIR, True)
+
+    #make each submodule
+    for module_name in QT5_MODULES_LIST:
+        print_wrap('    Building module ' + module_name)
+        cmd_args = MAKE_CMD
+        if bldinstallercommon.is_linux_platform():
+            cmd_args += ' -j' + MAKE_THREAD_COUNT
+        cmd_args += ' module-' + module_name
+        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_SOURCE_DIR, True)
+
     print_wrap('--------------------------------------------------------------------')
-
-
-###############################
-# function
-###############################
-def patch_rpaths():
-    if RUN_RPATH:
-        if (bldinstallercommon.is_linux_platform() or bldinstallercommon.is_solaris_platform()):
-            print_wrap('---------------- Patching RPaths -----------------------------------')
-            bldinstallercommon.handle_component_rpath(QT_SOURCE_DIR, 'lib')
-            print_wrap('--------------------------------------------------------------------')
 
 
 ###############################
@@ -283,50 +277,45 @@ def patch_rpaths():
 ###############################
 def install_qt():
     print_wrap('---------------- Installing Qt -------------------------------------')
-    #main level make install
-    cmd_args = ''
-    if bldinstallercommon.is_linux_platform():
-        cmd_args = 'sudo '
-    cmd_args += MAKE_INSTALL_CMD
-    print_wrap('    Running main level make install')
-    bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_SOURCE_DIR, True)
-    #main level install with install root
-    #main level make install
+    #make install to single install root
     cmd_args = ''
     install_root_path = MAKE_INSTALL_ROOT_DIR + os.sep + MAIN_INSTALL_DIR_NAME
-    if bldinstallercommon.is_linux_platform():
-        cmd_args = 'sudo '
     if bldinstallercommon.is_win_platform():
         install_root_path = install_root_path[3:]
         print_wrap('    On Windows, use install root path: ' + install_root_path)
-    cmd_args += MAKE_INSTALL_CMD + ' INSTALL_ROOT=' + install_root_path
-    print_wrap('    Running main level make install with install root ' + install_root_path)
-    bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_SOURCE_DIR, True)
-    #end - main level install with install root
+
+    print_wrap('    Install modules to single INSTALL_ROOT')
+    for module_name in QT5_MODULES_LIST:
+        if bldinstallercommon.is_win_platform():
+            install_root_path = install_root_path[3:]
+            print_wrap('    Using install root path: ' + install_root_path)
+        submodule_dir_name = QT_SOURCE_DIR + os.sep + module_name
+        if module_name == 'qtwebkit':
+            submodule_dir_name = submodule_dir_name + os.sep + 'WebKitBuild' + os.sep + 'Release'
+        cmd_args = ''
+        cmd_args += MAKE_INSTALL_CMD + ' ' + 'INSTALL_ROOT=' + install_root_path
+        print_wrap('    Installing module: ' + module_name)
+        print_wrap('          -> cmd args: ' + cmd_args)
+        print_wrap('                -> in: ' + submodule_dir_name)
+        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), submodule_dir_name, True)
 
     #make install for each module with INSTALL_ROOT
-    print_wrap('    Install modules to INSTALL_ROOT')
+    print_wrap('    Install modules to separate INSTALL_ROOT')
     for module_name in QT5_MODULES_LIST:
-        if module_name == 'qtwebkit' and not BUILD_WEBKIT:
-            print_wrap('    > > > > > > NOT installing qtwebkit < < < < < < < <')
-        elif module_name == 'qtwebkit-examples-and-demos' and not BUILD_WEBKIT:
-            print_wrap('    > > > > > > NOT installing qtwebkit-examples-and-demos < < < < < < < <')
-        elif module_name == 'qttranslations' and not BUILD_TRANSLATIONS:
-            print_wrap('    > > > > > > NOT installing qttranslations < < < < < < < <')
-        else:
-            install_root_path = MAKE_INSTALL_ROOT_DIR + os.sep + SUBMODULE_INSTALL_BASE_DIR_NAME + module_name
-            if bldinstallercommon.is_win_platform():
-                install_root_path = install_root_path[3:]
-                print_wrap('    Using install root path: ' + install_root_path)
-            submodule_dir_name = QT_SOURCE_DIR + os.sep + module_name
-            cmd_args = ''
-            if bldinstallercommon.is_linux_platform():
-                cmd_args = 'sudo '
-            cmd_args += MAKE_INSTALL_CMD + ' ' + 'INSTALL_ROOT=' + install_root_path
-            print_wrap('    Installing module: ' + module_name)
-            print_wrap('          -> cmd args: ' + cmd_args)
-            print_wrap('                -> in: ' + submodule_dir_name)
-            bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), submodule_dir_name, True)
+        install_root_path = MAKE_INSTALL_ROOT_DIR + os.sep + SUBMODULE_INSTALL_BASE_DIR_NAME + module_name
+        if bldinstallercommon.is_win_platform():
+            install_root_path = install_root_path[3:]
+            print_wrap('    Using install root path: ' + install_root_path)
+        submodule_dir_name = QT_SOURCE_DIR + os.sep + module_name
+        if module_name == 'qtwebkit':
+            submodule_dir_name = submodule_dir_name + os.sep + 'WebKitBuild' + os.sep + 'Release'
+        cmd_args = ''
+        cmd_args += MAKE_INSTALL_CMD + ' ' + 'INSTALL_ROOT=' + install_root_path
+        print_wrap('    Installing module: ' + module_name)
+        print_wrap('          -> cmd args: ' + cmd_args)
+        print_wrap('                -> in: ' + submodule_dir_name)
+        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), submodule_dir_name, True)
+
     print_wrap('--------------------------------------------------------------------')
 
 
@@ -352,43 +341,37 @@ def save_original_qt_prfxpath():
 ###############################
 # function
 ###############################
-#def restore_qt_prfxpath():
-#    print_wrap('---------------- Restoring original qt_prfxpath --------------------')
-#    qmake_executable_path = bldinstallercommon.locate_executable(MAKE_INSTALL_ROOT_DIR, 'qmake' + bldinstallercommon.get_executable_suffix())
-#    print_wrap(' ===> Patching: ' + qmake_executable_path)
-#    patch_qmake_qt_key.replace_key(qmake_executable_path, 'qt_prfxpath', ORIGINAL_QMAKE_QT_PRFXPATH)
-#    print_wrap('--------------------------------------------------------------------')
-
-
-###############################
-# function
-###############################
 def replace_build_paths(path_to_checked):
     print_wrap('------------ Replacing build paths in ' + path_to_checked + '----------------')
+    pattern = re.compile(WORK_DIR_NAME)
     qt_source_dir_delimeter_2 = QT_SOURCE_DIR.replace('/', os.sep)
     for root, dirs, files in os.walk(path_to_checked):
         for name in files:
             path = os.path.join(root, name)
             if not os.path.isdir(path) and not os.path.islink(path):
-                if bldinstallercommon.is_text_file(path):
-                    print_wrap('---> Replacing build path in: ' + path)
-                    print_wrap('--->         String to match: ' + QT_SOURCE_DIR)
-                    print_wrap('--->         String to match: ' + qt_source_dir_delimeter_2)
-                    print_wrap('--->             Replacement: ' + ORIGINAL_QMAKE_QT_PRFXPATH)
-                    for line in fileinput.FileInput(path,inplace=1):
-                        output1 = line.replace(QT_SOURCE_DIR, ORIGINAL_QMAKE_QT_PRFXPATH)
-                        if line != output1:
-                            # we had a match
-                            print output1.rstrip('\n')
-                            continue
-                        else:
-                            output2 = line.replace(qt_source_dir_delimeter_2, ORIGINAL_QMAKE_QT_PRFXPATH)
-                            if line != output2:
-                                # we had a match for the second replacement
-                                print output2.rstrip('\n')
-                                continue
-                        # no match so write original line back to file
-                        print line.rstrip('\n')
+                if not (any(name.endswith(item) for item in IGNORE_PATCH_LIST)):
+                    readlines=open(path,'r').read()
+                    if pattern.search(readlines):
+                        print_wrap('---> Regexp match: ' + path)
+                        if bldinstallercommon.is_text_file(path):
+                            print_wrap('---> Replacing build path in: ' + path)
+                            print_wrap('--->         String to match: ' + QT_SOURCE_DIR)
+                            print_wrap('--->         String to match: ' + qt_source_dir_delimeter_2)
+                            print_wrap('--->             Replacement: ' + ORIGINAL_QMAKE_QT_PRFXPATH)
+                            for line in fileinput.FileInput(path,inplace=1):
+                                output1 = line.replace(QT_SOURCE_DIR, ORIGINAL_QMAKE_QT_PRFXPATH)
+                                if line != output1:
+                                    # we had a match
+                                    print output1.rstrip('\n')
+                                    continue
+                                else:
+                                    output2 = line.replace(qt_source_dir_delimeter_2, ORIGINAL_QMAKE_QT_PRFXPATH)
+                                    if line != output2:
+                                        # we had a match for the second replacement
+                                        print output2.rstrip('\n')
+                                        continue
+                                # no match so write original line back to file
+                                print line.rstrip('\n')
     print_wrap('--------------------------------------------------------------------')
 
 
@@ -397,21 +380,13 @@ def replace_build_paths(path_to_checked):
 ###############################
 def clean_up(install_dir):
     print_wrap('---------------- Cleaning unnecessary files from ' + install_dir + '----------')
+    # all platforms
     for root, dirs, files in os.walk(install_dir):
         for name in files:
-            if name in FILES_TO_REMOVE_LIST:
+            if (any(name.endswith(to_remove) for to_remove in FILES_TO_REMOVE_LIST)):
                 path = os.path.join(root, name)
                 print_wrap('    ---> Deleting file: ' + name)
                 os.remove(path)
-
-    #TODO: At the moment, it seems that installing to default location is necessary
-    #to be able to install to INSTALL_ROOT, so remove here the installation from default location
-    if bldinstallercommon.is_linux_platform() or bldinstallercommon.is_mac_platform():
-        default_install_dir = '/usr/local/Qt-5.0.0'
-        if os.path.exists(default_install_dir):
-            print_wrap('    Removing /usr/local/Qt-5.0.0 on mac/linux..')
-            bldinstallercommon.remove_tree(default_install_dir)
-
     # on windows remove redundant .dll files from \lib
     if bldinstallercommon.is_win_platform():
         # each submodule first
@@ -432,8 +407,6 @@ def clean_up(install_dir):
                 print_wrap('*** Warning! Unable to locate \\lib directory under: ' + full_install_lib_path)
     print_wrap('--------------------------------------------------------------------')
 
-
-
 ###############################
 # function
 ###############################
@@ -453,6 +426,7 @@ def archive_submodules():
         print_wrap('    Archiving all modules to archive qt5_all.7z')
         cmd_args = '7z a ' + MODULE_ARCHIVE_DIR + os.sep + 'qt5_all' + '.7z ' + MAIN_INSTALL_DIR_NAME
         bldinstallercommon.do_execute_sub_process_get_std_out(cmd_args.split(' '), MAKE_INSTALL_ROOT_DIR, True, True)
+
     print_wrap('---------------------------------------------------------------------')
 
 
@@ -470,10 +444,9 @@ def print_help():
     print_wrap('  devel_mode')
     print_wrap('  use_prefix=[prefix used for configure options]')
     print_wrap('  force_make')
-    print_wrap('  patch_rpath=yes/no')
     print_wrap('  make_cmd=[custom make tool]')
     print_wrap('  make_thread_count=[number of threads]')
-    print_wrap('  build_webkit=yes/no')
+    print_wrap('  ignore=[module_to_ignore]')
     print_wrap('')
 
 
@@ -485,11 +458,11 @@ def parse_cmd_line():
     global QT_SRC_PACKAGE_URL
     global DEVEL_MODE
     global FORCE_MAKE
-    global RUN_RPATH
     global MAKE_CMD
     global MAKE_THREAD_COUNT
     global MAKE_INSTALL_CMD
-    global BUILD_WEBKIT
+    global SILENT_BUILD
+    global QT5_MODULES_IGNORE_LIST
 
     print_wrap('---------------- Parsing commandline arguments ---------------------')
     arg_count = len(sys.argv)
@@ -505,7 +478,7 @@ def parse_cmd_line():
             print_wrap('        Qt source dir set to: ' + QT_SRC_PACKAGE_URL)
         #is using development mode
         if item.find('devel_mode') >= 0:
-            DEVEL_MODE = 1
+            DEVEL_MODE = True
             CONFIGURE_OPTIONS += ' -nomake examples'
             print_wrap('        devel mode set to true.')
         #prefix for configure
@@ -515,12 +488,8 @@ def parse_cmd_line():
             print_wrap('        -prefix added to configure line.')
         #set force make (-i option for make)
         if item.find('force_make') >= 0:
-            FORCE_MAKE = 1
+            FORCE_MAKE = True
             print_wrap('        using force make (ignoring errors).')
-        #set to run rpath
-        if item.find('patch_rpath') >= 0:
-            RUN_RPATH = True
-            print_wrap('        enabling RPath patching.')
         #set make command, if not set make/nmake is used
         if item.find('make_cmd') >= 0:
             values = item.split('=')
@@ -534,15 +503,21 @@ def parse_cmd_line():
             if values[1] != '':
                 MAKE_THREAD_COUNT = values[1]
             print_wrap('        threads used for building: ' + MAKE_THREAD_COUNT)
-        # do we build webkit?
-        if item.find('build_webkit') >= 0:
+        #set SILENT_BUILD to true, defaults to false
+        if item.find('silent_build') >= 0:
+            SILENT_BUILD = True
+            print_wrap('        doing silent build.')
+        # add modules to ignore list
+        if item.find('ignore') >= 0:
             values = item.split('=')
             if values[1] != '':
-                if values[1] == 'yes' or values[1] == 'true':
-                    BUILD_WEBKIT = True
-                else:
-                    BUILD_WEBKIT = False
-            print_wrap('        build webkit: ' + values[1])
+                QT5_MODULES_IGNORE_LIST.append(values[1])
+            #print_wrap('        ignoring modules: ' + QT5_MODULES_IGNORE_LIST)
+
+    if len(QT5_MODULES_IGNORE_LIST) > 0:
+        print_wrap('        ignoring modules:')
+        for ignore in QT5_MODULES_IGNORE_LIST:
+            print_wrap('        - ' + ignore)
 
     print_wrap('---------------------------------------------------------------------')
     return True
@@ -570,13 +545,9 @@ def main():
     save_original_qt_prfxpath()
     # install
     install_qt()
-    # patch rpaths
-    #patch_rpaths()
-    # restore qt_prfxpath in qmake executable
-    #restore_qt_prfxpath()
     #cleanup files that are not needed in binary packages
     clean_up(MAKE_INSTALL_ROOT_DIR)
-    # replace build directory paths in installed files
+    # replace build directory paths in install_root locations
     replace_build_paths(MAKE_INSTALL_ROOT_DIR)
     # archive each submodule
     archive_submodules()
