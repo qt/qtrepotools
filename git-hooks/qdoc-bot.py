@@ -209,7 +209,7 @@ def process_event(event_string):
         gerrit_url = config.gerrit_address + ":" + project
         # the mainlines need to be updated, so that we keep the updated refs and fetches don't start from scratch every time
         mainlines = subprocess.check_output(["git", "config", "remote.origin.fetch"]).rstrip()
-        fetch_cmd = ["git", "fetch", "-f", "origin", patch_set["ref"]+":refs/changes/"+change["number"], mainlines]
+        fetch_cmd = ["git", "fetch", "-f", "origin", patch_set["ref"]+":refs/changes/"+event["change"]["number"], mainlines]
         num_tries = 0
         while True:
             try:
