@@ -166,6 +166,32 @@ def review_output(event, output_no_patch, output_with_patch):
         print "Unexpected error:", sys.exc_info()
 
 
+def fetch_change(project, patch_set, change_number):
+    try:
+        gerrit_url = config.gerrit_address + ":" + project
+        # the mainlines need to be updated, so that we keep the updated refs and fetches don't start from scratch every time
+        mainlines = subprocess.check_output(["git", "config", "remote.origin.fetch"]).rstrip()
+        fetch_cmd = ["git", "fetch", "-f", "origin", patch_set["ref"]+":refs/changes/"+change_number, mainlines]
+        num_tries = 0
+        while True:
+            try:
+                p = subprocess.check_call(fetch_cmd)
+                return 0
+
+            except subprocess.CalledProcessError, e:
+                # Try to fetch again - one problem is that running git fetch will fail if run simultaneously
+                num_tries += 1
+                print "Fetching subprocess failed, trying again: ", e
+                import time
+                time.sleep(30)
+                if num_tries > 11:
+                    raise e
+
+    except subprocess.CalledProcessError, e:
+        print "Fetching subprocess failed too many times: ", e
+        return -1
+
+
 #git fetch https://codereview.qt-project.org/p/qt/qtbase refs/changes/46/32446/6 && git checkout FETCH_HEAD
 def process_event(event_string):
     # load the event data
@@ -188,6 +214,7 @@ def process_event(event_string):
     # go to the right project checkout
     project = event["change"]["project"]
     patch_set = event["patchSet"]
+    change_number = event["change"]["number"]
 
     module_name = project.split('/')[-1]
     if module_name != "qtbase": # TODO for now we care only about qtbase
@@ -204,29 +231,7 @@ def process_event(event_string):
         print "Current dir was:", os.getcwd()
         return -1
 
-    # fetch the change
-    try:
-        gerrit_url = config.gerrit_address + ":" + project
-        # the mainlines need to be updated, so that we keep the updated refs and fetches don't start from scratch every time
-        mainlines = subprocess.check_output(["git", "config", "remote.origin.fetch"]).rstrip()
-        fetch_cmd = ["git", "fetch", "-f", "origin", patch_set["ref"]+":refs/changes/"+event["change"]["number"], mainlines]
-        num_tries = 0
-        while True:
-            try:
-                p = subprocess.check_call(fetch_cmd)
-                break
-            except subprocess.CalledProcessError, e:
-                # Try to fetch again - one problem is that running git fetch will fail if run simultaneously
-                num_tries += 1
-                print "Fetching subprocess failed, trying again: ", e
-                import time
-                import random
-                time.sleep(random.randint(1,45))
-                if num_tries > 11:
-                    raise e
-
-    except subprocess.CalledProcessError, e:
-        print "Fetching subprocess failed too many times: ", e
+    if fetch_change(project, patch_set, change_number) != 0:
         return -1
 
     try:
