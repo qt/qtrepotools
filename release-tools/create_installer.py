@@ -120,6 +120,7 @@ def print_info():
     print '  <offline>    Creates offline installer'
     print '  <devmode>    Builds Qt and IFW (does not download pre-build IFW)'
     print '  <testclient> Creates installer for RnD testing purposes only (different dist server used)'
+    print '  <incremental> Do not clean up and skip parts that are already done.'
     print ''
 
 
@@ -179,6 +180,7 @@ def parse_cmd_line():
 
     global MAIN_CONFIG_NAME
     global DEVELOPMENT_MODE
+    global INCREMENTAL_MODE
     global OFFLINE_MODE
     global TESTCLIENT_MODE
     global USE_OLD_REPOGEN_SYNTAX
@@ -194,6 +196,8 @@ def parse_cmd_line():
             argument = sys.argv[counter].lower()
             if 'devmode' == argument:
                 DEVELOPMENT_MODE = True
+            elif 'incremental' == argument:
+                INCREMENTAL_MODE = True
             elif 'offline' == argument:
                 OFFLINE_MODE = True
             elif 'testclient' == argument:
@@ -569,6 +573,10 @@ def handle_archive(sdk_component, archive):
     # Create needed data dirs
     data_dir_dest = os.path.normpath(PACKAGES_FULL_PATH_DST + os.sep + sdk_component.package_name + os.sep + 'data')
     install_dir = os.path.normpath(data_dir_dest + os.sep + sdk_component.target_install_base + os.sep + archive.target_install_dir)
+
+    if INCREMENTAL_MODE and os.path.exists(os.path.join(data_dir_dest, archive.archive_name)):
+        return
+
     bldinstallercommon.create_dirs(install_dir)
     print '     -> Created:         ' + install_dir
     # generate save as filename
@@ -762,7 +770,10 @@ def install_ifw_tools():
 
     # if "devmode" mode used, then build IFW from sources
     if DEVELOPMENT_MODE:
-        tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', CONFIGURATIONS_DIR, PLATFORM_IDENTIFIER)
+        if INCREMENTAL_MODE:
+            tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', 'incmode', CONFIGURATIONS_DIR, PLATFORM_IDENTIFIER)
+        else:
+            tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', '', CONFIGURATIONS_DIR, PLATFORM_IDENTIFIER)
         tools_bin_path = SCRIPT_ROOT_DIR + os.sep + tools_dir_temp
     else:
         tools_dir_name = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'InstallerFrameworkTools')['name']
@@ -772,37 +783,38 @@ def install_ifw_tools():
         bldinstallercommon.create_dirs(IFW_TOOLS_DIR)
         package_save_as_temp = IFW_TOOLS_DIR + os.sep + os.path.basename(package_url)
         package_save_as_temp = os.path.normpath(package_save_as_temp)
-        print ' Source url:   ' + package_url
-        print ' Install dest: ' + package_save_as_temp
-        # download IFW archive
-        if not package_url == '':
-            print ' Downloading:  ' + package_url
-            res = bldinstallercommon.is_content_url_valid(package_url)
-            if not(res):
-                print '*** Package URL is invalid: [' + package_url + ']'
+        if not(INCREMENTAL_MODE and os.path.exists(package_save_as_temp)):
+            print ' Source url:   ' + package_url
+            print ' Install dest: ' + package_save_as_temp
+            # download IFW archive
+            if not package_url == '':
+                print ' Downloading:  ' + package_url
+                res = bldinstallercommon.is_content_url_valid(package_url)
+                if not(res):
+                    print '*** Package URL is invalid: [' + package_url + ']'
+                    print '*** Abort!'
+                    sys.exit(-1)
+                urllib.urlcleanup()
+                urllib.urlretrieve(package_url, package_save_as_temp, reporthook=bldinstallercommon.dlProgress)
+            if not (os.path.isfile(package_save_as_temp)):
+                print '*** Downloading failed! Aborting!'
+                sys.exit(-1)
+            # extract IFW archive
+            bldinstallercommon.extract_file(package_save_as_temp, IFW_TOOLS_DIR)
+            os.remove(package_save_as_temp)
+            dir_items = os.listdir(IFW_TOOLS_DIR)
+            items = len(dir_items)
+            if items == 1:
+                dir_name = dir_items[0]
+                os.chdir(IFW_TOOLS_DIR)
+                bldinstallercommon.move_tree(dir_name, '.')
+                bldinstallercommon.remove_tree(IFW_TOOLS_DIR + os.sep + dir_name)
+                os.chdir(SCRIPT_ROOT_DIR)
+            else:
+                print '*** Unsupported dir structure for installer-framework-tools package?!'
                 print '*** Abort!'
                 sys.exit(-1)
-            urllib.urlcleanup()
-            urllib.urlretrieve(package_url, package_save_as_temp, reporthook=bldinstallercommon.dlProgress)
-        if not (os.path.isfile(package_save_as_temp)):
-            print '*** Downloading failed! Aborting!'
-            sys.exit(-1)
-        # extract IFW archive
-        bldinstallercommon.extract_file(package_save_as_temp, IFW_TOOLS_DIR)
-        os.remove(package_save_as_temp)
-        dir_items = os.listdir(IFW_TOOLS_DIR)
-        items = len(dir_items)
-        if items == 1:
-            dir_name = dir_items[0]
-            os.chdir(IFW_TOOLS_DIR)
-            bldinstallercommon.move_tree(dir_name, '.')
-            bldinstallercommon.remove_tree(IFW_TOOLS_DIR + os.sep + dir_name)
-            os.chdir(SCRIPT_ROOT_DIR)
-        else:
-            print '*** Unsupported dir structure for installer-framework-tools package?!'
-            print '*** Abort!'
-            sys.exit(-1)
-        tools_bin_path = IFW_TOOLS_DIR
+            tools_bin_path = IFW_TOOLS_DIR
 
     executable_suffix = bldinstallercommon.get_executable_suffix()
     ARCHIVEGEN_TOOL = bldinstallercommon.locate_executable(tools_bin_path, 'archivegen' + executable_suffix)
@@ -951,7 +963,8 @@ def create_installer():
     # init data
     init_data()
     # clean env before starting
-    clean_work_dirs()
+    if not INCREMENTAL_MODE:
+        clean_work_dirs()
     # set config templates
     set_config_directory()
     set_config_xml()

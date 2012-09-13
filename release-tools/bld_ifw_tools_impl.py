@@ -37,6 +37,7 @@ import ConfigParser
 import bldinstallercommon
 
 DEVELOPMENT_MODE                    = False
+INCREMENTAL_MODE                    = False
 CONFIG_IFW                          = ''
 SCRIPT_ROOT_DIR                     = os.getcwd()
 PLATFORM_IDENTIFIER                 = ''
@@ -143,6 +144,9 @@ def prepare_qt_sources():
         if os.path.exists(QT_SOURCE_DIR):
             return
 
+    if INCREMENTAL_MODE and os.path.exists(QT_SOURCE_DIR):
+        return
+
     print '--------------------------------------------------------------------'
     print 'Fetching Qt src package from: ' + QT_SRC_PACKAGE_URL
     if not os.path.isfile(QT_SRC_PACKAGE_URL_SAVE_AS):
@@ -179,6 +183,9 @@ def build_qt():
         if os.path.exists(QT_BUILD_DIR):
             return
 
+    if INCREMENTAL_MODE and os.path.exists(QT_BUILD_DIR):
+        return
+
     bldinstallercommon.create_dirs(QT_BUILD_DIR)
     # configure first
     print '--------------------------------------------------------------------'
@@ -205,6 +212,9 @@ def prepare_installer_framework():
         if os.path.exists(INSTALLER_FRAMEWORK_SOURCE_DIR):
             return
 
+    if INCREMENTAL_MODE and os.path.exists(INSTALLER_FRAMEWORK_SOURCE_DIR):
+        return
+
     print '--------------------------------------------------------------------'
     print 'Prepare Installer Framework source'
     #create dirs
@@ -217,6 +227,13 @@ def prepare_installer_framework():
 # function
 ###############################
 def build_installer_framework():
+    if INCREMENTAL_MODE:
+        print 'INCREMENTAL_MODE'
+        print INSTALLER_FRAMEWORK_BUILD_DIR
+        if os.path.exists(os.path.join(INSTALLER_FRAMEWORK_BUILD_DIR, 'bin', 'installerbase.exe')):
+            print 'exists'
+            return
+
     print '--------------------------------------------------------------------'
     print 'Building Installer Framework'
 
@@ -240,7 +257,7 @@ def build_installer_framework():
 # function
 ###############################
 def clean_build_environment():
-    if DEVELOPMENT_MODE:
+    if DEVELOPMENT_MODE or INCREMENTAL_MODE:
         return
 
     # delete existing stuff if exists
@@ -262,7 +279,10 @@ def clean_build_environment():
 # function
 ###############################
 def archive_installer_framework():
-    if DEVELOPMENT_MODE:
+    if DEVELOPMENT_MODE or INCREMENTAL_MODE:
+        return
+
+    if INCREMENTAL_MODE and os.path.isfile(INSTALLER_FRAMEWORK_ARCHIVE_NAME):
         return
 
     print '--------------------------------------------------------------------'
@@ -282,6 +302,9 @@ def archive_installer_framework():
 ###############################
 def archive_installerbase():
     if DEVELOPMENT_MODE:
+        return
+
+    if INCREMENTAL_MODE and os.path.isfile(INSTALLERBASE_ARCHIVE_NAME):
         return
 
     print '--------------------------------------------------------------------'
@@ -358,11 +381,14 @@ def archive_macdeployqt():
 # function
 ###############################
 def archive_qt():
+    archive_name = bldinstallercommon.config_section_map(CONFIG_IFW,'Output')['qt_archive_name']
+    if INCREMENTAL_MODE and os.path.exists(archive_name):
+        return
+
     print '--------------------------------------------------------------------'
     print 'Archive static Qt build'
 
     content_path = QT_BUILD_DIR
-    archive_name = bldinstallercommon.config_section_map(CONFIG_IFW,'Output')['qt_archive_name']
     if not archive_name:
         print '*** Error! macdeployqt_archive_name not defined?!'
         sys.exit(-1)
@@ -392,12 +418,15 @@ def archive_qt():
 ###############################
 # main
 ###############################
-def build_ifw(build_mode, configurations_dir, platform):
+def build_ifw(build_mode, incremental_mode, configurations_dir, platform):
     global DEVELOPMENT_MODE
+    global INCREMENTAL_MODE
     global PLATFORM_IDENTIFIER
 
     if build_mode == 'devmode':
         DEVELOPMENT_MODE = True
+    if incremental_mode == 'incmode':
+        INCREMENTAL_MODE = True
     PLATFORM_IDENTIFIER = platform
 
     # init
