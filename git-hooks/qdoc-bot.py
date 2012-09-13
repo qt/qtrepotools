@@ -118,15 +118,16 @@ def remove_moved_doc_errors(fixes, errors):
 def review_output(event, output_no_patch, output_with_patch):
     try:
         import difflib
-        print "REVIEW OUTPUT"
         project = event["change"]["project"]
         patch_set = event["patchSet"]
+        url = event["change"]["url"]
+        subject = event["change"]["subject"]
         new_error_count = output_with_patch.count("\n") - output_no_patch.count("\n")
         if new_error_count == 0:
-            print(project, patch_set, "CHANGE DOES NOT AFFECT DOC ERRORS")
-            post_review(event, "", 1)
+            print "NO DOC ERRORS: ", subject, url
+            #post_review(event, "", 1)
             return 0
-        print(project, patch_set, "DIFF:")
+        print "DIFF for:", subject, url
         message = ""
         score = 0
         if new_error_count == 1:
