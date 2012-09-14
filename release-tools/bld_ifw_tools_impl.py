@@ -165,8 +165,7 @@ def prepare_qt_sources():
         if not bldinstallercommon.is_content_url_valid(QT_SRC_PACKAGE_URL):
             print '*** Qt src package url is invalid! Abort!'
             sys.exit(-1)
-        urllib.urlcleanup()
-        urllib.urlretrieve(QT_SRC_PACKAGE_URL, QT_SRC_PACKAGE_URL_SAVE_AS)
+        bldinstallercommon.retrieve_url(QT_SRC_PACKAGE_URL, QT_SRC_PACKAGE_URL_SAVE_AS)
     else:
         print 'Found old local package, using that: ' + QT_SRC_PACKAGE_URL_SAVE_AS
     print 'Done'

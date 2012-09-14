@@ -51,6 +51,7 @@ from subprocess import PIPE, STDOUT
 import sys
 import stat
 import tarfile
+import urllib
 import urllib2
 import zipfile
 import string
@@ -119,6 +120,24 @@ def dlProgress(count, blockSize, totalSize):
         CURRENT_DOWNLOAD_PERCENT = 0
         print '\n'
 
+
+###############################
+# function
+###############################
+def retrieve_url(url, savefile):
+    try:
+        savefile_tmp = savefile + '.tmp'
+        urllib.urlcleanup()
+        urllib.urlretrieve(url, savefile_tmp, reporthook=dlProgress)
+        os.rename(savefile_tmp, savefile)
+    except:
+        exc = sys.exc_info()[0]
+        print exc
+        try:
+            os.remove(savefile_tmp)
+        except: #swallow, do not shadow actual error
+            pass
+        raise exc
 
 ###############################
 # function

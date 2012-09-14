@@ -663,8 +663,7 @@ def handle_archive(sdk_component, archive):
         print '     Downloading:        ' + archive.archive_uri
         print '            into:        ' + package_save_as_temp
         # start download
-        urllib.urlcleanup()
-        urllib.urlretrieve(archive.archive_uri, package_save_as_temp, reporthook=bldinstallercommon.dlProgress)
+        bldinstallercommon.retrieve_url(archive.archive_uri, package_save_as_temp)
         print '     Downloading completed'
     else:
         print '     Copying:        ' + archive.archive_uri
@@ -882,8 +881,7 @@ def install_ifw_tools():
                     print '*** Package URL is invalid: [' + package_url + ']'
                     print '*** Abort!'
                     sys.exit(-1)
-                urllib.urlcleanup()
-                urllib.urlretrieve(package_url, package_save_as_temp, reporthook=bldinstallercommon.dlProgress)
+                bldinstallercommon.retrieve_url(package_url, package_save_as_temp)
             if not (os.path.isfile(package_save_as_temp)):
                 print '*** Downloading failed! Aborting!'
                 sys.exit(-1)
@@ -1040,8 +1038,7 @@ def create_mac_disk_image():
             print '*** Package URL is invalid: [' + nib_archive_name + ']'
             print '*** Abort!'
             sys.exit(-1)
-        urllib.urlcleanup()
-        urllib.urlretrieve(nib_archive_name, package_save_as_temp, reporthook=bldinstallercommon.dlProgress)
+        bldinstallercommon.retrieve_url(nib_archive_name, package_save_as_temp)
 
     # extract contents
     bldinstallercommon.extract_file(package_save_as_temp, package_save_as_folder)
