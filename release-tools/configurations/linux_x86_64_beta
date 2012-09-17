@@ -61,12 +61,12 @@ archive_name:           readme.7z
 
 [qt.sdk.src.qt.500_beta]
 archives:               src.qt.500_beta
-target_install_base:    /Src/Qt/5.0.0-beta1/
+target_install_base:    /Src/Qt/5.0.0-beta2/
 version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [src.qt.500_beta]
-archive_uri:            /qt5.0-beta-snapshots/src_snapshot/qt-everywhere-opensource-src-5.0.0-beta1.tar.gz
+archive_uri:            /qt5.0-beta-snapshots/src_snapshot/qt-everywhere-opensource-src-5.0.0-beta2.tar.gz
 package_strip_dirs:     1
 target_install_dir:     /
 rpath_target:
@@ -76,7 +76,7 @@ archive_name:           qt-everywhere-opensource-src-5.0.0.7z
 
 [qt.sdk.desktop.500_beta.gcc_64]
 archives:               desktop.500_beta.gcc_64
-target_install_base:    /Desktop/Qt/5.0.0-beta1/gcc_64
+target_install_base:    /Desktop/Qt/5.0.0-beta2/gcc_64
 version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
