@@ -295,7 +295,7 @@ def watcher():
                 event_string = ssh.stdout.readline()
         except:
             # an error occured let's restart in 15 sec
-            print "WATCHER RESTART" + datetime.datetime.now().isoformat()
+            print "WATCHER RESTART" + datetime.datetime.now().isoformat(), sys.exc_info()
             import time
             time.sleep(15)
 
