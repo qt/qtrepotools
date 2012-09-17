@@ -69,17 +69,16 @@ class SdkComponent:
             if self.archive_uri.startswith('http'):
                 res = bldinstallercommon.is_content_url_valid(self.archive_uri)
                 if not res:
-                    print '*** Archive check fail! ***\n*** Unable to locate archive: ' + self.archive_uri
-                    sys.exit(-1)
+                    return '*** Archive check fail! ***\n*** Unable to locate archive: ' + self.archive_uri
             elif not os.path.isfile(self.archive_uri):
-                print '*** Archive check fail! ***\n*** Unable to locate archive: ' + self.archive_uri
-                sys.exit(-1)
+                return '*** Archive check fail! ***\n*** Unable to locate archive: ' + self.archive_uri
 
 
     def __init__(self, section_name, target_config, packages_full_path_list, archive_location_resolver):
         self.static_component           = bldinstallercommon.safe_config_key_fetch(target_config, section_name, 'static_component')
         self.root_component             = bldinstallercommon.safe_config_key_fetch(target_config, section_name, 'root_component')
         self.package_name               = section_name
+        self.packages_full_path_list    = packages_full_path_list
         self.archives                   = bldinstallercommon.safe_config_key_fetch(target_config, section_name, 'archives')
         self.archives                   = self.archives.replace(' ', '')
         self.archive_server_name        = bldinstallercommon.safe_config_key_fetch(target_config, section_name, 'archive_server_name')
@@ -92,10 +91,21 @@ class SdkComponent:
         self.sorting_priority           = bldinstallercommon.safe_config_key_fetch(target_config, section_name, 'sorting_priority')
         self.downloadable_arch_list_qs  = []
         self.pkg_template_dir           = ''
+        self.sanity_check_error_msg     = ''
+        self.target_config              = target_config
+        self.archive_location_resolver  = archive_location_resolver
+
+
+    def is_root_component(self):
+        if self.root_component == 'yes' or self.root_component == 'true':
+            return True
+        return False
+
+    def validate(self):
         # look up correct package template directory from list
         found = False
-        for item in packages_full_path_list:
-            template_full_path = os.path.normpath(item + os.sep + section_name)
+        for item in self.packages_full_path_list:
+            template_full_path = os.path.normpath(item + os.sep + self.package_name)
             if os.path.exists(template_full_path):
                 if not (found):
                     # take the first match
@@ -108,37 +118,56 @@ class SdkComponent:
                     print '*** Only one template for package should exist!'
                     print '*** Fix your configuration! Abort!'
                     sys.exit(-1)
-        self.parse_archives(target_config, archive_location_resolver)
-        self.check_component_data(target_config)
+        self.parse_archives(self.target_config, self.archive_location_resolver)
+        self.check_component_data(self.target_config)
 
 
     def check_component_data(self, target_config):
         if self.static_component:
             if not os.path.isfile(self.static_component):
                 self.sanity_check_fail(self.package_name, 'Unable to locate given static package: ' + self.static_component)
+                return
             # no more checks needed for static component
             return
         if not self.package_name:
             self.sanity_check_fail(self.package_name, 'Undefined package name?')
+            return
         if self.archives and not self.target_install_base:
             self.sanity_check_fail(self.package_name, 'Undefined target_install_base?')
+            return
         if self.version and not self.version_tag:
             self.sanity_check_fail(self.package_name, 'Undefined version_tag?')
+            return
         if self.version_tag and not self.version:
             self.sanity_check_fail(self.package_name, 'Undefined version?')
+            return
         if self.package_default not in ['true', 'false', 'script']:
             self.package_default = 'false'
         # check that package template exists
         if not os.path.exists(self.pkg_template_dir):
             self.sanity_check_fail(self.package_name, 'Package template dir does not exist: ' + self.pkg_template_dir)
+            return
         # next check that archive locations exist
         for archive in self.downloadable_archive_list:
-            archive.check_archive_data()
+            error_msg = archive.check_archive_data()
+            if error_msg:
+                self.sanity_check_fail(self.package_name, error_msg)
+                return
 
 
     def sanity_check_fail(self, component_name, message):
-        print '\n*** Sanity check fail! ***\n*** Component: [' + component_name + ']\n*** ' + message
-        sys.exit(-1)
+        self.sanity_check_error_msg = '*** Sanity check fail! ***\n*** Component: [' + component_name + ']\n*** ' + message
+
+
+    def is_valid(self):
+        if self.sanity_check_error_msg:
+            return False
+        else:
+            return True
+
+
+    def error_msg(self):
+        return self.sanity_check_error_msg
 
 
     def parse_archives(self, target_config, archive_location_resolver):

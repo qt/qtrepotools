@@ -89,8 +89,10 @@ OFFLINE_MODE                = False
 TESTCLIENT_MODE             = False
 ARCHIVE_LOCATION_RESOLVER   = None
 SDK_COMPONENT_LIST          = []
+SDK_COMPONENT_LIST_SKIPPED  = []
 SDK_COMPONENT_IGNORE_LIST   = []
 USE_OLD_REPOGEN_SYNTAX      = False
+STRICT_MODE                 = True
 
 INSTALLER_NAMING_SCHEME_COMPILER    = ''
 INSTALLER_NAMING_SCHEME_TARGET_ARCH = ''
@@ -201,6 +203,7 @@ def parse_cmd_line():
     global INSTALLER_NAMING_SCHEME_TARGET_ARCH
     global LICENSE_TYPE
     global CONFIGURATIONS_DIR
+    global STRICT_MODE
 
     MAIN_CONFIG_NAME = sys.argv[1]
     if(arg_count > 2):
@@ -233,6 +236,11 @@ def parse_cmd_line():
                 values = argument.split('=')
                 if values[1] != '':
                     CONFIGURATIONS_DIR = values[1]
+            elif argument.find('strict_mode') >= 0:
+                values = item.split('=')
+                tmp = values[1]
+                if tmp == 'false' or tmp == 'no':
+                    STRICT_MODE = False
             else:
                 print '*** Unsupported argument given: ' + argument
                 sys.exit(-1)
@@ -648,6 +656,7 @@ def finalize_package_archives(sdk_component):
 def parse_component_data(configuration_file, configurations_base_path):
     """Parse SDK component data"""
     global SDK_COMPONENT_LIST
+    global SDK_COMPONENT_LIST_SKIPPED
     global SDK_COMPONENT_IGNORE_LIST
     print ' -> Reading target configuration file: ' + configuration_file
     configuration = ConfigParser.ConfigParser()
@@ -665,7 +674,21 @@ def parse_component_data(configuration_file, configurations_base_path):
         if section.startswith(PACKAGE_NAMESPACE):
             if section not in SDK_COMPONENT_IGNORE_LIST:
                 sdk_component = SdkComponent(section, configuration, PACKAGES_DIR_NAME_LIST, ARCHIVE_LOCATION_RESOLVER)
-                SDK_COMPONENT_LIST.append(sdk_component)
+                # if online installer, we are interested only about the root component!
+                if not OFFLINE_MODE and not sdk_component.is_root_component():
+                    continue
+
+                # validate component
+                sdk_component.validate()
+                if sdk_component.is_valid():
+                    SDK_COMPONENT_LIST.append(sdk_component)
+                else:
+                    if STRICT_MODE:
+                        print sdk_component.error_msg()
+                        sys.exit(-1)
+                    else:
+                        print '!!! Ignored component in non-strict mode (missing archive data or metadata?): ' + section
+                        SDK_COMPONENT_LIST_SKIPPED.append(sdk_component)
     # check for extra configuration files if defined
     extra_conf_list = bldinstallercommon.safe_config_key_fetch(configuration, 'ExtraPackageConfigurationFiles', 'file_list')
     if extra_conf_list:
@@ -959,6 +982,19 @@ def create_mac_disk_image():
     bldinstallercommon.do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
 
 
+def print_warnings():
+    # check if any components were skipped
+    if SDK_COMPONENT_LIST_SKIPPED:
+        print ''
+        print 'Warning! The following components were not included in offline'
+        print '         installer or in online repository. The reason may be that'
+        print '         the script was run in non-strict mode and the packages'
+        print '         had incomplete metadata or the archive (.7z) was missing?'
+        print ''
+        for item in SDK_COMPONENT_LIST_SKIPPED:
+            print '*** ' + item.package_name
+
+
 ##############################################################
 # All main build steps
 ##############################################################
@@ -994,6 +1030,8 @@ def create_installer():
     # for mac we need some extra work
     if bldinstallercommon.is_mac_platform():
         create_mac_disk_image()
+    # print warning messages if encountered any problems
+    print_warnings()
 
 
 ##############################################################
