@@ -54,6 +54,7 @@ import tarfile
 import urllib2
 import zipfile
 import string
+import fileinput
 
 # need to include this for win platforms as long path names
 # cause problems
@@ -337,6 +338,38 @@ def replace_in_files(filelist, regexp, replacement_string):
                 write_file.write(line)
             # close the file
             write_file.close()
+
+
+###############################
+# function
+###############################
+def replace_in_text_files(root_directory, match_string, replacement_string, file_type_ignore_list):
+    print '------------ replace_in_text_files ----------------'
+    print '  root_directory:     ' + root_directory
+    print '  match_string:       ' + match_string
+    print '  replacement_string: ' + replacement_string
+    pattern = re.compile(match_string)
+    for root, dirs, files in os.walk(root_directory):
+        for name in files:
+            path = os.path.join(root, name)
+            if not os.path.isdir(path) and not os.path.islink(path):
+                if not (any(name.endswith(item) for item in file_type_ignore_list)):
+                    readlines=open(path,'r').read()
+                    if pattern.search(readlines):
+                        print '---> Regexp match: ' + path
+                        if is_text_file(path):
+                            print '---> Replacing build path in: ' + path
+                            print '--->         String to match: ' + match_string
+                            print '--->             Replacement: ' + replacement_string
+                            for line in fileinput.FileInput(path,inplace=1):
+                                output1 = line.replace(match_string, replacement_string)
+                                if line != output1:
+                                    # we had a match
+                                    print output1.rstrip('\n')
+                                else:
+                                    # no match so write original line back to file
+                                    print line.rstrip('\n')
+    print '--------------------------------------------------------------------'
 
 
 ###############################
