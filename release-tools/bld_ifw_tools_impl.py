@@ -203,11 +203,7 @@ def build_qt():
     print '--------------------------------------------------------------------'
     print 'Configuring Qt'
     # TODO, nasty hack, beucause of a bug in python ConfigParser module, loses trailing white spaces!!
-    cmd_args = ''
-    if bldinstallercommon.is_win_platform():
-        cmd_args = QT_CONFIGURE_BIN + ' ' + QT_INSTALLERFW_QT_CONFIGURE_LINE + ' ' + QT_BUILD_DIR
-    else:
-        cmd_args = QT_CONFIGURE_BIN + ' ' + QT_INSTALLERFW_QT_CONFIGURE_LINE + QT_BUILD_DIR
+    cmd_args = QT_CONFIGURE_BIN + ' ' + QT_INSTALLERFW_QT_CONFIGURE_LINE + ' ' + QT_BUILD_DIR
     bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_BUILD_DIR, True)
 
     print '--------------------------------------------------------------------'
