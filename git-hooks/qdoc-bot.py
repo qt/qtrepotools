@@ -295,6 +295,17 @@ def watcher():
                     #clean up working dir is it neccessery?
                     os.chdir(config.watcher_working_dir)
                 event_string = ssh.stdout.readline()
+            # we can get here if connection was broken somehow for example because of a timeout
+            logging.error("WATCHER RESTART because an empty response was received")
+            try:
+                if ssh.returncode is None:
+                    # try to terminate the connection, it is better then wait for gc to do it.
+                    logging.warn("WATCHER received empty response but the connection was not closed, about to terminate it before restart")
+                    ssh.terminate()
+                else:
+                    logging.warn("WATCHER was terminated with error code: %s", ssh.returncode)
+            except:
+                pass
         except:
             # an error occured let's restart in 15 sec
             logging.critical("WATCHER RESTART because of: %s", sys.exc_info())
