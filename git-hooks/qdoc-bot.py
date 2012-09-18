@@ -97,8 +97,10 @@ def post_review(event, message, score):
         command += "--message", "\"" + message + "\"",
     command += sha1,
     logging.debug(command)
-    #if (event["change"]["number"] == '33219' or event["change"]["number"] == '33224'):
-    subprocess.check_call(command)
+    if not config.sandbox:
+        subprocess.check_call(command)
+    elif event["change"]["number"] == '33219' or event["change"]["number"] == '33224':
+        subprocess.check_call(command)
 
 def remove_moved_doc_errors(fixes, errors):
     for fix in fixes:
@@ -330,6 +332,11 @@ if __name__== "__main__":
                    choices=["debug", "info", "warning", "error", "critical"],
                    default="INFO",
                    help='Set verbose level')
+    parser.add_argument('--sandbox',
+                   dest="sandbox",
+                   action="store_true",
+                   default=False,
+                   help='The option should be used for debugging only. It simulates execution of the bot, post reviews are sent only for 33219 and 33224 changes')
 
     args = parser.parse_args(namespace=config)
     logging.basicConfig(format='(PID: %(process)d) %(asctime)s %(levelname)s: %(message)s', level=getattr(logging, config.logging_level.upper(), None))
