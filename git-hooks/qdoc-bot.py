@@ -26,7 +26,6 @@
 import os
 import subprocess
 import sys
-import datetime
 import logging
 
 config = None # configuration object, it is initialized in main and passed to every worker process created by multiprocessing.Pool
