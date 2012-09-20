@@ -250,7 +250,13 @@ def process_event(event_string):
             cmd_git_reset = ["git", "checkout", event["patchSet"]["revision"], "-b", "tmp"]
             subprocess.check_call(cmd_git_reset)
 
-            output_with_patch = run_qdoc(module_name)
+            try:
+                output_with_patch = run_qdoc(module_name)
+            except subprocess.CalledProcessError, e:
+                logging.debug("RUNNING QDOC FAILED", e)
+                msg = "Running command\n " + str(e.cmd) + "\nfailed."
+                post_review(event, msg, -1)
+                return -1
 
             #reseting to parent and cleaning (especially needed for docs removal)
             cmd_git_clean = ["git", "clean", "-fdxq"]
