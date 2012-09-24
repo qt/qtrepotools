@@ -53,7 +53,7 @@ version:                5.0.0
 version_tag:            %QT_VERSION%
 package_default:        true
 [sdk.readme]
-archive_uri:            http://origin.releases.qt-project.org/prebuilt/README_windows_line-endings.7z
+archive_uri:            http://qt.gitorious.org/qt/qtrepotools/blobs/raw/master/release-tools/dist/README.txt
 package_strip_dirs:     0
 target_install_dir:     /
 rpath_target:
