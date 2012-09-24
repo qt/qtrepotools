@@ -72,6 +72,7 @@ SDK_NAME                    = ''
 DEBUG_RPATH                 = False
 DUMP_CONFIG                 = False
 DEVELOPMENT_MODE            = False
+INCREMENTAL_MODE            = False
 OFFLINE_MODE                = False
 TESTCLIENT_MODE             = False
 ARCHIVE_LOCATION_RESOLVER   = None
