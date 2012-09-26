@@ -46,7 +46,6 @@ import bldinstallercommon
 
 SERVER_NAMESPACE                = 'ArchiveRemoteLocation'
 PACKAGE_REMOTE_LOCATION_RELEASE = 'release'
-PACKAGE_REMOTE_LOCATION_RND     = 'rnd'
 PACKAGE_ARCHIVE_TAG             = 'ARCHIVE_TAG'
 
 
@@ -79,7 +78,7 @@ class ArchiveLocationResolver:
     ###############################
     # Constructor
     ###############################
-    def __init__(self, target_config, testclient_mode, configurations_root_dir):
+    def __init__(self, target_config, server_base_url_override, configurations_root_dir):
         """Init data based on the target configuration"""
         self.server_list = []
         self.pkg_templates_dir = ''
@@ -89,23 +88,24 @@ class ArchiveLocationResolver:
         self.pkg_templates_dir = os.path.normpath(bldinstallercommon.config_section_map(target_config,'WorkingDirectories')['packages_dir'])
         server_namespace = os.path.normpath(bldinstallercommon.config_section_map(target_config,'WorkingDirectories')['packages_dir'])
         # next read server list
-        for section in target_config.sections():
-            if section.startswith(SERVER_NAMESPACE):
-                server_name = section.split('.')[-1]
-                base_url    = bldinstallercommon.safe_config_key_fetch(target_config, section, 'base_url')
-                base_path   = bldinstallercommon.safe_config_key_fetch(target_config, section, 'base_path')
-                base_path.replace(' ', '')
-                # if base path is defined, then the following logic applies:
-                # if script is used in testclient mode fetch the packages from "RnD" location
-                # otherwise fetch packages from "release" location.
-                # If the base_path is not defined, use the address as-is
-                if base_path:
-                    if testclient_mode:
-                        base_path = base_path + PACKAGE_REMOTE_LOCATION_RND
-                    else:
+        if server_base_url_override:
+            server_obj  = ArchiveLocationResolver.ArchiveRemoteLocation('default_server_name', server_base_url_override, '')
+            self.server_list.append(server_obj)
+        else:
+            for section in target_config.sections():
+                if section.startswith(SERVER_NAMESPACE):
+                    server_name = section.split('.')[-1]
+                    base_url    = bldinstallercommon.safe_config_key_fetch(target_config, section, 'base_url')
+                    base_path   = bldinstallercommon.safe_config_key_fetch(target_config, section, 'base_path')
+                    base_path.replace(' ', '')
+                    # if base path is defined, then the following logic applies:
+                    # if script is used in testclient mode fetch the packages from "RnD" location
+                    # otherwise fetch packages from "release" location.
+                    # If the base_path is not defined, use the address as-is
+                    if base_path:
                         base_path = base_path + PACKAGE_REMOTE_LOCATION_RELEASE
-                server_obj  = ArchiveLocationResolver.ArchiveRemoteLocation(server_name, base_url, base_path)
-                self.server_list.append(server_obj)
+                    server_obj  = ArchiveLocationResolver.ArchiveRemoteLocation(server_name, base_url, base_path)
+                    self.server_list.append(server_obj)
         if len(self.server_list) == 1:
             self.default_server = self.server_list[0]
 

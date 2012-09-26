@@ -48,6 +48,7 @@ import shutil
 import sys
 from time import gmtime, strftime
 import urllib
+from optparse import OptionParser
 
 import bldinstallercommon
 import bld_ifw_tools_impl
@@ -58,6 +59,7 @@ from sdkcomponent import SdkComponent
 BUILD_TIMESTAMP             = strftime('%d-%b-%Y', gmtime())
 CONFIG_PARSER_COMMON        = 0
 CONFIG_PARSER_TARGET        = 0
+OPTION_PARSER               = 0
 PLATFORM_IDENTIFIER         = ''
 MAIN_CONFIG_NAME            = ''
 SCRIPT_ROOT_DIR             = os.getcwd()
@@ -69,7 +71,6 @@ COMMON_CONFIG_DIR_NAME      = 'all-os'
 REPO_OUTPUT_DIR             = os.path.normpath(SCRIPT_ROOT_DIR + os.sep + 'repository')
 SDK_VERSION_NUMBER          = ''
 SDK_VERSION_TAG             = ''
-LICENSE_TYPE                = ''
 PACKAGES_DIR_NAME_LIST      = []
 PACKAGES_FULL_PATH_DST      = 'pkg'
 ROOT_COMPONENT_NAME         = ''
@@ -85,17 +86,21 @@ DEBUG_RPATH                 = False
 DUMP_CONFIG                 = False
 DEVELOPMENT_MODE            = False
 INCREMENTAL_MODE            = False
-OFFLINE_MODE                = False
-TESTCLIENT_MODE             = False
+CREATE_ONLINE_INSTALLER     = False
+CREATE_OFFLINE_INSTALLER    = False
+CREATE_REPOSITORY           = False
+NO_REMOTE_BACKEND           = False
 ARCHIVE_LOCATION_RESOLVER   = None
 SDK_COMPONENT_LIST          = []
 SDK_COMPONENT_LIST_SKIPPED  = []
 SDK_COMPONENT_IGNORE_LIST   = []
-USE_OLD_REPOGEN_SYNTAX      = False
+USE_LEGACY_IFW              = False
 STRICT_MODE                 = True
+ARCHIVE_SERVER_BASE_URL     = ''
 
 INSTALLER_NAMING_SCHEME_COMPILER    = ''
 INSTALLER_NAMING_SCHEME_TARGET_ARCH = ''
+LICENSE_TYPE                = ''
 
 TARGET_INSTALL_DIR_NAME_TAG         = '%TARGET_INSTALL_DIR%'
 PACKAGE_DEFAULT_TAG                 = '%PACKAGE_DEFAULT_TAG%'
@@ -116,27 +121,7 @@ def main():
         create_installer()
         sys.exit(0)
     else:
-        print_info()
         sys.exit(-1)
-
-
-##############################################################
-# Print usage info
-##############################################################
-def print_info():
-    """ Print usage info """
-    print ''
-    print ''
-    print 'Invalid number of arguments!'
-    print ''
-    print 'Usage: python create_installer.py <platform> <configuration_name>'
-    print ''
-    print 'Optional arguments:'
-    print '  <offline>    Creates offline installer'
-    print '  <devmode>    Builds Qt and IFW (does not download pre-build IFW)'
-    print '  <testclient> Creates installer for RnD testing purposes only (different dist server used)'
-    print '  <incremental> Do not clean up and skip parts that are already done.'
-    print ''
 
 
 ##############################################################
@@ -185,6 +170,87 @@ def check_configuration_file(configuration_name):
 
 
 ##############################################################
+# Setup Option Parser
+##############################################################
+def setup_option_parser():
+    """ Set up Option Parser """
+    global OPTION_PARSER
+    OPTION_PARSER = OptionParser()
+    OPTION_PARSER.add_option("-c", "--configurations-dir",
+                      action="store", type="string", dest="configurations_dir", default="configurations",
+                      help="define configurations directory where to read installer configuration files")
+    OPTION_PARSER.add_option("-f", "--configuration-file",
+                      action="store", type="string", dest="configuration_file", default="",
+                      help="define configurations directory where to read installer configuration files")
+
+    OPTION_PARSER.add_option("-d", "--devmode",
+                      action="store_true", dest="devmode", default=False,
+                      help="enable development mode, build static Qt and IFW from sources")
+    OPTION_PARSER.add_option("-i", "--incremental",
+                      action="store_true", dest="incremental", default=False,
+                      help="enable incremental development mode")
+    OPTION_PARSER.add_option("-o", "--offline",
+                      action="store_true", dest="offline_installer", default=False,
+                      help="create offline installer")
+    OPTION_PARSER.add_option("-O", "--online",
+                      action="store_true", dest="online_installer", default=False,
+                      help="create online installer")
+    OPTION_PARSER.add_option("-r", "--create-repo",
+                      action="store_true", dest="create_repository", default=False,
+                      help="create offline repository")
+    OPTION_PARSER.add_option("-g", "--legacy-repogen",
+                      action="store_true", dest="legacy_repogen", default=False,
+                      help="use legacy repogen, uses different cmd line syntax")
+    OPTION_PARSER.add_option("-s", "--strict",
+                      action="store_true", dest="strict_mode", default=True,
+                      help="use strict mode, abort on any error")
+    OPTION_PARSER.add_option("-S", "--non-strict",
+                      action="store_false", dest="strict_mode", default=True,
+                      help="non strict mode, try to keep on going despite of errors")
+    # optional override
+    OPTION_PARSER.add_option("-u", "--archive-base-url",
+                      action="store", dest="archive_base_url", default="",
+                      help="define alternative server base url where to look for archives (.7z)")
+    # installer naming scheme options, affects only the filename of the installer executable
+    OPTION_PARSER.add_option("-l", "--license-type",
+                      action="store", type="string", dest="license_type", default="opensource",
+                      help="installer file name scheme: define license type")
+    OPTION_PARSER.add_option("-a", "--target-architecture",
+                      action="store", type="string", dest="target_architecture", default="",
+                      help="installer file name scheme: define target architecture name")
+    OPTION_PARSER.add_option("-e", "--compiler-name",
+                      action="store", type="string", dest="compiler_name", default="",
+                      help="installer file name scheme: define compile name")
+
+
+##############################################################
+# Print options
+##############################################################
+def print_options():
+    """Print given command options."""
+    print
+    print '----------------------------------------'
+    print ' Installer creation options'
+    print '----------------------------------------'
+    if ARCHIVE_SERVER_BASE_URL:
+        print "Archive URL override:        " + ARCHIVE_SERVER_BASE_URL
+    print "Configurations directory:    " + CONFIGURATIONS_DIR
+    print "Configuration file:          " + MAIN_CONFIG_NAME
+    print "Create online installer:     %r" % (CREATE_ONLINE_INSTALLER)
+    print "Create offline installer:    %r" % (CREATE_OFFLINE_INSTALLER)
+    print "Create repository:           %r" % (CREATE_REPOSITORY)
+    print "Development mode:            %r" % (DEVELOPMENT_MODE)
+    print "Incremental mode:            %r" % (INCREMENTAL_MODE)
+    print "Legacy IFW:                  %r" % (USE_LEGACY_IFW)
+    print "Strict mode:                 %r" % (STRICT_MODE)
+    print
+    print "Installer naming scheme options:\n"
+    print "License type:                " + LICENSE_TYPE
+    print "Compiler type:               " + INSTALLER_NAMING_SCHEME_COMPILER
+    print "Target arch:                 " + INSTALLER_NAMING_SCHEME_TARGET_ARCH
+
+
+##############################################################
 # Parse command line arguments
 ##############################################################
 def parse_cmd_line():
@@ -192,62 +258,53 @@ def parse_cmd_line():
     arg_count = len(sys.argv)
     if arg_count < 2:
         return False
+    setup_option_parser()
+    (options, args) = OPTION_PARSER.parse_args()
 
     global MAIN_CONFIG_NAME
     global DEVELOPMENT_MODE
     global INCREMENTAL_MODE
-    global OFFLINE_MODE
-    global TESTCLIENT_MODE
-    global USE_OLD_REPOGEN_SYNTAX
+    global CREATE_ONLINE_INSTALLER
+    global CREATE_OFFLINE_INSTALLER
+    global CREATE_REPOSITORY
+    global NO_REMOTE_BACKEND
+    global USE_LEGACY_IFW
     global INSTALLER_NAMING_SCHEME_COMPILER
     global INSTALLER_NAMING_SCHEME_TARGET_ARCH
     global LICENSE_TYPE
     global CONFIGURATIONS_DIR
     global STRICT_MODE
+    global ARCHIVE_SERVER_BASE_URL
 
-    MAIN_CONFIG_NAME = sys.argv[1]
-    if(arg_count > 2):
-        counter = 2
-        while(counter < arg_count):
-            argument = sys.argv[counter].lower()
-            if 'devmode' == argument:
-                DEVELOPMENT_MODE = True
-            elif 'incremental' == argument:
-                INCREMENTAL_MODE = True
-            elif 'offline' == argument:
-                OFFLINE_MODE = True
-            elif 'testclient' == argument:
-                TESTCLIENT_MODE = True
-            elif 'legacy_repogen' == argument:
-                USE_OLD_REPOGEN_SYNTAX = True
-            elif argument.find('target_architecture') >= 0:
-                values = argument.split('=')
-                if values[1] != '':
-                    INSTALLER_NAMING_SCHEME_TARGET_ARCH = values[1]
-            elif argument.find('compiler') >= 0:
-                values = argument.split('=')
-                if values[1] != '':
-                    INSTALLER_NAMING_SCHEME_COMPILER = values[1]
-            elif argument.find('licence_type') >= 0:
-                values = argument.split('=')
-                if values[1] != '':
-                    LICENSE_TYPE = values[1]
-            elif argument.find('configurations_dir') >= 0:
-                values = argument.split('=')
-                if values[1] != '':
-                    CONFIGURATIONS_DIR = values[1]
-            elif argument.find('strict_mode') >= 0:
-                values = item.split('=')
-                tmp = values[1]
-                if tmp == 'false' or tmp == 'no':
-                    STRICT_MODE = False
-            else:
-                print '*** Unsupported argument given: ' + argument
-                sys.exit(-1)
-            counter = counter + 1
+    CONFIGURATIONS_DIR                  = options.configurations_dir
+    MAIN_CONFIG_NAME                    = options.configuration_file
+    LICENSE_TYPE                        = options.license_type
+    DEVELOPMENT_MODE                    = options.devmode
+    INCREMENTAL_MODE                    = options.incremental
+    CREATE_ONLINE_INSTALLER             = options.online_installer
+    CREATE_OFFLINE_INSTALLER            = options.offline_installer
+    CREATE_REPOSITORY                   = options.create_repository
+    USE_LEGACY_IFW                      = options.legacy_repogen
+    STRICT_MODE                         = options.strict_mode
+    INSTALLER_NAMING_SCHEME_TARGET_ARCH = options.target_architecture
+    INSTALLER_NAMING_SCHEME_COMPILER    = options.compiler_name
+    ARCHIVE_SERVER_BASE_URL             = options.archive_base_url
+
+    if INCREMENTAL_MODE:
+        DEVELOPMENT_MODE = True
+    if CREATE_ONLINE_INSTALLER and CREATE_OFFLINE_INSTALLER:
+        print '*** Error! This script does not support (yet) creating offline and online installers at the same time!'
+        print '*** Choose either offline or online!'
+        sys.exit(-1)
+    if CREATE_ONLINE_INSTALLER and CREATE_REPOSITORY:
+        print '*** Error! This script does not support (yet) creating online installer and repository at the same time!'
+        print '*** Choose either online installer or repository creation!'
+        sys.exit(-1)
 
     # check that given configuration exits
     check_configuration_file(MAIN_CONFIG_NAME)
+    # print given options
+    print_options()
     return True
 
 
@@ -320,7 +377,7 @@ def init_data():
         IFW_TOOLS_DIR = os.path.normpath(IFW_TOOLS_DIR)
 
     # init data for archive locator
-    ARCHIVE_LOCATION_RESOLVER = ArchiveLocationResolver(CONFIG_PARSER_TARGET, TESTCLIENT_MODE, SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR)
+    ARCHIVE_LOCATION_RESOLVER = ArchiveLocationResolver(CONFIG_PARSER_TARGET, ARCHIVE_SERVER_BASE_URL, SCRIPT_ROOT_DIR + os.sep + CONFIGURATIONS_DIR)
     ARCHIVE_LOCATION_RESOLVER.print_server_list()
 
     if DUMP_CONFIG:
@@ -369,6 +426,7 @@ def set_config_directory():
     bldinstallercommon.copy_tree(config_dir_template, CONFIG_DIR_DST)
     print ' -> copied [' + config_dir_template + '] into [' + CONFIG_DIR_DST + ']'
 
+
 ##############################################################
 # Set the config.xml
 ##############################################################
@@ -398,10 +456,7 @@ def set_config_xml():
     shutil.copy(config_template_source, config_template_dest)
     print ' -> copied [' + config_template_source + '] into [' + config_template_dest + ']'
 
-    if TESTCLIENT_MODE:
-        update_repository_url = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'SdkUpdateRepository')['repository_url_rnd']
-    else:
-        update_repository_url = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'SdkUpdateRepository')['repository_url_release']
+    update_repository_url = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'SdkUpdateRepository')['repository_url_release']
 
     fileslist = [config_template_dest]
     bldinstallercommon.replace_in_files(fileslist, SDK_VERSION_NUM_TAG, SDK_VERSION_NUMBER)
@@ -671,11 +726,11 @@ def parse_component_data(configuration_file, configurations_base_path):
             SDK_COMPONENT_IGNORE_LIST.append(item)
     # parse sdk components
     for section in configuration.sections():
-        if section.startswith(PACKAGE_NAMESPACE):
+        if section.startswith(PACKAGE_NAMESPACE + '.'):
             if section not in SDK_COMPONENT_IGNORE_LIST:
                 sdk_component = SdkComponent(section, configuration, PACKAGES_DIR_NAME_LIST, ARCHIVE_LOCATION_RESOLVER)
                 # if online installer, we are interested only about the root component!
-                if not OFFLINE_MODE and not sdk_component.is_root_component():
+                if CREATE_ONLINE_INSTALLER and not sdk_component.is_root_component():
                     continue
 
                 # validate component
@@ -721,13 +776,13 @@ def parse_components(target_config):
 ##############################################################
 # Create target components
 ##############################################################
-def create_target_components(target_config, offline_mode):
+def create_target_components(target_config):
     """Create target components."""
     global ROOT_COMPONENT_NAME
     bldinstallercommon.create_dirs(PACKAGES_FULL_PATH_DST)
 
     print '================================================================='
-    print '= Creating offline SDK components'
+    print '= Creating SDK components'
     print '================================================================='
     print ''
     for sdk_component in SDK_COMPONENT_LIST:
@@ -735,7 +790,7 @@ def create_target_components(target_config, offline_mode):
         if sdk_component.root_component == 'yes':
             ROOT_COMPONENT_NAME = sdk_component.package_name
         # for online installer handle only the root component, nothing else
-        if not offline_mode and not sdk_component.root_component == 'yes':
+        if CREATE_ONLINE_INSTALLER and not sdk_component.root_component == 'yes':
             continue
 
         # check if static component or not
@@ -778,8 +833,8 @@ def create_target_components(target_config, offline_mode):
             # Copy archives into temporary build directory if exists
             for archive in sdk_component.downloadable_archive_list:
                 downloadable_archive_list.append(archive.archive_name)
-                # fetch packages only if offline installer, for online installer just handle the metadata
-                if offline_mode:
+                # fetch packages only if offline installer or repo creation, for online installer just handle the metadata
+                if CREATE_OFFLINE_INSTALLER or CREATE_REPOSITORY:
                     handle_archive(sdk_component, archive)
             # finalize archives
             finalize_package_archives(sdk_component)
@@ -893,7 +948,7 @@ def create_installer_binary():
     #    tag is alpha1, beta2, rc1, etc (no tag for final).
     #    platform is win, linux, mac, etc.
     platform        = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'PlatformIdentifier')['identifier']
-    installer_type  = 'offline' if OFFLINE_MODE else 'online'
+    installer_type  = 'offline' if CREATE_OFFLINE_INSTALLER else 'online'
     extension       = '.run' if bldinstallercommon.is_linux_platform() else ''
 
     SDK_NAME = SDK_NAME + '-' + platform + '-' + LICENSE_TYPE + '-' + SDK_VERSION_NUMBER
@@ -906,43 +961,63 @@ def create_installer_binary():
     # optional
     if INSTALLER_NAMING_SCHEME_TARGET_ARCH:
         SDK_NAME = SDK_NAME + '-' + INSTALLER_NAMING_SCHEME_TARGET_ARCH
-
     SDK_NAME = SDK_NAME + '-' + installer_type + extension
 
-    cmd_args = [BINARYCREATOR_TOOL, '-t', INSTALLERBASE_TOOL, '-v', '-p', PACKAGES_FULL_PATH_DST]
-    if OFFLINE_MODE:
+    # if online installer only
+    if CREATE_ONLINE_INSTALLER:
+        # binarycreator arguments
+        cmd_args = [BINARYCREATOR_TOOL, '-t', INSTALLERBASE_TOOL, '-v', '-p', PACKAGES_FULL_PATH_DST]
+        # check if we are using older binarycreator version
+        if USE_LEGACY_IFW:
+            cmd_args = cmd_args + ['-c', CONFIG_DIR_DST, SDK_NAME, ROOT_COMPONENT_NAME]
+        else:
+            cmd_args = cmd_args + ['-c', CONFIG_DIR_DST + os.sep + 'config.xml', SDK_NAME]
+        # create installer binary
+        bldinstallercommon.do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
+
+    # if offline-only installer
+    if CREATE_OFFLINE_INSTALLER:
+        cmd_args = [BINARYCREATOR_TOOL, '--offline-only']
+        cmd_args = cmd_args + ['-t', INSTALLERBASE_TOOL, '-v', '-p', PACKAGES_FULL_PATH_DST]
         # check if package exclude list should be used for offline installer
         package_exclude_list = bldinstallercommon.safe_config_key_fetch(CONFIG_PARSER_TARGET, 'OfflinePackageExcludeList', 'package_list')
         package_exclude_list = package_exclude_list.replace('\n', '')
         if package_exclude_list:
             cmd_args = cmd_args + ['-e', package_exclude_list]
-    if USE_OLD_REPOGEN_SYNTAX:
-        cmd_args = cmd_args + ['-c', CONFIG_DIR_DST, SDK_NAME, ROOT_COMPONENT_NAME]
-    else:
-        cmd_args = cmd_args + ['-c', CONFIG_DIR_DST + os.sep + 'config.xml', SDK_NAME]
+        # check if we are using older binarycreator version
+        if USE_LEGACY_IFW:
+            cmd_args = cmd_args + ['-c', CONFIG_DIR_DST, SDK_NAME, ROOT_COMPONENT_NAME]
+        else:
+            cmd_args = cmd_args + ['-c', CONFIG_DIR_DST + os.sep + 'config.xml', SDK_NAME]
+        # create installer binary
+        bldinstallercommon.do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
 
-    if OFFLINE_MODE:
-        cmd_args = cmd_args + ['--offline-only']
+
+##############################################################
+# Create the repository
+##############################################################
+def create_offline_repository():
+    """Create offline repository using repogen tool."""
+    print '=================================================='
+    print '= Create offline repository'
+    print '=================================================='
+
+    # repogen arguments
+    if CREATE_REPOSITORY:
         print 'Creating repository for the SDK ...'
         print '    Outputdir: ' + REPO_OUTPUT_DIR
         print '      pkg src: ' + PACKAGES_FULL_PATH_DST
-        if USE_OLD_REPOGEN_SYNTAX:
-            print '(legacy syntax)' + PACKAGES_FULL_PATH_DST
+        repogen_args = []
+        if USE_LEGACY_IFW:
+            print '(legacy syntax)'
             repogen_args = [REPOGEN_TOOL, '-p', PACKAGES_FULL_PATH_DST, '-c', CONFIG_DIR_DST, REPO_OUTPUT_DIR, ROOT_COMPONENT_NAME, '-v']
         else:
             repogen_args = [REPOGEN_TOOL, '-p', PACKAGES_FULL_PATH_DST, '-c', CONFIG_DIR_DST + os.sep + 'config.xml', REPO_OUTPUT_DIR]
-
+        # create repository
         bldinstallercommon.do_execute_sub_process(repogen_args, SCRIPT_ROOT_DIR, True)
         if not os.path.exists(REPO_OUTPUT_DIR):
             print '*** Fatal error! Unable to create repository directory: ' + REPO_OUTPUT_DIR
             sys.exit(-1)
-
-    # sanity checks
-    if not os.path.exists(PACKAGES_FULL_PATH_DST):
-        print '*** Fatal error! Could not find packages directory: ' + PACKAGES_FULL_PATH_DST
-        sys.exit(-1)
-
-    bldinstallercommon.do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
 
 
 ##############################################################
@@ -982,7 +1057,11 @@ def create_mac_disk_image():
     bldinstallercommon.do_execute_sub_process(cmd_args, SCRIPT_ROOT_DIR, True)
 
 
+##############################################################
+# Print warnings
+##############################################################
 def print_warnings():
+    """Print warnings."""
     # check if any components were skipped
     if SDK_COMPONENT_LIST_SKIPPED:
         print ''
@@ -1022,11 +1101,14 @@ def create_installer():
     # parse SDK components
     parse_components(CONFIG_PARSER_TARGET)
     # create components
-    create_target_components(CONFIG_PARSER_TARGET, OFFLINE_MODE)
+    create_target_components(CONFIG_PARSER_TARGET)
     # substitute global tags
     substitute_global_tags()
     # create the installer binary
-    create_installer_binary()
+    if CREATE_ONLINE_INSTALLER or CREATE_OFFLINE_INSTALLER:
+        create_installer_binary()
+    if CREATE_REPOSITORY:
+        create_offline_repository()
     # for mac we need some extra work
     if bldinstallercommon.is_mac_platform():
         create_mac_disk_image()
