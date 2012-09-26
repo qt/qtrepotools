@@ -218,7 +218,7 @@ def process_event(event_string):
     change_number = event["change"]["number"]
 
     module_name = project.split('/')[-1]
-    if module_name != "qtbase": # TODO for now we care only about qtbase
+    if module_name not in ["qtbase"]: # TODO for now we care only about qtbase
         logging.info("IGNORED MODULE: %s %s", module_name, patch_set)
         return 0
 
