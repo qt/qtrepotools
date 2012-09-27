@@ -228,9 +228,34 @@ def process_event(event_string):
     try:
         os.chdir(source_path)
     except OSError, e:
-        logging.error("Unknown project, TODO write code to initialize it, error message: %s", e) #TODO for know you need to have qt/qtbase checkout ready
-        logging.debug("Current dir was: %s", os.getcwd())
-        return -1
+        logging.info("Unknown project: %s, trying to clone it", project)
+        tmp_dir = tempfile.mkdtemp(prefix="qdoc_code_")
+        os.chdir(tmp_dir)
+        try:
+            logging.debug("Clonning a new project (%s) to a tmp_dir (%s)", project, tmp_dir)
+            cmd_git_clone = ["git", "clone", "ssh://" + config.gerrit_address + "/" + project, "."]
+            subprocess.check_call(cmd_git_clone)
+        except Error, e:
+            logging.error("Could not clone a new project (%s) to a tmp_dir (%s), error message:", project, tmp_dir, e)
+            shutil.rmtree(tmp_dir)
+            return -1
+        try:
+            root_project_dir = config.watcher_working_dir + "/" + project.split('/')[:-1][0]
+            logging.debug("Creating destination folder (%s) for the new project (%s)", root_project_dir, project)
+            try:
+                os.mkdir(root_project_dir)
+            except OSError, e:
+                if e.errno != 17: # if error is different then "File exist"
+                    logging.error("Can not make project root directory: %s ", e)
+                    raise e
+            logging.debug("Moving the clone (%s) from tmp dir (%s) to the destination folder (%s)", project, tmp_dir, source_path)
+            os.rename(tmp_dir, source_path)
+        except Error, e:
+            logging.info("Initialization of a new project (%s) failed because it was initialized before, probably by an other process", project)
+            logging.debug("Exception caught during rename operation: %s", e)
+            shutil.rmtree(tmp_dir)
+        os.chdir(source_path)
+        logging.info("New project (%s) was initialized correctly", project)
 
     if fetch_change(project, patch_set, change_number) != 0:
         return -1
