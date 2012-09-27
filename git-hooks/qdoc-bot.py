@@ -140,10 +140,10 @@ def review_output(event, output_no_patch, output_with_patch):
             score = -1
         elif new_error_count == -1:
             message += "This change removes a documentation error. Thank you!"
-            score = 1
+            score = 0
         else:
             message = "This change removes " + str(abs(new_error_count)) + " documentation errors. Thank you!"
-            score = 1
+            score = 0
 
         message += "\n\n "
         fixes = []
