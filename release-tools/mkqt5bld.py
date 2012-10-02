@@ -57,7 +57,9 @@ WORK_DIR                            = SCRIPT_ROOT_DIR + os.sep + WORK_DIR_NAME
 QT_SRC_PACKAGE_URL                  = ''
 QT_PACKAGE_SAVE_AS_TEMP             = ''
 QT_SOURCE_DIR                       = WORK_DIR + os.sep + 'w'
-MAKE_INSTALL_ROOT_DIR               = WORK_DIR + os.sep + 'qt5_install_root' #main dir for submodule installations
+MAKE_INSTALL_ROOT_DIR_NAME          = 'qt5_install_root'
+MAKE_INSTALL_ROOT_DIR               = WORK_DIR + os.sep + MAKE_INSTALL_ROOT_DIR_NAME #main dir for submodule installations
+MISSING_MODULES_FILE                = WORK_DIR + os.sep + 'missing_modules.txt'
 CONFIGURE_CMD                       = ''
 MAKE_CMD                            = ''
 MAKE_THREAD_COUNT                   = '8' # some initial default value
@@ -82,6 +84,7 @@ DEVEL_MODE                          = False
 FORCE_MAKE                          = False
 ORIGINAL_QMAKE_QT_PRFXPATH          = ''
 SILENT_BUILD                        = False
+STRICT_MODE                         = True
 PADDING                             = "______________________________PADDING______________________________"
 FILES_TO_REMOVE_LIST                = ['Makefile', 'Makefile.Release', 'Makefile.Debug', \
                                        '.o', '.moc', '.init-repository', \
@@ -279,7 +282,7 @@ def build_qt():
         if bldinstallercommon.is_linux_platform():
             cmd_args += ' -j' + MAKE_THREAD_COUNT
         cmd_args += ' module-' + module_name
-        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_SOURCE_DIR, True)
+        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), QT_SOURCE_DIR, STRICT_MODE)
 
     print_wrap('--------------------------------------------------------------------')
 
@@ -292,41 +295,45 @@ def install_qt():
     #make install to single install root
     cmd_args = ''
     install_root_path = MAKE_INSTALL_ROOT_DIR + os.sep + MAIN_INSTALL_DIR_NAME
+    #TODO: there probably is a better way to fix the delimeters, but this is working atm
+    if 'mingw' in MAKE_CMD:
+        install_root_path = WORK_DIR + '/' + MAKE_INSTALL_ROOT_DIR_NAME + '/' + MAIN_INSTALL_DIR_NAME
     if bldinstallercommon.is_win_platform():
         install_root_path = install_root_path[3:]
         print_wrap('    On Windows, use install root path: ' + install_root_path)
 
     print_wrap('    Install modules to single INSTALL_ROOT')
     for module_name in QT5_MODULES_LIST:
-        if bldinstallercommon.is_win_platform():
-            install_root_path = install_root_path[3:]
-            print_wrap('    Using install root path: ' + install_root_path)
         submodule_dir_name = QT_SOURCE_DIR + os.sep + module_name
+        make_i_cmd = MAKE_INSTALL_CMD
         if module_name == 'qtwebkit':
-            submodule_dir_name = submodule_dir_name + os.sep + 'WebKitBuild' + os.sep + 'Release'
+            make_i_cmd = make_i_cmd + ' -f Makefile.WebKit install'
         cmd_args = ''
-        cmd_args += MAKE_INSTALL_CMD + ' ' + 'INSTALL_ROOT=' + install_root_path
+        cmd_args += make_i_cmd + ' ' + 'INSTALL_ROOT=' + install_root_path
         print_wrap('    Installing module: ' + module_name)
         print_wrap('          -> cmd args: ' + cmd_args)
         print_wrap('                -> in: ' + submodule_dir_name)
-        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), submodule_dir_name, True)
+        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), submodule_dir_name, STRICT_MODE)
 
     #make install for each module with INSTALL_ROOT
     print_wrap('    Install modules to separate INSTALL_ROOT')
     for module_name in QT5_MODULES_LIST:
         install_root_path = MAKE_INSTALL_ROOT_DIR + os.sep + SUBMODULE_INSTALL_BASE_DIR_NAME + module_name
+        if 'mingw' in MAKE_CMD:
+            install_root_path = WORK_DIR + '/' + MAKE_INSTALL_ROOT_DIR_NAME + '/' + SUBMODULE_INSTALL_BASE_DIR_NAME + module_name
         if bldinstallercommon.is_win_platform():
             install_root_path = install_root_path[3:]
             print_wrap('    Using install root path: ' + install_root_path)
         submodule_dir_name = QT_SOURCE_DIR + os.sep + module_name
+        make_i_cmd = MAKE_INSTALL_CMD
         if module_name == 'qtwebkit':
-            submodule_dir_name = submodule_dir_name + os.sep + 'WebKitBuild' + os.sep + 'Release'
+            make_i_cmd = make_i_cmd + ' -f Makefile.WebKit install'
         cmd_args = ''
-        cmd_args += MAKE_INSTALL_CMD + ' ' + 'INSTALL_ROOT=' + install_root_path
+        cmd_args += make_i_cmd + ' ' + 'INSTALL_ROOT=' + install_root_path
         print_wrap('    Installing module: ' + module_name)
         print_wrap('          -> cmd args: ' + cmd_args)
         print_wrap('                -> in: ' + submodule_dir_name)
-        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), submodule_dir_name, True)
+        bldinstallercommon.do_execute_sub_process(cmd_args.split(' '), submodule_dir_name, STRICT_MODE)
 
     print_wrap('--------------------------------------------------------------------')
 
@@ -433,6 +440,9 @@ def archive_submodules():
             bldinstallercommon.do_execute_sub_process_get_std_out(cmd_args.split(' '), MAKE_INSTALL_ROOT_DIR, True, True)
         else:
             print_wrap(MAKE_INSTALL_ROOT_DIR + os.sep + SUBMODULE_INSTALL_BASE_DIR_NAME + sub_dir + ' DIRECTORY NOT FOUND\n      -> ' + sub_dir + ' not archived!')
+            file_handle = open(MISSING_MODULES_FILE, 'a')
+            file_handle.write('\nFailed to build ' + sub_dir)
+            file_handle.close()
     # one chunk
     if os.path.exists(MAKE_INSTALL_ROOT_DIR + os.sep + MAIN_INSTALL_DIR_NAME):
         print_wrap('    Archiving all modules to archive qt5_all.7z')
@@ -459,6 +469,7 @@ def print_help():
     print_wrap('  make_cmd=[custom make tool]')
     print_wrap('  make_thread_count=[number of threads]')
     print_wrap('  ignore=[module_to_ignore]')
+    print_wrap('  strict_mode=true/false')
     print_wrap('')
 
 
@@ -475,6 +486,7 @@ def parse_cmd_line():
     global MAKE_INSTALL_CMD
     global SILENT_BUILD
     global QT5_MODULES_IGNORE_LIST
+    global STRICT_MODE
 
     print_wrap('---------------- Parsing commandline arguments ---------------------')
     arg_count = len(sys.argv)
@@ -524,7 +536,11 @@ def parse_cmd_line():
             values = item.split('=')
             if values[1] != '':
                 QT5_MODULES_IGNORE_LIST.append(values[1])
-            #print_wrap('        ignoring modules: ' + QT5_MODULES_IGNORE_LIST)
+        # set strict mode on/off
+        if item.find('strict_mode') >= 0:
+            values = item.split('=')
+            if values[1] == 'false':
+                STRICT_MODE = False
 
     if len(QT5_MODULES_IGNORE_LIST) > 0:
         print_wrap('        ignoring modules:')
