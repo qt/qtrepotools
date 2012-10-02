@@ -623,6 +623,8 @@ def do_execute_sub_process(args, execution_path, abort_on_fail):
     print '      --------------------------------------------------------------------'
     print '      Executing:      [' + list_as_string(args) + ']'
     print '      Execution path: [' + execution_path + ']'
+    print '      Abort on fail:  [' + str(abort_on_fail) + ']'
+    return_code = -1
     try:
         os.chdir(execution_path)
         if IS_WIN_PLATFORM:
@@ -631,6 +633,7 @@ def do_execute_sub_process(args, execution_path, abort_on_fail):
             theproc = subprocess.Popen(args)
         output = theproc.communicate()[0]
         if theproc.returncode:
+            return_code = theproc.returncode
             if output:
                 output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
                 print output
@@ -648,7 +651,7 @@ def do_execute_sub_process(args, execution_path, abort_on_fail):
             pass
 
     os.chdir(SCRIPT_ROOT_DIR)
-    return theproc.returncode
+    return return_code
 
 
 ###############################
@@ -658,11 +661,14 @@ def do_execute_sub_process_2(args, execution_path, abort_on_fail):
     print '      --------------------------------------------------------------------'
     print '      Executing:      [' + args + ']'
     print '      Execution path: [' + execution_path + ']'
+    print '      Abort on fail:  [' + str(abort_on_fail) + ']'
+    return_code = -1
     try:
         os.chdir(execution_path)
         theproc = subprocess.Popen(args, shell=True)
         output = theproc.communicate()[0]
         if theproc.returncode:
+            return_code = theproc.returncode
             if output:
                 output = output[len(output) - MAX_DEBUG_PRINT_LENGTH:] if len(output) > MAX_DEBUG_PRINT_LENGTH else output
                 print output
@@ -680,7 +686,7 @@ def do_execute_sub_process_2(args, execution_path, abort_on_fail):
             pass
 
     os.chdir(SCRIPT_ROOT_DIR)
-    return theproc.returncode
+    return return_code
 
 
 ###############################
@@ -691,6 +697,7 @@ def do_execute_sub_process_get_std_out(args, execution_path, abort_on_fail, prin
         print '      --------------------------------------------------------------------'
         print '      Executing:      [' + list_as_string(args) + ']'
         print '      Execution path: [' + execution_path + ']'
+        print '      Abort on fail:  [' + str(abort_on_fail) + ']'
     theproc = None
     output = ''
     try:
