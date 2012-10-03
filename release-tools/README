@@ -86,7 +86,7 @@
 
         Now you are ready the create the installer with the following command (on windows):
 
-        > python create_installer.py win_x86_beta offline devmode
+        > python create_installer.py -f win_x86_beta --offline --devmode
 
         Explanations:
 
@@ -102,13 +102,13 @@
 
     To create a standalone offline installer use:
 
-    Linux:      python create_installer.py linux linux_x86_32_beta offline devmode
+    Linux:      python create_installer.py linux -f linux_x86_32_beta --offline --devmode
                 OR
-                python create_installer.py linux linux_x86_64_beta offline devmode
+                python create_installer.py linux -f linux_x86_64_beta --offline --devmode
 
-    Mac:        python create_installer.py mac mac_x86_64_beta offline devmode
+    Mac:        python create_installer.py mac -f mac_x86_64_beta --offline --devmode
 
-    Windows:    python create_installer.py win_x86_beta offline devmode
+    Windows:    python create_installer.py -f win_x86_beta --offline --devmode
 
 
     output:
