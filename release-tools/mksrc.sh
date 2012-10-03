@@ -23,6 +23,7 @@ QTSHORTVER=0.0
 QTGITTAG=.sha1s
 PACK_TIME=`date '+%Y-%m-%d'`
 DOCS=generate
+EXIT_AFTER_DOCS=false
 DO_TAG=false
 DO_FETCH=true
 MULTIPACK=no
@@ -37,14 +38,15 @@ function usage()
   echo "./mksrc.sh -u <file_url_to_git_repo> -v <version> [-m][-d][-i sub][-l lic][-p patch][-t revision]"
   echo "where -u is path to git repo and -v is version"
   echo "Optional parameters:"
-  echo "-m             one is able to tar each sub module separately"
-  echo "--no-docs      skip generating documentation"
-  echo "--tag          also tag the repository"
-  echo "-N             don't use git fetch to update submodules"
-  echo "-i submodule   will exclude the submodule from final package "
-  echo "-l license     license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
-  echo "-p patch file  patch file (.sh) to execute, example: change_licenses.sh"
-  echo "-t revision    committish to pack (tag name, branch name or SHA-1)"
+  echo "-m                  one is able to tar each sub module separately"
+  echo "--no-docs           skip generating documentation"
+  echo "--tag               also tag the repository"
+  echo "-N                  don't use git fetch to update submodules"
+  echo "-i submodule        will exclude the submodule from final package "
+  echo "-l license          license type, will default to 'opensource', if set to 'commercial' all the necessary patches will be applied for commercial build"
+  echo "-p patch file       patch file (.sh) to execute, example: change_licenses.sh"
+  echo "-t revision         committish to pack (tag name, branch name or SHA-1)"
+  echo "--exit-after-docs   exit after creating doc arhives (without creating src archives)"
 }
 
 function cleanup()
@@ -161,6 +163,11 @@ while test $# -gt 0; do
     -t|--tag)
       shift
       REPO_TAG=$1
+      shift
+    ;;
+    --exit-after-docs)
+      shift
+      EXIT_AFTER_DOCS=true
       shift
     ;;
     *)
@@ -297,7 +304,7 @@ if [ $DOCS = generate ]; then
   cd $DOC_BUILD/$PACKAGE_NAME
   # Build bootstrapped qdoc
   echo "DOC: configuring build"
-  ./configure -developer-build -opensource -confirm-license -nomake examples -nomake tests -release -fast
+  ./configure -developer-build -opensource -confirm-license -nomake examples -nomake tests -release -fast -no-pch -no-qpa-platform-guard
   # Run qmake in each module, as this generates the .pri files that tell qdoc what docs to generate
   QMAKE=$PWD/qtbase/bin/qmake
   echo "DOC: running $QMAKE and qmake_all for submodules"
@@ -312,7 +319,22 @@ if [ $DOCS = generate ]; then
   # Generate the offline docs and qt.qch
   echo "DOC: Generate the offline docs and qt.qch"
   (cd qtdoc ; $QMAKE ; make qmake_all ; LD_LIBRARY_PATH=$PWD/../qttools/lib make qch_docs)
-  # Put the generated docs back into the clean source directory
+  (cd qtdoc ; $QMAKE ; LD_LIBRARY_PATH=$PWD/../qttools/lib make online_docs)
+
+  # exit if so wanted, to speed up
+  if [ $EXIT_AFTER_DOCS = true ]; then
+    cd $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc
+    cp $CUR_DIR/$PACKAGE_NAME/$QTGITTAG html/
+    cp $CUR_DIR/$PACKAGE_NAME/$QTGITTAG qch/
+    tar cJf $CUR_DIR/online_doc.tar.xz html/
+    tar cJf $CUR_DIR/offline_doc.tar.xz qch/
+    cd $CUR_DIR
+    rm -rf $DOC_BUILD
+    cleanup
+    exit
+  fi # $EXIT_AFTER_DOCS
+
+# Put the generated docs back into the clean source directory
   echo "DOC: Put the generated docs back into the clean source directory"
   mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/html $CUR_DIR/$PACKAGE_NAME/qtdoc/doc
   mv $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc/qch $CUR_DIR/$PACKAGE_NAME/qtdoc/qch
