@@ -18,6 +18,7 @@
 
 CUR_DIR=$PWD
 REPO_DIR=$CUR_DIR
+REPO_NAME=''
 QTVER=0.0.0
 QTSHORTVER=0.0
 QTGITTAG=.sha1s
@@ -201,6 +202,7 @@ if ! git rev-parse --git-dir >/dev/null 2>/dev/null; then
   echo "$REPO_DIR is not a valid git repo"
   exit 2
 fi
+REPO_NAME=$(basename $REPO_DIR)
 
 PACKAGE_NAME=qt-everywhere-$LICENSE-src-$QTVER
 MODULES=$CUR_DIR/submodules.txt
@@ -246,7 +248,7 @@ git archive --format=tar $REPO_TAG | tar -x -C $_TMP_DIR
 _SHA=`git rev-parse $REPO_TAG`
 MASTER_SHA=$_SHA
 rm -f $_TMP_DIR/$QTGITTAG
-echo "qt5=$_SHA">$_TMP_DIR/$QTGITTAG
+echo "$REPO_NAME=$_SHA">$_TMP_DIR/$QTGITTAG
 
 echo " -- From dir $PWD, let's pack the master repo at $MASTER_SHA --"
 
@@ -285,7 +287,7 @@ rm -f _tmp_mod
 rm -f _tmp_shas
 
 # read the shas
-echo "qt5 was archived from $MASTER_SHA" >$CUR_DIR/_tmp_shas
+echo "$REPO_NAME was archived from $MASTER_SHA" >$CUR_DIR/_tmp_shas
 echo "------------------------------------------------------------------------">>$CUR_DIR/_tmp_shas
 echo "Fixing shas"
 while read submodule submodule_sha1; do
@@ -318,7 +320,11 @@ if [ $DOCS = generate ]; then
   cd $DOC_BUILD/$PACKAGE_NAME
   # Build bootstrapped qdoc
   echo "DOC: configuring build"
-  ./configure -developer-build -opensource -confirm-license -nomake examples -nomake tests -release -fast -no-pch -no-qpa-platform-guard
+  if [ $REPO_NAME = qtsdk ]; then
+    ( cd qtbase ; ./configure -developer-build -opensource -confirm-license -nomake examples -nomake tests -release -fast -no-pch -no-qpa-platform-guard)
+  else
+    ./configure -developer-build -opensource -confirm-license -nomake examples -nomake tests -release -fast -no-pch -no-qpa-platform-guard
+  fi
   # Run qmake in each module, as this generates the .pri files that tell qdoc what docs to generate
   QMAKE=$PWD/qtbase/bin/qmake
   echo "DOC: running $QMAKE and qmake_all for submodules"
@@ -338,6 +344,7 @@ if [ $DOCS = generate ]; then
   # exit if so wanted, to speed up
   if [ $EXIT_AFTER_DOCS = true ]; then
     cd $DOC_BUILD/$PACKAGE_NAME/qtdoc/doc
+    # store the sha1 file into tar files
     cp $CUR_DIR/$PACKAGE_NAME/$QTGITTAG html/
     cp $CUR_DIR/$PACKAGE_NAME/$QTGITTAG qch/
     tar cJf $CUR_DIR/online_doc.tar.xz html/
