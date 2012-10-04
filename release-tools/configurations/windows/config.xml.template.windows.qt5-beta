@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Installer>
     <Name>Qt 5.0.0 Beta 2 Installer</Name>
-    <Version>%SDK_VERSION_NUM%</Version>
+    <Version>5.0.0 Beta 2</Version>
     <Title>Qt 5.0.0 Beta 2</Title>
     <MaintenanceTitle>Maintain Qt 5.0.0 Beta 2</MaintenanceTitle>
     <Publisher>Qt</Publisher>
