@@ -861,10 +861,7 @@ def install_ifw_tools():
 
     # if "devmode" mode used, then build IFW from sources
     if DEVELOPMENT_MODE:
-        if INCREMENTAL_MODE:
-            tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', 'incmode', CONFIGURATIONS_DIR, PLATFORM_IDENTIFIER)
-        else:
-            tools_dir_temp = bld_ifw_tools_impl.build_ifw('devmode', '', CONFIGURATIONS_DIR, PLATFORM_IDENTIFIER)
+        tools_dir_temp = bld_ifw_tools_impl.build_ifw(True, INCREMENTAL_MODE, CONFIGURATIONS_DIR, PLATFORM_IDENTIFIER)
         tools_bin_path = SCRIPT_ROOT_DIR + os.sep + tools_dir_temp
     else:
         tools_dir_name = bldinstallercommon.config_section_map(CONFIG_PARSER_TARGET,'InstallerFrameworkTools')['name']

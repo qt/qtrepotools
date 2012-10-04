@@ -430,15 +430,12 @@ def archive_qt():
 ###############################
 # main
 ###############################
-def build_ifw(build_mode, incremental_mode, configurations_dir, platform):
+def build_ifw(development_mode, incremental_mode, configurations_dir, platform):
     global DEVELOPMENT_MODE
     global INCREMENTAL_MODE
     global PLATFORM_IDENTIFIER
-
-    if build_mode == 'devmode':
-        DEVELOPMENT_MODE = True
-    if incremental_mode == 'incmode':
-        INCREMENTAL_MODE = True
+    DEVELOPMENT_MODE = development_mode
+    INCREMENTAL_MODE = incremental_mode
     PLATFORM_IDENTIFIER = platform
 
     # init
@@ -463,7 +460,7 @@ def build_ifw(build_mode, incremental_mode, configurations_dir, platform):
         archive_macdeployqt()
     # archive static qt package
     archive_qt()
-    if build_mode == 'devmode':
+    if DEVELOPMENT_MODE:
         #TODO, the returned values should be in config file, not return it here!
         return os.path.basename(INSTALLER_FRAMEWORK_BUILD_DIR)
     else:

@@ -66,7 +66,7 @@ arg_count = len(sys.argv)
 if arg_count > 2:
     configurations_dir = sys.argv[2]
 # build ifw tools
-bld_ifw_tools_impl.build_ifw('release', configurations_dir, platformIdentifier)
+bld_ifw_tools_impl.build_ifw(False, False, configurations_dir, platformIdentifier)
 
 
 
