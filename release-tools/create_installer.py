@@ -726,7 +726,7 @@ def parse_component_data(configuration_file, configurations_base_path):
             SDK_COMPONENT_IGNORE_LIST.append(item)
     # parse sdk components
     for section in configuration.sections():
-        if section.startswith(PACKAGE_NAMESPACE + '.'):
+        if section.startswith(PACKAGE_NAMESPACE + '.') or section == PACKAGE_NAMESPACE:
             if section not in SDK_COMPONENT_IGNORE_LIST:
                 sdk_component = SdkComponent(section, configuration, PACKAGES_DIR_NAME_LIST, ARCHIVE_LOCATION_RESOLVER)
                 # if online installer, we are interested only about the root component!
