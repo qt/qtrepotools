@@ -27,6 +27,7 @@ import os
 import subprocess
 import sys
 import logging
+import re
 
 config = None # configuration object, it is initialized in main and passed to every worker process created by multiprocessing.Pool
 
@@ -117,7 +118,7 @@ def remove_moved_doc_errors(fixes, errors):
         message += line + "\n "
     return message
 
-def review_output(event, output_no_patch, output_with_patch):
+def review_output(event, output_no_patch, output_with_patch, score_on_negative_review):
     try:
         import difflib
         project = event["change"]["project"]
@@ -134,10 +135,10 @@ def review_output(event, output_no_patch, output_with_patch):
         score = 0
         if new_error_count == 1:
             message += "This change introduces one new documentation error."
-            score = -1
+            score = score_on_negative_review
         elif new_error_count > 1:
             message += "This change introduces " + str(new_error_count) + " new documentation errors."
-            score = -1
+            score = score_on_negative_review
         elif new_error_count == -1:
             message += "This change removes a documentation error. Thank you!"
             score = 0
@@ -275,6 +276,11 @@ def process_event(event_string):
             cmd_git_reset = ["git", "checkout", event["patchSet"]["revision"], "-b", "tmp"]
             subprocess.check_call(cmd_git_reset)
 
+            score_on_negative_review = -1
+            header = subprocess.check_output(["git", "log", '--pretty=oneline', '-n 1'])
+            if  (re.search(r'\bWIP\b', header) or header.find('***') >= 0):
+                score_on_negative_review = 0 # Respect work in progress
+
             try:
                 output_with_patch = run_qdoc(module_name)
             except subprocess.CalledProcessError, e:
@@ -292,7 +298,7 @@ def process_event(event_string):
             output_no_patch = run_qdoc(module_name)
 
             logging.info("DONE RUNNING QDOC")
-            return review_output(event, output_no_patch, output_with_patch)
+            return review_output(event, output_no_patch, output_with_patch, score_on_negative_review)
 
         finally:
             # TODO reuse tmp dir
