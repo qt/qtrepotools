@@ -71,7 +71,7 @@ def run_qdoc(module_name):
         environment["CCACHE_BASEDIR"] =  os.getcwd()
         environment["QT_HASH_SEED"] = "1234"
         cmd = "(./configure -opensource -confirm-license -release && make sub-src-qmake_all && cd src/tools && make sub-qdoc) > /dev/null"
-        subprocess.call(cmd, shell=True, env=environment)
+        subprocess.check_call(cmd, shell=True, env=environment)
         cmd = "make docs".split()
         output.append(subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment).communicate()[1])
         def smart_concatenate(r, x):
