@@ -86,6 +86,7 @@ Supported keys:
 developerBuild:     Developer build (Boolean)
 initArguments:      Arguments to init-repository for -q.
 codeReviewUser:     User name for code review (Gerrit)
+branch:             'dev', 'stable' or other
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
 
@@ -99,7 +100,16 @@ done in '/home/user/qt-5-build'. It is overridden by a value for the checkout
 EOF
 
 my %preferredBranches = (
-#    'qtwebkit' , 'qt-modularization-base'
+    'qtwebkit' => '',
+    'qtrepotools' => 'master',
+#   -- Unmaintained modules as of 4.12.2012. Qt3D currently only has 'dev'
+    'qtconnectivity' => 'master',
+    'qtfeedback' => 'master',
+    'qtlocation' => 'master',
+    'qtpim' => 'master',
+    'qtqa' => 'master',
+    'qtsystems' => 'master',
+    'qtwayland' => 'master'
 );
 
 # --------------- Detect OS
@@ -200,7 +210,7 @@ $USAGE =~ s/%CONFIGFILE%/$configFile/; # Replace placeholder.
 
 my @MODULES = ();
 
-my ($developerBuildConfigKey) = ('developerBuild');
+my ($developerBuildConfigKey, $branchConfigKey) = ('developerBuild', 'branch');
 
 # --- Execute a command and print to log.
 sub execute
@@ -466,38 +476,49 @@ sub determineModules
 }
 
 # ---- Helper to be called before pull. Checks if
-#      the module is in a 'no branch' state after init-repository.
+#      the module is in a 'no branch' state after init-repository or in the wrong
+#      branch as from the configuration file.
 #      If so, check out a branch, checking preferredBranches hash.
 
-sub checkoutInitialBranch
+sub checkoutBranch
 {
-    my ($mod) = @_;
+    my ($mod, $desiredBranchIn) = @_;
     # -- Special treatment for webkit: Do not touch.
-    return if ($mod eq 'qtwebkit');
+    my $desiredBranch = $preferredBranches{$mod};
+    $desiredBranch = $desiredBranchIn unless defined $desiredBranch;
+    if ($desiredBranch eq '') {
+       print 'Skipping ', $mod, ".\n";
+       return 0;
+    }
     # Determine branch
     my @branches = split("\n", `"$git" branch`);
     my @currentBranches = grep(/^\* /, @branches);
     die ('Unable to determine branch of ' . $mod) if @currentBranches != 1;
     my $currentBranch = substr($currentBranches[0], 2);
     #  We have one, no need to act.
-    if ($currentBranch ne '(no branch)') {
-        print ' branch: ',$currentBranch,"\n";
-        return;
+    if ($currentBranch eq $desiredBranch) {
+        print $mod, ' is already on branch: "',$currentBranch,".\"\n";
+        return 1;
     }
-    # Fetch all
-    my $rc = execute($git, ('fetch', '--all'));
-    die 'fetch of ' . $mod . ' failed'  if ($rc);
-    # Switch to suitable branch when none is set initially.
-    my $desiredBranch = $preferredBranches{$mod};
-    if (defined($desiredBranch) && $desiredBranch eq '') {
-        print 'Not changing branch for ',$mod,"\n";
-        return;
+    # Does the local branch exist?
+    my $rc = 0;
+    if (!grep(/^  $desiredBranch$/, @branches)) {
+        my $remoteBranchName = 'origin/' . $desiredBranch;
+        # Does the remote branch exist?
+        $rc = execute($git, ('fetch', '--all'));
+        die 'fetch of ' . $mod . ' failed'  if ($rc);
+        my @availableRemoteBranches = split("\n", `"$git" branch -r`);
+        if (!grep(/^  $remoteBranchName$/, @availableRemoteBranches)) {
+            print $mod, ' does not have the remote branch of "', $remoteBranchName, "\" set up, skipping.\n";
+            return 0;
+        }
+        $rc = execute($git, ('branch', '--track', $desiredBranch, $remoteBranchName));
+        die 'Creation of ' . $desiredBranch . ' tracking ', $remoteBranchName, ' failed'  if ($rc);
     }
-    $desiredBranch = substr($branches[1],2) unless defined $desiredBranch;
-    die ('Unable to determine suitable branch for ' . $mod) unless defined $desiredBranch;
-    print 'Switching ',$mod, ' from ', $currentBranch,' to ',$desiredBranch,"\n";
+    print 'switching ',$mod, ' from "', $currentBranch,'" to "',$desiredBranch,"\".\n";
     $rc = execute($git, ('checkout', $desiredBranch));
     die 'Checkout of ' . $desiredBranch . ' failed'  if ($rc);
+    return 1;
 }
 
 sub buildWebKit
@@ -563,10 +584,12 @@ if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) 
     $newCodeReviewUser = prompt('Enter CodeReview user name', $user) if ($newDeveloperBuild);
     my $newInitArguments = prompt('Enter arguments to init-repository', $newInitArgumentsDefault);
     my $newConfigureArguments = prompt('Enter arguments to configure', defaultConfigureArguments($newDeveloperBuild));
+    my $newBranch = prompt('Branch', 'dev');
     my $configFileHandle = new IO::File('>' . $configFile) or die ('Unable to write to ' . $configFile . ':' . $!);
     print $configFileHandle 'configureArguments=', $newConfigureArguments, "\n" if $newConfigureArguments ne '';
     print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
     print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
+    print $configFileHandle $branchConfigKey, '=', $newBranch,"\n";
     print $configFileHandle $developerBuildConfigKey, "=true\n" if $newDeveloperBuild;
     $configFileHandle->close();
     print "Wrote '",$configFile, "'\n\n";
@@ -766,16 +789,22 @@ if ( $CLEAN !=  0 ) {
 
 if ( $PULL !=  0 ) {
     print 'Pulling Qt 5 in ',$rootDir,"\n";
+    my $desiredBranch = readQt5ToolConfig($branchConfigKey);
+    if (!defined $desiredBranch || $desiredBranch eq '') {
+        $desiredBranch = 'dev';
+        print 'No branch has been set up in ', $configFile, ' (key: ', $branchConfigKey, '), assuming ', $desiredBranch, "\n";
+    }
     my @pullArgs = ('pull');
     my $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY);
     die 'Pull failed'  if ($prc);
     foreach my $MOD (@MODULES) {
         print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
         chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
-        checkoutInitialBranch($MOD);
-        print 'Pulling ', $MOD, "\n";
-        $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY, $MOD);
-        die 'Pull ' . $MOD . ' failed'  if ($prc);
+        if (checkoutBranch($MOD, $desiredBranch)) {
+            print 'Pulling ', $MOD, "\n";
+            $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY, $MOD);
+            die 'Pull ' . $MOD . ' failed'  if ($prc);
+        }
         chdir($rootDir);
    } # foreach
 } # pull
