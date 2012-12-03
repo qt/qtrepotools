@@ -31,7 +31,6 @@ use IO::File;
 use File::Path;
 
 my $CLEAN=0;
-my $DOC=0;
 my $PULL=0;
 my $BUILD=0;
 my $MAKE=0;
@@ -45,7 +44,6 @@ my $REBUILD_CONFIGURE=0;
 my $BUILD_WEBKIT = 0;
 my $optModuleBranchArgument;
 my $optGerritModule;
-my $optCommitHook;
 my $gitoriousURL = 'git://gitorious.org/qt/qt5.git';
 my $codeReviewHost = 'codereview.qt-project.org';
 my $codeReviewPort = 29418;
@@ -67,18 +65,11 @@ Options:
   -p  Pull (for development only)
   -b  Build (configure + build)
   -m  Make
-  -o  [D]ocumentation
   -t  Test: Builds and runs tests located in tests/auto for each module,
       creates log file(s) in that directory as well as a summary log  file.
   -q  Quick bootstrap a new checkout under current folder.
   -w  Build WebKit
   -g <module> Set up gerrit for the module.
-  -a <module> Set up a tracking branch for the module. By default, this is
-              staging/master. It is possible the specify the branch by appending
-              :remote-branch to the module parameter, for example:
-              qtbase:origin/refactor
-  -h <hook>   Path to commit hook for -s.
-  -x  Windows: Rebuild configure.exe (requires MSVC setup)
 
 Example use cases:
   qt5_tool -c -u -b     Clean, update and build for nightly builds
@@ -93,12 +84,10 @@ Use 'true', '1' for Boolean keys.
 Supported keys:
 
 developerBuild:     Developer build (Boolean)
-initArguments:      Arguments to init-repository for -q. Example:
-                    [--berlin-|--brisbane-|--]nokia-developer
+initArguments:      Arguments to init-repository for -q.
 codeReviewUser:     User name for code review (Gerrit)
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
-nokiaDeveloper:     Nokia Developer mode (Boolean)
 
 Example:
 shadowBuildPostfix=-build
@@ -211,7 +200,7 @@ $USAGE =~ s/%CONFIGFILE%/$configFile/; # Replace placeholder.
 
 my @MODULES = ();
 
-my ($developerBuildConfigKey, $nokiaDeveloperConfigKey) = ('developerBuild', 'nokiaDeveloper');
+my ($developerBuildConfigKey) = ('developerBuild');
 
 # --- Execute a command and print to log.
 sub execute
@@ -420,24 +409,6 @@ sub ls
     return $fileName . ' ' . $size . ' ' . scalar(localtime($mtime));
 }
 
-# ---- Windows: Rebuild configure.exe
-
-sub rebuildConfigure
-{
-    my ($rootDir) = @_;
-    print "### Rebuilding configure.exe'\n";
-    my $qtbase = File::Spec->catfile($rootDir, 'qtbase');
-    my $qmake = File::Spec->catfile($qtbase, 'bin', 'qmake.exe');
-    my $configureFolder = File::Spec->catfile($qtbase, 'tools' , 'configure');
-    chdir ($configureFolder) or die ('Failed to chdir to "' . $configureFolder . '":' . $!);
-    my $makefile = 'Makefile.Release';
-    execute('nmake', ('/s', '/f', $makefile, 'clean')) if -f $makefile;
-    execute($qmake, ('CONFIG-=debug'));
-    executeCheck('nmake', ('/s', '/f', $makefile));
-    my $configureExe = File::Spec->catfile($qtbase, 'configure.exe');
-    print "\n",ls($configureExe), "\n";
-}
-
 # ---- Read a value from the '$HOME/.qt5_tool' configuration file
 #      When given a key 'key' for the repository directory '/foo/qt-5',
 #      check for the repo-specific value 'key-qt5' and then for the general
@@ -557,13 +528,13 @@ sub buildWebKit
 
 # --------------- MAIN: Parse arguments
 
-if (!GetOptions('clean' => \$CLEAN, 'ocumentation' => \$DOC,
+if (!GetOptions('clean' => \$CLEAN,
      'pull' => \$PULL, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
      'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
      'acking=s' => \$optModuleBranchArgument, 'gerrit=s' => \$optGerritModule,
-     'hook=s' => \$optCommitHook, 'quick-bootstrap'  => \$BOOTSTRAP,
+     'quick-bootstrap'  => \$BOOTSTRAP,
      'webkit'  => \$BUILD_WEBKIT, 'x' => \$REBUILD_CONFIGURE)
-    || ($CLEAN + $DOC + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS
+    || ($CLEAN + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS
         + $REBUILD_CONFIGURE + $TEST + $BUILD_WEBKIT== 0
         && ! defined $optModuleBranchArgument && !defined $optGerritModule)) {
     print $USAGE;
@@ -587,11 +558,9 @@ sub defaultConfigureArguments
 if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) {
     print "\n### This appears to be the first use of qt5_tool on this machine.\n\nCreating configuration file '",$configFile, "'...\n";
     my $newDeveloperBuild = prompt('Developer build (y/n)', 'y') =~ /y/i;
-    my $newNokiaDeveloper = prompt('Nokia developer (y/n)', 'n') =~ /y/i;
     my $newCodeReviewUser = '';
     my $newInitArgumentsDefault = '--no-webkit';
-    $newCodeReviewUser = prompt('Enter CodeReview user name', $user) if ($newDeveloperBuild || $newNokiaDeveloper);
-    $newInitArgumentsDefault .= ' --berlin'  if $newNokiaDeveloper;
+    $newCodeReviewUser = prompt('Enter CodeReview user name', $user) if ($newDeveloperBuild);
     my $newInitArguments = prompt('Enter arguments to init-repository', $newInitArgumentsDefault);
     my $newConfigureArguments = prompt('Enter arguments to configure', defaultConfigureArguments($newDeveloperBuild));
     my $configFileHandle = new IO::File('>' . $configFile) or die ('Unable to write to ' . $configFile . ':' . $!);
@@ -599,7 +568,6 @@ if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) 
     print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
     print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
     print $configFileHandle $developerBuildConfigKey, "=true\n" if $newDeveloperBuild;
-    print $configFileHandle $nokiaDeveloperConfigKey, "=true\n" if $newNokiaDeveloper;
     $configFileHandle->close();
     print "Wrote '",$configFile, "'\n\n";
 }
@@ -610,14 +578,9 @@ my $codeReviewUser = readQt5ToolConfig('codeReviewUser');
 # --------------- Bootstrap
 
 if ( $BOOTSTRAP != 0 ) {
-    my $nokiaDeveloper = readQt5ToolConfigBool($nokiaDeveloperConfigKey);
     my $developerBuild = readQt5ToolConfigBool($developerBuildConfigKey);
-    my $repoURL = $nokiaDeveloper  ?
-                   ('ssh://' . $codeReviewHost . ':' . $codeReviewPort .'/qt/qt5.git') :
-                   $gitoriousURL;
     my $targetFolder = prompt('Enter target folder', 'qt-5');
     my @initOptions;
-    push (@initOptions, '-nokia-developer') if $nokiaDeveloper;
     push (@initOptions, '--codereview-username=' . $codeReviewUser) if $codeReviewUser ne '';
     my $initArgumentsFromConfig = readQt5ToolConfig('initArguments');
 #   -- Webkit is usually too slow to clone unless something is configured.
@@ -626,8 +589,8 @@ if ( $BOOTSTRAP != 0 ) {
     }
     my $toolsFolder = 'qtrepotools';
     # -- Clone
-    my $cloneRc = execute($git, ('clone', $repoURL, $targetFolder));
-    die 'clone '. $repoURL  . ' failed.' if $cloneRc;
+    my $cloneRc = execute($git, ('clone',  $gitoriousURL, $targetFolder));
+    die 'clone '.  $gitoriousURL . ' failed.' if $cloneRc;
     chdir($targetFolder) or die ('Failed to chdir to "' . $targetFolder . '":' . $!);
     # -- Run init
     my $initRc = 0;
@@ -636,7 +599,7 @@ if ( $BOOTSTRAP != 0 ) {
     } else {
         $initRc = execute('./init-repository', @initOptions);
     }
-    die 'init '. $repoURL  . ' failed.' if $initRc;
+    die 'init '. $gitoriousURL . ' failed.' if $initRc;
     exit 0;
 }
 
@@ -770,41 +733,6 @@ if ( $TEST !=  0 ) {
     print $report;
 }
 
-# --------------- Switch to branch
-
-if (defined $optModuleBranchArgument) {
-#   -- Split arguments of form module[:origin/refactor]
-    my ($branchName, $remoteBranchName ) = ('staging','staging/master');
-    my $bColon = index($optModuleBranchArgument, ':');
-    if ($bColon > 0) {
-        $remoteBranchName = substr($optModuleBranchArgument, $bColon + 1);
-        my $bSlash = index($remoteBranchName, '/');
-        die ('Invalid remote branch name' . $remoteBranchName) if ($bSlash < 1);
-        $branchName = substr($remoteBranchName, $bSlash + 1);
-        $optModuleBranchArgument = substr($optModuleBranchArgument, 0, $bColon);
-    }
-    chdir($optModuleBranchArgument) or die ('Failed to chdir from' . $rootDir . ' to "' . $optModuleBranchArgument . '":' . $!);
-    initTrackingBranch($branchName, $remoteBranchName);
-#   -- Copy/Link the commit hook: Try to autodetect standard setup.
-    if (!defined $optCommitHook && $os != $OS_WINDOWS) {
-       my $hook = $ENV{"HOME"} . '/dev/devtools/shell/git_post_commit_hook';
-       $optCommitHook = $hook if -f $hook;
-    }
-#   -- Link or copy the hook according to platform.
-    if (defined $optCommitHook) {
-        my $target =File::Spec->catfile('.git', 'hooks' ,'post-commit');
-        if (! -e $target) {
-            print 'Setting up commit hook: ', $optCommitHook, ' ', $target,"\n";
-            if ($os == $OS_WINDOWS) {
-               execute('xcopy.exe', $optCommitHook, $target);
-            } else {
-                execute('ln', '-s', $optCommitHook, $target);
-            }
-        }
-    }
-    chdir($rootDir);
-}
-
 # --------------- Init gerrit
 
 if (defined $optGerritModule) {
@@ -916,14 +844,6 @@ if ( $BUILD && $makeInstallRequired ) {
     push (@installArgs, '-j', '1') unless (index($make, 'nmake') >= 0);
     push (@installArgs, 'install');
     executeCheck($make, @installArgs);
-}
-
-# ---- Build documentation. Note: qch_docs may fail on Windows.
-
-if ($DOC !=  0 ) {
-   print 'Documenting Qt 5 in ',$rootDir,"\n";
-   chdir('qtdoc') or die ('Unable to chdir to qtdoc:' . $!);
-   executeCheck($make, (@makeArgs, 'online_docs', 'qch_docs'));
 }
 
 exit($exitCode);
