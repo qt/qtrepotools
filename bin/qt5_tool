@@ -44,6 +44,7 @@ my $REBUILD_CONFIGURE=0;
 my $BUILD_WEBKIT = 0;
 my $optModuleBranchArgument;
 my $optGerritModule;
+my $optGitHooks;
 my $gitoriousURL = 'git://gitorious.org/qt/qt5.git';
 my $codeReviewHost = 'codereview.qt-project.org';
 my $codeReviewPort = 29418;
@@ -552,12 +553,12 @@ sub buildWebKit
 if (!GetOptions('clean' => \$CLEAN,
      'pull' => \$PULL, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
      'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
-     'acking=s' => \$optModuleBranchArgument, 'gerrit=s' => \$optGerritModule,
+     'acking=s' => \$optModuleBranchArgument, 'gerrit=s' => \$optGerritModule, 'hooks' => \$optGitHooks,
      'quick-bootstrap'  => \$BOOTSTRAP,
      'webkit'  => \$BUILD_WEBKIT, 'x' => \$REBUILD_CONFIGURE)
     || ($CLEAN + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS
         + $REBUILD_CONFIGURE + $TEST + $BUILD_WEBKIT== 0
-        && ! defined $optModuleBranchArgument && !defined $optGerritModule)) {
+        && ! defined $optModuleBranchArgument && !defined $optGerritModule && !defined $optGitHooks)) {
     print $USAGE;
     exit (1);
 }
@@ -774,6 +775,33 @@ if (defined $optGerritModule) {
     print 'Fetch all...', "\n";
     $grc = execute($git, ('fetch', '--all'));
     chdir($rootDir);
+}
+
+if (defined $optGitHooks) {
+    my $qtrepotoolsdir = dirname(dirname($prog));
+    my $postcommitpath = File::Spec->canonpath("$qtrepotoolsdir/git-hooks");
+    if ($os == $OS_WINDOWS) {
+        # rewrite from "C:/Users/qt" to "/C/Users/qt" so that msysgit understand
+        $postcommitpath =~ s,([A-Za-z]):,/$1,;
+    }
+    print "Installing post-commit hooks\n";
+    foreach my $MOD (@MODULES) {
+        print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
+        chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
+        my $postCommitFile = '.git\hooks\post-commit';
+        my $overwrite = 1;
+        if (-f $postCommitFile) {
+            $overwrite = prompt('Overwrite existing post-commit file? (y/n)', 'n') =~ /y/i;
+        }
+        if ($overwrite) {
+            my $postCommitFileHandle = new IO::File('>' . $postCommitFile) or die ('Unable to write to ' . $postCommitFile . ':' . $!);
+            print $postCommitFileHandle "#!/bin/sh\n";
+            print $postCommitFileHandle "export PATH=\$PATH:$postcommitpath\n"; #needed
+            print $postCommitFileHandle "exec $postcommitpath/git_post_commit_hook\n";
+            $postCommitFileHandle->close();
+        }
+        chdir($rootDir);
+    }
 }
 
 # --------------- Clean if desired
