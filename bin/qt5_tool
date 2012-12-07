@@ -783,6 +783,7 @@ if (defined $optGitHooks) {
     if ($os == $OS_WINDOWS) {
         # rewrite from "C:/Users/qt" to "/C/Users/qt" so that msysgit understand
         $postcommitpath =~ s,([A-Za-z]):,/$1,;
+        $postcommitpath =~ s,\\,/,g;
     }
     print "Installing post-commit hooks\n";
     foreach my $MOD (@MODULES) {
