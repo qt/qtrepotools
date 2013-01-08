@@ -40,10 +40,11 @@ if (defined $config{flags}) {
 }
 my $fail = 0;
 my $printed = $gerrit;
-my $file = "";
+our $file = "";  # 'our' for usage of 'local'
 my $fail_file = "-";
 my $summary;
 my ($lpfx, $elpfx) = ($gerrit ? ("", "\n") : ("***   ", "***\n"));
+my %footnotes;
 
 sub printerr()
 {
@@ -92,9 +93,67 @@ my $lineno = 0;
 my $iswip = defined($cfg{wip});
 my $revok = defined($cfg{revby});
 my $badlog = defined($cfg{log});
+my $spell_check = !defined($cfg{spell});
 my $parents = 0;
 my ($badauthor, $badcommitter) = (0, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
+my %logspellerrors;
+
+# Load spelling errors dataset if available
+our %MISTAKES;
+our %MISTAKES_BASE;
+BEGIN {
+    eval { require Lingua::EN::CommonMistakes };
+    if (!$@) {
+        # Load US-specific and non-US-specific mistakes so we can give a hint
+        # about US vs British English where appropriate
+        Lingua::EN::CommonMistakes->import(qw(:no-punct %MISTAKES_BASE));
+        Lingua::EN::CommonMistakes->import(qw(:american :no-punct %MISTAKES));
+    }
+}
+
+# complain() for each spelling error in the given set of $errors.
+sub complain_spelling
+{
+    my ($errors) = @_;
+    my @lines = sort { $a <=> $b } keys %{$errors || {}};
+
+    foreach my $line (@lines) {
+        foreach my $error (@{$errors->{$line}}) {
+            &complain("$line: possible spelling error: $error", "spell", 1);
+        }
+    }
+}
+
+# Given a line of text, searches for likely spelling errors.
+# The results are stored in $out (a hashref) if it is passed; otherwise,
+# the errors are directly complained about.
+sub check_spelling
+{
+    my ($text, $out) = @_;
+
+    my %seen;
+    my $complain = !$out;
+    my @errors;
+    my (@words) = split(/\b/, $text);
+    foreach my $word (@words) {
+        $word = lc $word;
+        next if $seen{$word};
+        $seen{$word} = 1;
+        if (my $correction = $MISTAKES{$word}) {
+            if (!$MISTAKES_BASE{$word}) {
+                $correction .= ' [*]';
+                $footnotes{'[*] Please note, Qt prefers American English.'} = 1;
+            }
+            push @{$out->{$lineno}}, "$word -> $correction";
+        }
+    }
+
+    if ($complain) {
+        complain_spelling($out);
+    }
+}
+
 open MSG, "git log -1 --pretty=raw ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     chomp;
@@ -138,6 +197,10 @@ while (<MSG>) {
             }
         }
     }
+
+    if ($spell_check) {
+        check_spelling($_, \%logspellerrors);
+    }
 }
 close MSG;
 printerr;
@@ -151,6 +214,11 @@ if ($badauthor) {
 }
 if ($badcommitter) {
     &complain("Bogus committer email", "email", 1);
+}
+
+{
+    local $file = 'log message';
+    complain_spelling(\%logspellerrors);
 }
 
 my $chunk = 0;
@@ -346,6 +414,9 @@ while (<DIFF>) {
                 }
             }
         }
+        if ($spell_check) {
+            check_spelling($_);
+        }
     } else {
         flushChunk() if ($chunk);
         if (/^ /) {
@@ -379,6 +450,8 @@ while (<DIFF>) {
             $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
             $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(def|spec|changes)$)/);
             $ctlkw_check = $tabs_check && $clike;
+            # .ts files usually contain languages other than English
+            $spell_check = !defined($cfg{spell}) && ($file !~ /\.ts$/i);
             $conflict_fail = defined($cfg{conflict});
             $braces = 0;
             $check_gen = 0;
@@ -450,6 +523,13 @@ if ($mixws_check) {
         for my $fn (@ws_files) {
             print $lpfx."  WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}})."\n";
         }
+    }
+}
+
+if (%footnotes) {
+    print $elpfx;
+    for my $fn (sort keys %footnotes) {
+        print $lpfx.$fn."\n";
     }
 }
 
