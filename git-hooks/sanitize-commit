@@ -88,7 +88,7 @@ sub complain()
     }
 }
 
-my $ln = 0;
+my $lineno = 0;
 my $iswip = defined($cfg{wip});
 my $revok = defined($cfg{revby});
 my $badlog = defined($cfg{log});
@@ -108,7 +108,8 @@ while (<MSG>) {
         }
         next
     }
-    if ($ln == 0) {
+    $lineno++;
+    if ($lineno == 1) {
         $summary = $_;
         $revert1 = 1 if (/^Revert ".*"$/);
         if (!$iswip && $parents < 2 && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
@@ -126,7 +127,7 @@ while (<MSG>) {
         } elsif (!/^[-\w]+:|^$/) {
             $nonrevert = 1;
         }
-        if ($ln == 1) {
+        if ($lineno == 2) {
             if (!$badlog && $_ ne "") {
                 &complain("2nd line of log message is not empty", "log");
             }
@@ -137,7 +138,6 @@ while (<MSG>) {
             }
         }
     }
-    $ln++;
 }
 close MSG;
 printerr;
@@ -159,7 +159,6 @@ my @deli = ();
 my $nonws;
 my $ws;
 my $mixws_check = 0;
-my $lineno = 0;
 my @ws_files = ();
 my %ws_lines = (); # hash of lists
 my $braces = 0;
@@ -167,6 +166,8 @@ my $open_key = qr/\s*#\s*if|.*{/;
 my $close_key = qr/\s*#\s*endif|.*}/;
 my $kill_all_ws = qr/\s+((?:\"(?:\\.|[^\"])*\"|\S)+)/; # Collapse all whitespace not inside strings.
 my $kill_nl_ws = qr/((?:\"(?:\\.|[^\"])*\"|\S)+)\s+/; # Collapse all non-leading whitespace not inside strings.
+
+$lineno = 0;
 
 sub flushChunk()
 {
