@@ -1,6 +1,7 @@
 # This file contains a mapping of #qt-labs et al. IRC nicks to Gerrit username, allowing for easy
 # assigning of reviewers through the 'git gpush' script.
 
+aalpert=416365416c
 andre=apoenitz
 anshaw=andysh
 bhughes-mpd=bhughes
