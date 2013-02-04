@@ -100,8 +100,8 @@ done in '/home/user/qt-5-build'. It is overridden by a value for the checkout
 '/home/user/qt-5special', which would result in '/home/user/qt-5-special-build'
 EOF
 
+# Empty entry means: Do not touch.
 my %preferredBranches = (
-    'qtwebkit' => '',
     'qtrepotools' => 'master',
 #   -- Unmaintained modules as of 4.12.2012. Qt3D currently only has 'dev'
     'qtconnectivity' => 'master',
