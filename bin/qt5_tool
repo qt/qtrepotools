@@ -809,7 +809,7 @@ if (defined $optGitHooks) {
 
 if ( $CLEAN !=  0 ) {
   print 'Cleaning Qt 5 in ',$rootDir,"\n";
-  my @cleanArgs = ('clean','-dxf');
+  my @cleanArgs = ('clean','-dxfq');
   runGitAllModules(\@cleanArgs, $RUN_GIT_FAILMODE_RETRY);
 }
 
