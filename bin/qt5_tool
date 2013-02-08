@@ -14,9 +14,8 @@
 #
 # Feel free to add useful options!
 #
-# The intention is that this works with the old Perl used for Symbian as well:
+# To keep this script working with older Perl versions, please follow these guidelines:
 # - Variables should not shadow others.
-# - Some functions are just broken  (abs_path()),etc.
 ############################################################################################
 
 use strict;
