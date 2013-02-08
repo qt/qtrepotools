@@ -1,0 +1,297 @@
+#!/usr/bin/env perl
+# Copyright (C) 2013 Digia Plc and/or its subsidiary(-ies).
+# Contact: http://www.qt-project.org/legal
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+package Git::PPush;
+
+use strict;
+use warnings;
+
+# Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
+# may not (msysgit for example) support this module, even if it's considered a Core module.
+sub usage
+{
+    print <<'EOM';
+Usage:
+    git ppush [options] [<refspec>...]
+
+    Pushes local branches to a personal namespace on a git server.
+
+    A git repository has two standard namespaces: heads and tags, which
+    are automatically added when setting up remotes.
+    But it is possible to put refs into non-standard namespaces as well.
+    These namespaces can be used to make backups or share work somewhat
+    silently.
+
+Options:
+    <refspec>...
+        The format is the same as for a regular git push.
+        However, the destination ref is automatically prefixed with the
+        personal namespace.
+
+    -a, --all
+        Push all local branches instead of the current one.
+
+    -r, --remote=<remote>
+        Use specified remote instead of 'personal'.
+
+    --prune
+        Remove remote branches that do not have a local counterpart.
+
+    --delete
+        All listed refs are deleted from the remote repository.
+        This is the same as prefixing all refs with a colon.
+
+    -f, --force
+        Force push even if remote commits will be lost.
+
+    -n, --dry-run
+        Do everything except actually send the updates.
+
+    -v, --verbose
+        Shows the final 'git push' command as a comma-separated list of
+        arguments.
+
+    --setup
+        Instead of pushing, create the personal remote.
+
+    -b, --base=<remote>
+        In setup mode, use the specified remote as an information source.
+        By default, the current branch's upstream is used.
+
+    -u, --url=<url>
+        In setup mode, use the specified git URL instead of trying to
+        derive it from the base remote.
+
+    -p, --user=<user>
+        In setup mode, use the specified user (subdirectory) instead of
+        trying to derive it from the username in the URL.
+
+    -s, --namespace=<namespace>
+        In setup mode, use the specified namespace instead of 'personal'.
+
+Examples:
+
+    Backup local branches:
+
+        $ git ppush --setup --base=gerrit    # Needed only once
+        $ git ppush -f                       # Backup current branch
+        $ git ppush --force --all --prune    # Synchronize everything
+
+    Get a colleague's work:
+
+        $ git ppush --setup --base=gerrit --remote=ossis --user=buddenha
+        $ git fetch ossis
+        $ git log -p ossis/master
+
+Copyright:
+    Copyright (C) 2013 Digia Plc and/or its subsidiary(-ies).
+    Contact: http://www.qt-project.org/legal
+
+License:
+    You may use this file under the terms of the 3-clause BSD license.
+EOM
+}
+
+sub parse_arguments
+{
+    my ($self, @arguments) = @_;
+
+    while (scalar @arguments) {
+        my $arg = shift @arguments;
+
+        if ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
+            $self->usage();
+            exit 0;
+        } elsif ($arg eq "-v" || $arg eq "--verbose") {
+            $self->{'verbose'} = 1;
+            push @{$self->{'arguments'}}, $arg;
+        } elsif ($arg eq "-n" || $arg eq "--dry-run") {
+            $self->{'dry-run'} = 1;
+            push @{$self->{'arguments'}}, $arg;
+        } elsif ($arg eq "-r") {
+            $self->{'remote'} = shift @arguments;
+        } elsif ($arg =~ /^--remote=(.*)/) {
+            $self->{'remote'} = $1;
+        } elsif ($arg eq "-a" || $arg eq "--all") {
+            $self->{'refs'} = [ "refs/heads/*" ];
+        } elsif ($arg eq "--prune") {
+            $self->{'prune'} = 1;
+            push @{$self->{'arguments'}}, $arg;
+        } elsif ($arg eq "--delete") {
+            $self->{'delete'} = 1;
+        } elsif ($arg eq "-f" || $arg eq "--force") {
+            $self->{'force'} = 1;
+        } elsif ($arg eq "--setup") {
+            $self->{'setup'} = 1;
+        } elsif ($arg eq "-b") {
+            $self->{'base'} = shift @arguments;
+        } elsif ($arg =~ /^--base=(.*)/) {
+            $self->{'base'} = $1;
+        } elsif ($arg eq "-u") {
+            $self->{'url'} = shift @arguments;
+        } elsif ($arg =~ /^--url=(.*)/) {
+            $self->{'url'} = $1;
+        } elsif ($arg eq "-s") {
+            $self->{'namespace'} = shift @arguments;
+        } elsif ($arg =~ /^--namespace=(.*)/) {
+            $self->{'namespace'} = $1;
+        } elsif ($arg eq "-p") {
+            $self->{'user'} = shift @arguments;
+        } elsif ($arg =~ /^--user=(.*)/) {
+            $self->{'user'} = $1;
+        } elsif ($arg =~ /^-/) {
+            die "Unrecognized option ".$arg."\n";
+        } else {
+            push @{$self->{'refs'}}, $arg;
+        }
+    }
+
+    if ($self->{'setup'}) {
+        die "Naming refspecs is incompatible with --setup.\n" if (@{$self->{'refs'}});
+        die "--prune is incompatible with --setup\n" if ($self->{'prune'});
+        die "--delete is incompatible with --setup\n" if ($self->{'delete'});
+        die "--force is incompatible with --setup\n" if ($self->{'force'});
+    } else {
+        die "--base is valid only in --setup mode.\n" if ($self->{'base'});
+        die "--url is valid only in --setup mode.\n" if ($self->{'url'});
+        die "--namespace is valid only in --setup mode.\n" if ($self->{'namespace'});
+        die "--user is valid only in --setup mode.\n" if ($self->{'user'});
+    }
+}
+
+sub spawn_cmd
+{
+    my ($self, @cmd) = @_;
+
+    print '+'.join(',', @cmd)."\n" if ($self->{'verbose'});
+    system(@cmd) and exit $? if (!$self->{'dry-run'});
+}
+
+sub run_setup
+{
+    my ($self) = @_;
+
+    my $url = $self->{'url'};
+    my $user = $self->{'user'};
+    if (!$url) {
+        my $base = $self->{'base'};
+        if (!$base) {
+            my $ref = `git symbolic-ref -q HEAD`;
+            die "Not on a branch. Cannot determine base remote.\n" if (!$ref);
+            chomp $ref;
+            $ref =~ s,^refs/heads/,,;
+            $base = `git config branch.$ref.remote`;
+            die "Have no upstream. Cannot determine base remote.\n" if (!$base);
+            chomp $base;
+        }
+        $url = `git config remote.$base.url`;
+        die "Cannot determine URL of base remote. Try --url.\n" if (!$url);
+        chomp $url;
+    }
+    if (!$user) {
+        $url =~ m,(?:[^:]+://)?([^\@]+)\@.*, or
+            # FIXME: could try to query ssh config here.
+            die "Cannot determine user from URL. Try --user.\n";
+        $user = $1;
+    }
+    my $remote = $self->{'remote'};
+    my $namespace = $self->{'namespace'};
+    $namespace = "personal" if (!$namespace);
+    $self->spawn_cmd("git", "config", "remote.$remote.url", $url);
+    $self->spawn_cmd("git", "config", "remote.$remote.fetch",
+                                      "+refs/$namespace/$user/*:refs/remotes/$remote/*");
+}
+
+sub push_commits
+{
+    my ($self) = @_;
+
+    my $force = $self->{'force'};
+    my $remote = $self->{'remote'};
+    my $refspec = `git config remote.$remote.fetch`;
+    die "Invalid remote specified.\n" if (!$refspec);
+    chomp $refspec;
+    $refspec =~ s,^\+?([^*]+).*,$1,;
+    my @refs = @{$self->{'refs'}};
+    if (!@refs) {
+        my $ref = `git symbolic-ref -q HEAD`;
+        die "No refspecs given and not on a branch.\n" if (!$ref);
+        chomp $ref;
+        $ref =~ s,^refs/heads/,,;
+        push @refs, $ref;
+    }
+
+    my @gitcmd = ("git", "push");
+    push @gitcmd, @{$self->{'arguments'}};
+    push @gitcmd, $remote;
+    foreach my $ref (@refs) {
+        my ($pfx, $src, $dst) = ("", "", "");
+        $ref =~ s,^(\+?)(.*),$2,;
+        $pfx = $1;
+        $pfx = '+' if ($force);
+        if ($ref =~ /(.*):(.*)/) {
+            $src = $1;
+            $dst = $2;
+        } else {
+            $src = $ref if (!$self->{'delete'});
+            $dst = $ref;
+        }
+        $dst =~ s,^refs/heads/,,;
+        push @gitcmd, $pfx.$src.':'.$refspec.$dst;
+    }
+
+    $self->{'dry-run'} = 0;  # we already have it in git's command line
+    $self->spawn_cmd(@gitcmd);
+    exit 0;
+}
+
+sub new
+{
+    my ($class, @arguments) = @_;
+
+    my $self = {};
+    bless $self, $class;
+
+    $self->{'verbose'} = 0;
+    $self->{'dry-run'} = 0;
+
+    $self->{'setup'} = 0;
+    $self->{'remote'} = "personal";
+
+    # push mode
+    $self->{'refs'} = [];
+    $self->{'prune'} = 0;
+    $self->{'delete'} = 0;
+    $self->{'force'} = 0;
+
+    # setup mode
+    $self->{'base'} = "";
+    $self->{'url'} = "";
+    $self->{'namespace'} = "";
+    $self->{'user'} = "";
+
+    $self->{'arguments'} = [];
+
+    $self->parse_arguments(@arguments);
+    return $self;
+}
+
+sub run
+{
+    my ($self) = @_;
+    if ($self->{'setup'}) {
+        $self->run_setup;
+    } else {
+        $self->push_commits;
+    }
+}
+
+#==============================================================================
+
+Git::PPush->new(@ARGV)->run if (!caller);
+1;
