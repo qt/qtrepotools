@@ -284,7 +284,7 @@ def process_event(event_string):
             try:
                 output_with_patch = run_qdoc(module_name)
             except subprocess.CalledProcessError, e:
-                logging.debug("RUNNING QDOC FAILED", e)
+                logging.debug("RUNNING QDOC FAILED: %s", e)
                 msg = "Running command\n " + str(e.cmd) + "\nfailed."
                 post_review(event, msg, -1)
                 return -1
