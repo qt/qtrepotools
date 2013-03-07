@@ -43,6 +43,7 @@ my $BUILD_WEBKIT = 0;
 my $optModuleBranchArgument;
 my $optGerritModule;
 my $optGitHooks;
+my $optDesiredBranch;
 my $gitoriousURL = 'git://gitorious.org/qt/qt5.git';
 my $codeReviewHost = 'codereview.qt-project.org';
 my $codeReviewPort = 29418;
@@ -62,6 +63,7 @@ Options:
   -c  Clean
   -u  Update
   -p  Pull (for development only)
+    --branch (dev/stable) to select which branches to check out when pulling
   -b  Build (configure + build)
   -m  Make
   -t  Test: Builds and runs tests located in tests/auto for each module,
@@ -71,9 +73,10 @@ Options:
   -g <module> Set up gerrit for the module.
 
 Example use cases:
-  qt5_tool -c -u -b     Clean, update and build for nightly builds
-  qt5_tool -d           Generate modules diff relative to root directory
-  qt5_tool -r           Reset --hard of repo.
+  qt5_tool -c -u -b             Clean, update and build for nightly builds
+  qt5_tool -d                   Generate modules diff relative to root directory
+  qt5_tool -r                   Reset --hard of repo.
+  qt5_tool -p --branch stable   Check out all repos to the stable branches
 
 qt_tool can be configured by creating a configuration file
 "%CONFIGFILE%"
@@ -549,7 +552,7 @@ sub buildWebKit
 # --------------- MAIN: Parse arguments
 
 if (!GetOptions('clean' => \$CLEAN,
-     'pull' => \$PULL, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
+     'pull' => \$PULL, 'branch=s' => \$optDesiredBranch, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
      'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
      'acking=s' => \$optModuleBranchArgument, 'gerrit=s' => \$optGerritModule, 'hooks' => \$optGitHooks,
      'quick-bootstrap'  => \$BOOTSTRAP,
@@ -816,7 +819,7 @@ if ( $CLEAN !=  0 ) {
 
 if ( $PULL !=  0 ) {
     print 'Pulling Qt 5 in ',$rootDir,"\n";
-    my $desiredBranch = readQt5ToolConfig($branchConfigKey);
+    my $desiredBranch = defined $optDesiredBranch ? $optDesiredBranch : readQt5ToolConfig($branchConfigKey);
     if (!defined $desiredBranch || $desiredBranch eq '') {
         $desiredBranch = 'dev';
         print 'No branch has been set up in ', $configFile, ' (key: ', $branchConfigKey, '), assuming ', $desiredBranch, "\n";
