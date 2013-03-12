@@ -20,7 +20,7 @@
 
 use strict;
 
-use Getopt::Long;
+use Getopt::Long qw(:config no_ignore_case);
 use File::Basename;
 use File::Spec;
 use File::Copy;
@@ -63,7 +63,7 @@ Options:
   -c  Clean
   -u  Update
   -p  Pull (for development only)
-    --branch (dev/stable) to select which branches to check out when pulling
+    --Branch (dev/stable) to select which branches to check out when pulling
   -b  Build (configure + build)
   -m  Make
   -t  Test: Builds and runs tests located in tests/auto for each module,
@@ -76,7 +76,7 @@ Example use cases:
   qt5_tool -c -u -b             Clean, update and build for nightly builds
   qt5_tool -d                   Generate modules diff relative to root directory
   qt5_tool -r                   Reset --hard of repo.
-  qt5_tool -p --branch stable   Check out all repos to the stable branches
+  qt5_tool -p --Branch stable   Check out all repos to the stable branches
 
 qt_tool can be configured by creating a configuration file
 "%CONFIGFILE%"
@@ -88,7 +88,7 @@ Supported keys:
 developerBuild:     Developer build (Boolean)
 initArguments:      Arguments to init-repository for -q.
 codeReviewUser:     User name for code review (Gerrit)
-branch:             'dev', 'stable' or other
+Branch:             'dev', 'stable' or other
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
 
@@ -551,8 +551,9 @@ sub buildWebKit
 
 # --------------- MAIN: Parse arguments
 
+$Getopt::ignoreCase = 0;
 if (!GetOptions('clean' => \$CLEAN,
-     'pull' => \$PULL, 'branch=s' => \$optDesiredBranch, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
+     'pull' => \$PULL, 'Branch=s' => \$optDesiredBranch, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
      'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
      'acking=s' => \$optModuleBranchArgument, 'gerrit=s' => \$optGerritModule, 'hooks' => \$optGitHooks,
      'quick-bootstrap'  => \$BOOTSTRAP,
