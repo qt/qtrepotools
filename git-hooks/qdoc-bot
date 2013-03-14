@@ -382,10 +382,15 @@ def watcher():
             except:
                 pass
         except:
-            # an error occured let's restart in 15 sec
             logging.critical("WATCHER RESTART because of: %s", sys.exc_info())
+        finally:
+            # an error occurred let's restart in 15 sec
             import time
             time.sleep(15)
+            try:
+                ssh.kill()
+            except: # swallow all errors, we do not care anymore
+                pass
 
 
 if __name__== "__main__":
