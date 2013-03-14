@@ -90,10 +90,13 @@ def run_qdoc(module_name):
         environment = os.environ
         environment["CCACHE_BASEDIR"] =  os.getcwd()
         environment["QT_HASH_SEED"] = "1234"
-        for cmd in ["/bin/sh ./configure --opensource --confirm-license --release", "make sub-src-qmake_all", "make -Csrc/tools sub-qdoc"]:
+        for cmd in ["/bin/sh ./configure --opensource --confirm-license --release".split()
+                   , "make sub-src-qmake_all".split()
+                   , ["/bin/bash", "-c", "if [ -f src/tools/Makefile ] ; then make -Csrc/tools sub-qdoc; else make -Csrc sub-qdoc ; fi"] # build qdoc
+                   ]:
             logging.debug("Executing command: %s", cmd)
             try:
-                proc = subprocess.Popen(cmd.split(), env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                proc = subprocess.Popen(cmd, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                 buildOutput = proc.communicate()[0]
             except Exception, e:
                 logging.error("Unknown error. Command execution failed: %s", str(e))
