@@ -90,6 +90,7 @@ def run_qdoc(module_name):
         environment = os.environ
         environment["CCACHE_BASEDIR"] =  os.getcwd()
         environment["QT_HASH_SEED"] = "1234"
+        environment["QMAKEFLAGS"] = "CONFIG+=force_bootstrap"
         for cmd in ["/bin/sh ./configure --opensource --confirm-license --release".split()
                    , "make sub-src-qmake_all".split()
                    , ["/bin/bash", "-c", "if [ -f src/tools/Makefile ] ; then make -Csrc/tools sub-qdoc; else make -Csrc sub-qdoc ; fi"] # build qdoc
