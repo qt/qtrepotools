@@ -10,9 +10,12 @@
 # Run this once a day (from a cron job) to keep the sanity bot's
 # git clones performing well.
 
-root=$(git config sanitybot.gitbasedir)
+instance=sanitybot
+test -n "$1" && instance=$1
+
+root=$(git config $instance.gitbasedir)
 if test -z "$root"; then
-    echo "Error: sanitybot.gitbasedir not set" >&2
+    echo "Error: $instance.gitbasedir not set" >&2
     exit 1
 fi
 cd "$root" || exit

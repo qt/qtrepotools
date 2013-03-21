@@ -13,9 +13,10 @@ use POSIX;
 use JSON;
 use File::Path;
 
-# Usage:
+# Usage: $0 [instance]
+# - default instance is 'sanitybot'
 # - configure ssh: Host, Port, User, IdentityFile
-# - configure git: git config --global sanitybot.<option> <value>
+# - configure git: git config --global <instance>}.<option> <value>
 # Valid options are:
 #   gerrithost (mandatory)
 #     Target host. The identification is done via SSH.
@@ -41,6 +42,9 @@ use File::Path;
 # - Make inviteonly actually work beyond the initial startup.
 #   See http://code.google.com/p/gerrit/issues/detail?id=1200
 
+my $instance = 'sanitybot';
+$instance = $ARGV[0] if ($#ARGV > -1);
+
 # Doing this is less expensive than calling git repeatedly.
 my %config = ();
 for (`git config -l`) {
@@ -51,7 +55,7 @@ for (`git config -l`) {
 sub getcfg($;$)
 {
   my ($key, $def) = @_;
-  my $fkey = 'sanitybot.'.$key;
+  my $fkey = $instance.'.'.$key;
   if (defined $config{$fkey}) {
     return $config{$fkey};
   } elsif (defined $def) {
