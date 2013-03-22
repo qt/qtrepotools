@@ -110,8 +110,7 @@ my %preferredBranches = (
     'qtlocation' => 'master',
     'qtpim' => 'master',
     'qtqa' => 'master',
-    'qtsystems' => 'master',
-    'qtwayland' => 'master'
+    'qtsystems' => 'master'
 );
 
 # --------------- Detect OS
