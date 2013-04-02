@@ -498,7 +498,7 @@ sub checkoutBranch
     my $currentBranch = substr($currentBranches[0], 2);
     #  We have one, no need to act.
     if ($currentBranch eq $desiredBranch) {
-        print $mod, ' is already on branch: "',$currentBranch,".\"\n";
+        print $mod, ' is already on branch: "',$currentBranch,"\".\n";
         return 1;
     }
     # Does the local branch exist?
