@@ -120,7 +120,7 @@ sub complain_spelling
 
     foreach my $line (@lines) {
         foreach my $error (@{$errors->{$line}}) {
-            &complain("$line: possible spelling error: $error", "spell", 1);
+            &complain("$line: possible spelling error: $error", "spell");
         }
     }
 }
