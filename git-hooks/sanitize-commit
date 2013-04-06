@@ -451,7 +451,7 @@ while (<DIFF>) {
             $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(def|spec|changes)$)/);
             $ctlkw_check = $tabs_check && $clike;
             # .ts files usually contain languages other than English
-            $spell_check = !defined($cfg{spell}) && ($file !~ /\.ts$/i);
+            $spell_check = !defined($cfg{spell}) && !$foreign && ($file !~ /\.ts$/i);
             $conflict_fail = defined($cfg{conflict});
             $braces = 0;
             $check_gen = 0;
