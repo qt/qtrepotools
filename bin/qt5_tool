@@ -59,7 +59,7 @@ Feel free to extend!
 Options:
   -d  Diff (over all modules, relative to root)
   -s  Status
-  -r  Reset hard
+  -r  Reset hard to upstream state
   -c  Clean
   -u  Update
   -p  Pull (for development only)
@@ -75,7 +75,7 @@ Options:
 Example use cases:
   qt5_tool -c -u -b             Clean, update and build for nightly builds
   qt5_tool -d                   Generate modules diff relative to root directory
-  qt5_tool -r                   Reset --hard of repo.
+  qt5_tool -r                   Reset repository to upstream state (hard).
   qt5_tool -p --Branch stable   Check out all repos to the stable branches
 
 qt_tool can be configured by creating a configuration file
@@ -653,7 +653,7 @@ if ( $RESET !=  0 ) {
      $patchFile->close();
      print 'Saved ', $patch, "\n";
   }
-  my @resetArgs = ('reset','--hard');
+  my @resetArgs = ('reset', '--hard', '@{upstream}');
   runGitAllModules(\@resetArgs, $RUN_GIT_FAILMODE_IGNORE);
 }
 
