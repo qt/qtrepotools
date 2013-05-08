@@ -522,32 +522,6 @@ sub checkoutBranch
     return 1;
 }
 
-sub buildWebKit
-{
-    my $webkit = 'qtwebkit';
-    chdir($webkit) or die ('Failed to chdir from' . $rootDir . ' to "' . $webkit . '":' . $!);
-    my $webOutDir = File::Spec->catfile($rootDir, $webkit, 'WebKitBuild');
-    print 'Setting WEBKITOUTPUTDIR: ', $webOutDir, "\n";
-    $ENV{'WEBKITOUTPUTDIR'} = $webOutDir;
-    if ($os == $OS_WINDOWS) { # get bison from mother repository
-        my $toolsPath = File::Spec->catfile($rootDir, 'gnuwin32', 'bin');
-        my $path = $ENV{'PATH'};
-        $path .= ';' unless $path =~ /;$/; # SDKs create trailing semicolons
-        $path .= $toolsPath;
-        print 'Adding tools to path: ', $toolsPath, "\n";
-        $ENV{'PATH'} = $path;
-    }
-    my $script = File::Spec->catfile($rootDir, $webkit, 'Tools', 'Scripts', 'build-webkit');
-    my $qmake = File::Spec->catfile($rootDir, 'qtbase', 'bin', 'qmake');
-    $qmake .= '.exe' if ($os == $OS_WINDOWS);
-    my @args = ($script, '--qt', '--no-netscape-plugin');
-    push (@args, '--no-webkit2') if $os == $OS_WINDOWS;
-    push (@args, '--qmake=' . $qmake, '--makeargs=' . join(' ', @makeArgs));
-    push (@args, '--release') unless grep('-debug', split(' ', readQt5ToolConfig('configureArguments')));
-    executeCheck('perl', @args);
-    chdir($rootDir);
-}
-
 # --------------- MAIN: Parse arguments
 
 $Getopt::ignoreCase = 0;
@@ -864,6 +838,7 @@ if ( $BUILD !=  0 ) {
     my @configureArguments;
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
+    push(@configureArguments, "-skip qtwebkit") if not $BUILD_WEBKIT;
     $makeInstallRequired = grep(/^-prefix$/, @configureArguments);
 #   --- Shadow builds: Remove and re-create directory
     my $shadowBuildDir = shadowBuildFolder();
@@ -891,10 +866,6 @@ if ( $BUILD + $MAKE !=  0) {
 #   Run a global make for non-shadow developer build, else call 'build'.
     executeCheck($make, @makeArgs);
 } # MAKE
-
-if ( $BUILD_WEBKIT !=  0) {
-    buildWebKit();
-}
 
 if ( $BUILD && $makeInstallRequired ) {
     print 'Installing Qt 5 from ',$rootDir,"\n";
