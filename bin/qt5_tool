@@ -838,7 +838,10 @@ if ( $BUILD !=  0 ) {
     my @configureArguments;
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
-    push(@configureArguments, "-skip qtwebkit") if not $BUILD_WEBKIT;
+    if (!$BUILD_WEBKIT) {
+        push(@configureArguments, "-skip");
+        push(@configureArguments, "qtwebkit");
+    }
     $makeInstallRequired = grep(/^-prefix$/, @configureArguments);
 #   --- Shadow builds: Remove and re-create directory
     my $shadowBuildDir = shadowBuildFolder();
