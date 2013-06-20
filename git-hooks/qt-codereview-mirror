@@ -1,0 +1,63 @@
+#! /bin/bash
+# Copyright (C) 2013 Digia Plc and/or its subsidiary(-ies).
+# Contact: http://www.qt-project.org/legal
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+set -e # exit on any error
+
+# FIXME: use git config for that
+MIRROR_ROOT=/data/repos
+GIT_BIN=/usr/bin/git
+UPDATE_LOCK=$HOME/.update_codereview_lock
+
+# don't retry; pronounce 1h+ old locks as dead
+lockfile -r 0 -l 3600 $UPDATE_LOCK
+trap 'rm -f $UPDATE_LOCK' EXIT
+
+cd $MIRROR_ROOT
+
+# first mark all mirrors as deletable
+for i in `find -type d -name '*.git' -prune | cut -c3-`; do
+    touch $i/delete-me
+done
+
+# then get a current list of projects
+rawproj=`ssh -p 29418 codereview.qt-project.org gerrit ls-projects`
+allproj=`echo "$rawproj" | grep -v '^\{graveyard\}/'`
+# this test ensures that the list is complete, identified by the trailing graveyard projects
+if test x"$allproj" = x"$rawproj"; then
+    echo "List of projects from gerrit is incomplete." >&2
+    exit 1
+fi
+
+# then create the respective mirrors
+for i in `echo "$allproj" | grep -v '^All-'`; do (
+    mkdir -p $i.git
+    cd $i.git
+    rm -f delete-me
+    test -f config || $GIT_BIN init --bare
+    $GIT_BIN config remote.origin.fetch '+refs/heads/*:refs/heads/*' heads
+    $GIT_BIN config remote.origin.fetch '+refs/staging/*:refs/staging/*' staging
+    $GIT_BIN config remote.origin.url "ssh://codereview.qt-project.org:29418/$i.git"
+); done
+
+# then update all active mirrors and purge the orphaned ones
+for i in `find -type d -name '*.git' -prune | cut -c3-`; do (
+    if test -f $i/delete-me; then
+        rm -rf $i
+    else
+        cd $i
+        if ! test -s HEAD; then
+            echo "Note: HEAD of $i is bogus." >&2
+            echo "ref: refs/heads/master" > HEAD
+        fi
+        $GIT_BIN remote show origin | sed -n 's,^  HEAD branch: ,ref: refs/heads/,p' > new-HEAD
+        test -s new-HEAD && mv new-HEAD HEAD || echo "Cannot obtain HEAD for $i" >&2
+        $GIT_BIN fetch -p -q -u origin
+#        $GIT_BIN gc
+        chown -R --reference $MIRROR_ROOT .
+    fi
+); done
