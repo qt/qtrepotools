@@ -1,0 +1,214 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+
+# Copyright (C) 2013 Digia Plc and/or its subsidiary(-ies).
+# Contact: http://www.qt-project.org/legal
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+import os
+import sys
+import logging
+import subprocess
+import re
+
+DEFAULT_MODULE_LIST = [
+    'qtactiveqt',
+    'qtbase',
+    'qtdeclarative',
+    'qtdoc',
+    'qtgraphicaleffects',
+    'qtimageformats',
+    'qtjsbackend',
+    'qtmultimedia',
+    'qtquickcontrols',
+    'qtquick1',
+    'qtscript',
+    'qtsensors',
+    'qtserialport',
+    'qtsvg',
+    'qttools',
+    'qtwebkit',
+    'qtwebkit-examples',
+    'qtxmlpatterns',
+    'qtx11extras',
+    ]
+
+fnull = open(os.devnull, "w")
+
+class colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+
+
+# Replace all occurrences of searchExp in one file
+def replaceInFile(file, searchExp, replaceExp):
+    import fileinput
+    for line in fileinput.input(file, inplace=1):
+        line = re.sub(searchExp, replaceExp, line)
+        sys.stdout.write(line)
+
+# Reset module to destination branch
+def reset_module(module, config):
+    opts = {}
+    opts['to'] = config.branch_to
+    try:
+        git_checkout = "git checkout %(to)s" %opts
+        subprocess.check_call(git_checkout.split(), stdout=fnull)
+        git_reset = "git reset --hard origin/%(to)s" %opts
+        subprocess.check_call(git_reset.split(), stdout=fnull, stderr=fnull)
+    except Exception as e:
+        logging.error("Git reset failed: %s", str(e))
+        return False
+    return True
+
+# Run git merge for one module
+def do_merge(module, config):
+    opts = {}
+    opts['from'] = config.branch_from
+    opts['to'] = config.branch_to
+    try:
+        git_merge = "git merge origin/%(from)s --no-edit --no-ff" %opts
+        ret = subprocess.call(git_merge.split(), stdout=fnull)
+        if ret != 0:
+            print("Module $s failed to merge, manual merge needed." % module)
+            return False
+
+        # Make sure we get a change-id as git merge doesn't generate it for us
+        git_amend = "git commit --amend --no-edit"
+        subprocess.check_call(git_amend.split(), stdout=fnull)
+
+    except Exception as e:
+        logging.error("Merge failed: %s", str(e))
+        return False
+
+    return True
+
+# Change the version number in the .qmake.conf file to a given string
+def update_qmake_conf(module, version):
+    fileName = ".qmake.conf"
+    replaceInFile(fileName, "5\..\..", version)
+    cmd_git_status = "git status".split()
+
+    status = subprocess.check_output(cmd_git_status).decode('utf-8')
+    print(status)
+    if status.find(fileName) < 0:
+        return False
+
+    cmd_git_add = "git add .qmake.conf".split()
+    subprocess.check_call(cmd_git_add, stdout=fnull)
+    cmd_git_commit = ['git', 'commit', '-m', 'Update module version to %s' % version]
+    subprocess.check_call(cmd_git_commit, stdout=fnull)
+    return True
+
+# Run git push to the destination branch for one module
+def push_gerrit(module, config):
+    subprocess.call(["git", "show"])
+    print('\n"%s" was successfully updated and merged' % module)
+    confirm = input('Push merge? [Y/n] ')
+    if len(confirm) == 0 or confirm[0].lower() == 'y':
+        output = subprocess.check_output(('git push gerrit HEAD:refs/for/%s' % config.branch_to).split()).decode('utf-8')
+        #url = re.search("https.*", output).group(0).strip()
+        #print(url)
+
+        #GERRIT_CHANGE_ID=$(echo "$GIT_PUSH" | sed 's/.*https:\/\/codereview.qt-project.org\/\(.*\)/\;tx;d;:x')
+        #echo "ChangeId: $GERRIT_CHANGE_ID"
+        # if we had gerrit 2.4, we could do this:
+        #for reviewer in
+        #   sh codereview.qt-project.org gerrit set-reviewers --add jedrzej.nowacki@digia.com 49938
+
+    else:
+        print(colors.WARNING + "Merge not pushed." + colors.ENDC)
+
+# Perform merge and push it for one module
+def merge(module, config):
+    push_required = False
+    if config.merge:
+        if not do_merge(module, config):
+            return False
+        push_required = True
+
+    if len(config.version) > 0:
+        print('Updating .qmake.conf for', module)
+        if update_qmake_conf(module, config.version):
+            push_required = True
+
+    if push_required:
+        push_gerrit(module, config)
+    return True
+
+# Iterate over all modules (either default or passed with -m option)
+def process_modules(config):
+    if config.list_modules:
+        print("Modules: ", config.modules)
+
+    manual_merges = []
+
+    for module in config.modules.split():
+        print("\nModule: " + colors.GREEN + module + colors.ENDC)
+        if not os.path.isdir(module):
+            print("Directory '%s' does not exist. Skipping..." % module)
+            continue
+        try:
+            os.chdir(module)
+            cmd_git_fetch = ["git", "fetch"]
+            subprocess.check_call(cmd_git_fetch, stdout=fnull, stderr=fnull)
+
+            cmd_git_cherry = ["git", "cherry", "origin/" + config.branch_to, "origin/" + config.branch_from, "-v"]
+            cherry_output = subprocess.check_output(cmd_git_cherry).decode('utf-8').strip()
+
+            change_count = 0
+            if len(cherry_output) > 0:
+                change_count = len(cherry_output.split('\n'))
+
+            if config.status:
+                print(cherry_output)
+                print(colors.GREEN, change_count, colors.ENDC, "patches to be merged in", module, "\n")
+
+            if config.reset or config.merge or len(config.version):
+                reset_module(module, config)
+
+            if change_count > 0:
+                if not merge(module, config):
+                    manual_merges.append(module)
+
+            os.chdir("..")
+        except Exception as e:
+            logging.error("Command execution failed: %s", str(e))
+            import traceback
+            traceback.print_exc(file=sys.stdout)
+    if len(manual_merges):
+        print("Modules failed to merge: ", manual_merges)
+
+
+if __name__== "__main__":
+    class Config(object): pass
+    config = Config()
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="git-qt-merge-branches",
+        description="Merge branches for the Qt Project")
+
+    parser.add_argument('-s', '--status', action="store_true", help='show the status (which patches will be merged)')
+    parser.add_argument('-d', '--merge', action="store_true", help='do the merge')
+    parser.add_argument('-m', '--modules', type=str, default=" ".join(DEFAULT_MODULE_LIST), help='override the list of modules (eg. -m "qtbase qtdeclarative")')
+    parser.add_argument('-l', '--list-modules', action="store_true", help='list the modules to be merged and exit')
+    parser.add_argument('--reset', action="store_true", help='reset to origin/to_branch. this is implicit in the merge command')
+    parser.add_argument('-f', '--branch-from', type=str, default='stable', help='from which branch to merge')
+    parser.add_argument('-t', '--branch-to', type=str, default='dev', help='the target branch')
+    parser.add_argument('-v', '--version', type=str, default='', help='set version in .qmake.conf to given version string')
+    args = parser.parse_args(namespace=config)
+
+    logging.basicConfig(format='%(levelname)s: %(message)s')
+    print("Qt Project merge tool")
+
+    if not config.status and not config.merge and not config.reset and not len(config.version):
+        parser.print_help()
+    else:
+        process_modules(config)
