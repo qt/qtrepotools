@@ -105,12 +105,9 @@ EOF
 my %preferredBranches = (
     'qtrepotools' => 'master',
 #   -- Unmaintained modules as of 4.12.2012. Qt3D currently only has 'dev'
-    'qtconnectivity' => 'master',
     'qtfeedback' => 'master',
-    'qtlocation' => 'master',
     'qtpim' => 'master',
     'qtqa' => 'master',
-    'qtsystems' => 'master'
 );
 
 # --------------- Detect OS
