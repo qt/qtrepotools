@@ -152,6 +152,7 @@ def merge(module, config):
 def process_modules(config):
     if config.list_modules:
         print("Modules: ", config.modules)
+        return;
 
     manual_merges = []
 
@@ -213,7 +214,7 @@ if __name__== "__main__":
     logging.basicConfig(format='%(levelname)s: %(message)s')
     print("Qt Project merge tool")
 
-    if not config.status and not config.merge and not config.reset and not len(config.version):
+    if not config.status and not config.merge and not config.reset and not config.list_modules and not len(config.version):
         parser.print_help()
     else:
         process_modules(config)
