@@ -206,7 +206,7 @@ close MSG;
 printerr;
 
 if ($revert1 && $revert2 && !$nonrevert) {
-    &complain("Revert without justification", "revert", 1);
+    &complain("Revert without explanation", "revert", 1);
 }
 # These need to be delayed, because at the time they are found the subject is not known yet.
 if ($badauthor) {
