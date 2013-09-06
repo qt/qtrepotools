@@ -23,7 +23,6 @@ DEFAULT_MODULE_LIST = [
     'qtdoc',
     'qtgraphicaleffects',
     'qtimageformats',
-    'qtjsbackend',
     'qtmultimedia',
     'qtquickcontrols',
     'qtquick1',
