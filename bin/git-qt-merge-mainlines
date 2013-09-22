@@ -19,10 +19,13 @@ import re
 DEFAULT_MODULE_LIST = [
     'qtactiveqt',
     'qtbase',
+    'qtconnectivity',
     'qtdeclarative',
     'qtdoc',
     'qtgraphicaleffects',
     'qtimageformats',
+    'qtlocation',
+    'qtmacextras',
     'qtmultimedia',
     'qtquickcontrols',
     'qtquick1',
@@ -33,6 +36,7 @@ DEFAULT_MODULE_LIST = [
     'qttools',
     'qtwebkit',
     'qtwebkit-examples',
+    'qtwinextras',
     'qtxmlpatterns',
     'qtx11extras',
     ]
