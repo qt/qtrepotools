@@ -18,6 +18,7 @@ import re
 
 DEFAULT_MODULE_LIST = [
     'qtactiveqt',
+    'qtandroidextras',
     'qtbase',
     'qtconnectivity',
     'qtdeclarative',
