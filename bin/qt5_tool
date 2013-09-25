@@ -85,7 +85,6 @@ by adding a key postfixed by a dash and the repository folder base name.
 Use 'true', '1' for Boolean keys.
 Supported keys:
 
-developerBuild:     Developer build (Boolean)
 initArguments:      Arguments to init-repository for -q.
 codeReviewUser:     User name for code review (Gerrit)
 Branch:             'dev', 'stable' or other
@@ -208,7 +207,7 @@ $USAGE =~ s/%CONFIGFILE%/$configFile/; # Replace placeholder.
 
 my @MODULES = ();
 
-my ($developerBuildConfigKey, $branchConfigKey) = ('developerBuild', 'branch');
+my ($branchConfigKey) = ('branch');
 
 # --- Execute a command and print to log.
 sub execute
@@ -563,7 +562,6 @@ if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) 
     print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
     print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
     print $configFileHandle $branchConfigKey, '=', $newBranch,"\n";
-    print $configFileHandle $developerBuildConfigKey, "=true\n" if $newDeveloperBuild;
     $configFileHandle->close();
     print "Wrote '",$configFile, "'\n\n";
 }
@@ -574,7 +572,6 @@ my $codeReviewUser = readQt5ToolConfig('codeReviewUser');
 # --------------- Bootstrap
 
 if ( $BOOTSTRAP != 0 ) {
-    my $developerBuild = readQt5ToolConfigBool($developerBuildConfigKey);
     my $targetFolder = prompt('Enter target folder', 'qt-5');
     my @initOptions;
     push (@initOptions, '--codereview-username=' . $codeReviewUser) if $codeReviewUser ne '';
@@ -840,6 +837,8 @@ if ( $BUILD !=  0 ) {
         push(@configureArguments, "qtwebkit");
     }
     $makeInstallRequired = grep(/^-prefix$/, @configureArguments);
+    my $developerBuildSpecified = grep(/-developer-build/, @configureArguments);
+    push(@configureArguments, '-developer-build') unless ($makeInstallRequired || $developerBuildSpecified);
 #   --- Shadow builds: Remove and re-create directory
     my $shadowBuildDir = shadowBuildFolder();
     if ($shadowBuildDir ne '') {
