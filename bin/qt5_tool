@@ -87,7 +87,7 @@ Supported keys:
 
 initArguments:      Arguments to init-repository for -q.
 codeReviewUser:     User name for code review (Gerrit)
-Branch:             'dev', 'stable' or other
+branch:             'dev', 'stable', 'release' or other
 configureArguments: Arguments to configure
 shadowBuildPostfix: Postfix to use for shadow build directory.
 
