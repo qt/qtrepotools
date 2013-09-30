@@ -40,6 +40,7 @@ my @mappings = (
         [ 'doc/src/development//[^/]+$', 'doc/src//[^/]+$' ]
     ] ],
     [ [ "qt", "qt5/qtbase" ], [
+        [ 'doc/src/development', 'qmake/doc/src' ],
     ] ],
     [ [ "qt", "qt5/qtdeclarative" ], [
         [ 'tools/qml', 'tools/qmlviewer' ]
@@ -75,6 +76,10 @@ my @mappings = (
     ], 1 ],
     [ [ "qt5/qtbase", "qt5/qttools" ], [
         [ 'qmake/library', 'src/linguist/shared' ],
+    ], 1 ],
+    [ [ "qt5/qtbase", "qt5/qtdoc" ], [
+        [ 'qmake/doc/src/snippets', 'doc/src/snippets' ],
+        [ 'qmake/doc/src', 'doc/src/development' ],
     ], 1 ]
 );
 
