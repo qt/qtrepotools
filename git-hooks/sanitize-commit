@@ -327,7 +327,7 @@ my $no_copyright = 0;
 
 sub flushFile()
 {
-    if ($no_copyright && $lineno >= 10) {
+    if ($no_copyright && $lineno > ($file =~ /^tests\/.*\.qml$/ ? 20 : 10)) {
         &complain("Missing copyright header", "copyright");
     }
     if (@style_fails) {
