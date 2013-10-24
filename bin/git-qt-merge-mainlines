@@ -167,32 +167,40 @@ def process_modules(config):
             continue
         try:
             os.chdir(module)
-            cmd_git_fetch = ["git", "fetch"]
-            subprocess.check_call(cmd_git_fetch, stdout=fnull, stderr=fnull)
+            try:
+                cmd_git_fetch = ["git", "fetch"]
+                subprocess.check_call(cmd_git_fetch, stdout=fnull, stderr=fnull)
 
-            cmd_git_cherry = ["git", "cherry", "origin/" + config.branch_to, "origin/" + config.branch_from, "-v"]
-            cherry_output = subprocess.check_output(cmd_git_cherry).decode('utf-8').strip()
+                cmd_git_cherry = ["git", "cherry", "origin/" + config.branch_to, "origin/" + config.branch_from, "-v"]
+                cherry_output = subprocess.check_output(cmd_git_cherry).decode('utf-8').strip()
 
-            change_count = 0
-            if len(cherry_output) > 0:
-                change_count = len(cherry_output.split('\n'))
+                change_count = 0
+                if len(cherry_output) > 0:
+                    change_count = len(cherry_output.split('\n'))
 
-            if config.status:
-                print(cherry_output)
-                print(colors.GREEN, change_count, colors.ENDC, "patches to be merged in", module, "\n")
+                if config.status:
+                    print(cherry_output)
+                    print(colors.GREEN, change_count, colors.ENDC, "patches to be merged in", module, "\n")
 
-            if config.reset or config.merge or len(config.version):
-                reset_module(module, config)
+                if config.reset or config.merge or len(config.version):
+                    reset_module(module, config)
 
-            if change_count > 0:
-                if not merge(module, config):
-                    manual_merges.append(module)
+                if change_count > 0:
+                    if not merge(module, config):
+                        manual_merges.append(module)
 
-            os.chdir("..")
+            except Exception as e:
+                logging.error("Command execution failed: %s", str(e))
+                import traceback
+                traceback.print_exc(file=sys.stdout)
+            finally:
+                os.chdir("..")
+
         except Exception as e:
-            logging.error("Command execution failed: %s", str(e))
+            logging.error("Changing current dir failed: %s", str(e))
             import traceback
             traceback.print_exc(file=sys.stdout)
+
     if len(manual_merges):
         print("Modules failed to merge: ", manual_merges)
 
