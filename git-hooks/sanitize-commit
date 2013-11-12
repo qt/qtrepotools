@@ -352,7 +352,7 @@ my $tabs_check;
 my $ws_check;
 my $tsv_check;
 my $ctlkw_check;
-open DIFF, "git diff-tree --no-commit-id --diff-filter=ACMR --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -C -l1000 --root ".$sha1." |" or die "cannot run git: $!";
+open DIFF, "git diff-tree --patience --no-commit-id --diff-filter=ACMR --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -C -l1000 --root ".$sha1." |" or die "cannot run git: $!";
 while (<DIFF>) {
     if (/^-/) {
         if ($mixws_check) {
