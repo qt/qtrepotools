@@ -792,7 +792,7 @@ if ( $PULL !=  0 ) {
         $desiredBranch = 'dev';
         print 'No branch has been set up in ', $configFile, ' (key: ', $branchConfigKey, '), assuming ', $desiredBranch, "\n";
     }
-    my @pullArgs = ('pull');
+    my @pullArgs = ('pull', '--rebase');
     my $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY);
     die 'Pull failed'  if ($prc);
     foreach my $MOD (@MODULES) {
