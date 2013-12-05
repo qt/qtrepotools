@@ -45,6 +45,7 @@
 #include <qmetaobject.h>
 #include <qstring.h>
 #include <qtextstream.h>
+#include <qcommandlineparser.h>
 
 #include <qdebug.h>
 
@@ -156,26 +157,31 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    if (app.argc() < 2 || (app.argc() == 2 && (app.argv()[1][0] == '-'))) {
-        printf("usage: normalize [--modify] <path>\n");
-        printf("  <path> can be a single file or a directory (default: look for *.cpp recursively)");
-        printf("  Outputs all filenames that contain non-normalized SIGNALs and SLOTs\n");
-        printf("  with --modify: fix all occurrences of non-normalized SIGNALs and SLOTs\n");
-        return 1;
-    }
+    QCommandLineParser parser;
+    parser.setApplicationDescription(
+            QStringLiteral("Qt Normalize tool (Qt %1)\nOutputs all filenames that contain non-normalized SIGNALs and SLOTs")
+            .arg(QString::fromLatin1(QT_VERSION_STR)));
+    parser.addHelpOption();
+    parser.addVersionOption();
 
-    QString path;
-    if (qstrcmp(app.argv()[1], "--modify") == 0) {
+    QCommandLineOption modifyOption(QStringLiteral("modify"),
+                                    QStringLiteral("Fix all occurrences of non-normalized SIGNALs and SLOTs."));
+    parser.addOption(modifyOption);
+
+    parser.addPositionalArgument(QStringLiteral("path"),
+                                 QStringLiteral("can be a single file or a directory (in which case, look for *.cpp recursively)"));
+
+    parser.process(app);
+
+    if (parser.positionalArguments().count() != 1)
+        parser.showHelp(1);
+    QString path = parser.positionalArguments().first();
+    if (path == "-")
+        parser.showHelp(1);
+
+    if (parser.isSet(modifyOption)) {
         printFilename = false;
         modify = true;
-        path = app.argv()[2];
-    } else {
-        path = app.argv()[1];
-    }
-
-    if (path.startsWith("-")) {
-        qWarning("unknown parameter: %s", path.toLocal8Bit().constData());
-        return 1;
     }
 
     QFileInfo fi(path);
