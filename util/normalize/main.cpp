@@ -126,7 +126,6 @@ void check(const QString &fileName)
         if (bline.isEmpty())
             break;
         QString line = QString::fromLocal8Bit(bline);
-        Q_ASSERT_X(line.endsWith("\n"), "check()", fileName.toLocal8Bit().constData());
         found |= checkSignature(fileName, line, "SLOT");
         found |= checkSignature(fileName, line, "SIGNAL");
         if (modify)
