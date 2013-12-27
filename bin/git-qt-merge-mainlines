@@ -23,6 +23,7 @@ DEFAULT_MODULE_LIST = [
     'qtconnectivity',
     'qtdeclarative',
     'qtdoc',
+    'qtenginio',
     'qtgraphicaleffects',
     'qtimageformats',
     'qtlocation',
