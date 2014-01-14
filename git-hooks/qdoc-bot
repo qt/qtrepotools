@@ -79,7 +79,7 @@ def pasteKDE(data):
         conn.request("POST", "", params, headers)
         response = json.loads(conn.getresponse().read())
         logging.debug("Making a paste %s", response)
-        return "http://paste.kde.org/" + str(response['result']['id']) + "/" + str(response['result']['hash'])
+        return "http://pastebin.kde.org/" + str(response['result']['id']) + "/" + str(response['result']['hash'])
     finally:
         conn.close()
 
