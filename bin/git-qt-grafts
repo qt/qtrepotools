@@ -99,8 +99,10 @@ while (<$GIT_REVLIST>) {
 close($GIT_REVLIST);
 
 my $found_any_grafts = 0;
+mkdir("$git_dir/info");
 my $graft_file = "$git_dir/info/grafts";
 my @graft_lines;
+
 foreach my $commit (@commits) {
     # find the graft point which the commit mentions
     my $commit_msg = `git show -s --format=%b $commit`;
