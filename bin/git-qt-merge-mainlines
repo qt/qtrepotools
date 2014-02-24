@@ -38,6 +38,7 @@ DEFAULT_MODULE_LIST = [
     'qttools',
     'qtwebkit',
     'qtwebkit-examples',
+    'qtwebsockets',
     'qtwinextras',
     'qtxmlpatterns',
     'qtx11extras',
