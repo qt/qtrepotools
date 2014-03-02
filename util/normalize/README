@@ -8,9 +8,10 @@ Run it without any arguments to see the command line parameters.
 
 Typical usage on Qt:
 
-# find all files with non-normalized signal/slot connections and p4 edit them
-normalize $QTDIR/src | xargs p4 edit
+# find all files with non-normalized signal/slot connections
+normalize $QTDIR/src
 # replace all non-normalized signal/slots
 normalize --modify $QTDIR/src
-# p4 diff to see that everything is OK then submit :)
-p4 submit $QTDIR/src/...
+# "git diff" and/or "git gui" to see that everything is OK then submit :)
+cd $QTDIR/src
+git commit -a -m "Normalize signal/slot signatures"
