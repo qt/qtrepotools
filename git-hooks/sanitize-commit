@@ -91,7 +91,7 @@ sub complain()
 
 my $lineno = 0;
 my $iswip = defined($cfg{wip});
-my $revok = defined($cfg{revby});
+my $badrev = 0;
 my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
 my $parents = 0;
@@ -191,9 +191,12 @@ while (<MSG>) {
                 &complain("2nd line of log message is not empty", "log");
             }
         } else {
-            if (!$revok && /^Reviewed-by: *(pending|TBD)?$/i) {
-                &complain("Bogus or empty Reviewed-by header", "revby", 1);
-                $revok = 1;
+            if (!$badrev && /^Reviewed-by:/i) {
+                $badrev = 1;
+            }
+            if (/^\(cherry[- ]picked /) {
+                # Some bad footers are ok above cherry-pick lines.
+                $badrev = 0;
             }
         }
     }
@@ -214,6 +217,9 @@ if ($badauthor) {
 }
 if ($badcommitter) {
     &complain("Bogus committer email", "email", 1);
+}
+if ($badrev && !defined($cfg{revby})) {
+    &complain("Bogus Reviewed-by footer", "revby", 1);
 }
 
 {
