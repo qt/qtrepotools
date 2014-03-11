@@ -175,6 +175,9 @@ while (<MSG>) {
         if (/^revert(ed|ing)? (commit )?[0-9a-f]{7,40}\.?$/i) {
             &complain("Summary of revert mentions only SHA1", "log");
         }
+        if (/\bQT[A-Z]+-\d+\b/) {
+            &complain("Bug reference in summary", "log");
+        }
         if (!$iswip && $parents < 2 && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
             &complain("Apparently pushing a Work In Progress", "wip", 1);
         } elsif (!$iswip && !$badlog && length($_) < 7) {
