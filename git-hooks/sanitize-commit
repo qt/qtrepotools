@@ -92,6 +92,7 @@ sub complain()
 my $lineno = 0;
 my $iswip = defined($cfg{wip});
 my $badrev = 0;
+my $badsign = 0;
 my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
 my $parents = 0;
@@ -194,9 +195,13 @@ while (<MSG>) {
             if (!$badrev && /^Reviewed-by:/i) {
                 $badrev = 1;
             }
+            if (/^Signed-off-by:/i) {
+                $badsign = 1;
+            }
             if (/^\(cherry[- ]picked /) {
                 # Some bad footers are ok above cherry-pick lines.
                 $badrev = 0;
+                $badsign = 0;
             }
         }
     }
@@ -220,6 +225,9 @@ if ($badcommitter) {
 }
 if ($badrev && !defined($cfg{revby})) {
     &complain("Bogus Reviewed-by footer", "revby", 1);
+}
+if ($badsign) {
+    &complain("Unnecessary Signed-off-by footer", "", -1);
 }
 
 {
