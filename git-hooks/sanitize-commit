@@ -98,6 +98,7 @@ my $badsign = 0;
 my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
 my $parents = 0;
+my ($footer, $cherry) = (0, 0);
 my ($badauthor, $badcommitter) = (0, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 my %logspellerrors;
@@ -199,6 +200,12 @@ while (<MSG>) {
             if (!$badlog && $_ ne "") {
                 &complain("2nd line of log message is not empty", "log");
             }
+        } elsif ($_ eq "") {
+            $cherry = 0;
+            # Empty line following footer(s).
+            $footer = 2 if ($footer == 1);
+        } elsif ($cherry) {
+            $cherry = 0 if (/\)/);
         } else {
             if (!$badrev && /^Reviewed-by:/i) {
                 $badrev = 1;
@@ -206,10 +213,29 @@ while (<MSG>) {
             if (!$badsign && /^Signed-off-by:/i) {
                 $badsign = 1;
             }
+            my $ftr = 0;
             if (/^\(cherry[- ]picked /) {
+                $cherry = 1 if (!/\)/);
                 # Some bad footers are ok above cherry-pick lines.
                 $badrev = 0;
                 $badsign = 0;
+                # cherry-pick lines count as footers as well.
+                $ftr = 1;
+            } elsif (/^[A-Z][a-z]+(-[A-Za-z][a-z]+)+: /) {
+                $ftr = 1;
+            }
+            if ($ftr) {
+                if ($footer == 0) {
+                    # Footer following non-footer
+                    $footer = 1;
+                } elsif ($footer == 2) {
+                    # Footer following empty line(s) following footer(s)
+                    $footer = 3;
+                }
+            } else {
+                # Non-footer resets the state, assuming it was a false alert.
+                # Possibly we should make a different complaint instead.
+                $footer = 0;
             }
         }
     }
@@ -236,6 +262,9 @@ if ($badrev && !defined($cfg{revby})) {
 }
 if ($badsign) {
     &complain("Unnecessary Signed-off-by footer", "", -1);
+}
+if ($footer == 3 && !defined($cfg{footer})) {
+    &complain("Empty lines between footers", "footer");
 }
 
 {
