@@ -100,6 +100,7 @@ my $badurl = defined($cfg{url});
 my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
 my $parents = 0;
+my ($inchangelog, $changelog) = (0, "");
 my ($footer, $cherry) = (0, 0);
 my ($badauthor, $badcommitter) = (0, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
@@ -204,6 +205,7 @@ while (<MSG>) {
             }
         } elsif ($_ eq "") {
             $cherry = 0;
+            $inchangelog = 0;
             # Empty line following footer(s).
             $footer = 2 if ($footer == 1);
         } elsif ($cherry) {
@@ -233,6 +235,14 @@ while (<MSG>) {
                 $ftr = 1;
             } elsif (/^[A-Z][a-z]+(-[A-Za-z][a-z]+)+: /) {
                 $ftr = 1;
+            } elsif (/^\[change-?log\]/i) {
+                $inchangelog = 1;
+            }
+            if ($inchangelog) {
+                if (($ftr || $footer == 1) && !defined($cfg{changelog})) {
+                    &complain("No empty line between ChangeLog and footers", "changelog");
+                }
+                $changelog .= "\n".$_;
             }
             if ($ftr) {
                 if ($footer == 0) {
@@ -275,6 +285,12 @@ if ($badsign) {
 }
 if ($footer == 3 && !defined($cfg{footer})) {
     &complain("Empty lines between footers", "footer");
+}
+if (length($changelog) && !defined($cfg{changelog})) {
+    &complain("Bad form of [ChangeLog] tag", "changelog") if ($changelog !~ /^\n\[ChangeLog\]/s);
+    &complain("Missing space between ChangeLog tags and text", "changelog") if ($changelog !~ /\]\s[^\[]/s);
+    &complain("JIRA task referenced from ChangeLog", "changelog") if ($changelog =~ /\[QT[A-Z]+-\d+\]/s);
+    &complain("Current repository referenced from ChangeLog", "changelog") if ($changelog =~ /\[$repo\]/si);
 }
 
 {
