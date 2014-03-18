@@ -95,6 +95,7 @@ my $lineno = 0;
 my $iswip = defined($cfg{wip});
 my $badrev = 0;
 my $badsign = 0;
+my $badid = defined($cfg{changeid});
 my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
 my $parents = 0;
@@ -212,6 +213,10 @@ while (<MSG>) {
             }
             if (!$badsign && /^Signed-off-by:/i) {
                 $badsign = 1;
+            }
+            if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
+                $badid = 1;
+                &complain("Gerrit change id outside Change-Id footer", "changeid");
             }
             my $ftr = 0;
             if (/^\(cherry[- ]picked /) {
