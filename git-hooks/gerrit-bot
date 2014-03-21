@@ -87,9 +87,9 @@ sub printerr($)
   print STDERR $msg.".\n";
 }
 
-sub process_commit($$$$)
+sub process_commit($$$$$)
 {
-  my ($number, $project, $ref, $rev) = @_;
+  my ($number, $project, $branch, $ref, $rev) = @_;
 
   if (defined $processed{$ref}) {
     return;
@@ -98,7 +98,7 @@ sub process_commit($$$$)
   my $orig_project = $project;
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
   my ($score, $verdict);
-  if (defined $EXCLUDED_PROJECTS{$project}) {
+  if (defined($EXCLUDED_PROJECTS{$project}) || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
     $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project."\n";
     $score = 1;
     $verdict = "(skipped)";
@@ -179,6 +179,7 @@ REVIEW: while (<STATUS>) {
   defined($review) or die "cannot decode JSON string '".chomp($_)."'\n";
   my $number = $$review{'number'};
   my $project = $$review{'project'};
+  my $branch = $$review{'branch'};
   my $cps = $$review{'currentPatchSet'};
   if (defined $cps) {
     my $status = $$review{'status'};
@@ -197,7 +198,7 @@ REVIEW: while (<STATUS>) {
         }
       }
     }
-    process_commit($number, $project, $ref, $revision);
+    process_commit($number, $project, $branch, $ref, $revision);
   }
 }
 close STATUS;
@@ -210,7 +211,7 @@ while (<UPDATES>) {
     if ($type eq 'patchset-created') {
       my $chg = $$update{'change'};
       my $ps = $$update{'patchSet'};
-      process_commit($$chg{'number'}, $$chg{'project'}, $$ps{'ref'}, $$ps{'revision'});
+      process_commit($$chg{'number'}, $$chg{'project'}, $$chg{'branch'}, $$ps{'ref'}, $$ps{'revision'});
     } elsif ($type eq 'ref-updated') {
       my $rup = $$update{'refUpdate'};
       delete $skipfetch{$$rup{'project'}};
