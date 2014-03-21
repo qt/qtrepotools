@@ -367,6 +367,7 @@ my $clike;
 my $size;
 my $check_gen = 0;
 my $crlf_fail;
+my $in_plus;
 my $conflict_fail;
 my $tabs_check;
 my $ws_check;
@@ -380,6 +381,7 @@ while (<DIFF>) {
             push @deli, substr($_, 1);
             $chunk = 1;
         }
+        $in_plus = 0;
         next;
     }
     if ($lineno < 50) {
@@ -418,6 +420,7 @@ while (<DIFF>) {
                 $chunk = 1;
             }
         }
+        $in_plus = 1;
         if (!$crlf_fail && /\r\n$/) {
             $crlf_fail = 1;
             &complain("CRLF line endings", "crlf");
@@ -449,6 +452,13 @@ while (<DIFF>) {
         flushChunk() if ($chunk);
         if (/^ /) {
             $lineno++ if (!$merge || !/^ -/);
+            $in_plus = 0;
+            next;
+        }
+        if (/^\\ No newline/) {
+            if ($in_plus) {
+                &complain("No newline at end of file", "fileend") if (!defined($cfg{fileend}));
+            }
             next;
         }
         if ($merge ? /^\@\@\@ -\S+ -\S+ \+(\d+)/ : /^\@\@ -\S+ \+(\d+)/) {
@@ -473,6 +483,7 @@ while (<DIFF>) {
             $maybe_bin = 0;
             $is_submodule = 0;
             $crlf_fail = defined($cfg{crlf});
+            $in_plus = 0;
             $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
             $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
             $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
