@@ -71,6 +71,7 @@ my $INVITE_ONLY = getcfg 'inviteonly', 0;
 my $GIT_BASEDIR = getcfg 'gitbasedir';
 my $GIT_DO_FETCH = getcfg 'gitdofetch';
 my $WORKER = getcfg 'worker';
+my %EXCLUDED_PROJECTS = map { $_ => 1 } split(/\s+/, getcfg('excluded', ""));
 my $verbose = getcfg 'verbose', 0;
 
 my @gerrit = ("ssh", $GERRIT_HOST, "gerrit");
@@ -96,52 +97,59 @@ sub process_commit($$$$)
   $processed{$ref} = 1;
   my $orig_project = $project;
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
-  $verbose and print "===== ".strftime("%c", localtime(time()))." ===== processing commit ".$ref." in ".$project."\n";
-  my $GIT_DIR = $GIT_BASEDIR."/".$project.".git";
-  if (!-d $GIT_DIR) {
-    mkpath $GIT_DIR or die "cannot create ".$GIT_DIR.": ".$!;
-  }
-  chdir $GIT_DIR or die "cannot change to ".$GIT_DIR.": ".$!;
-  if ($GIT_DO_FETCH) {
-    if (!-d $GIT_DIR."/refs/remotes" and `git config remote.origin.url` eq "") {
-      if (!-d $GIT_DIR."/refs") {
-        if (system("git", "init", "--bare")) {
-          printerr "Init of ".$project." failed";
+  my ($score, $verdict);
+  if (defined $EXCLUDED_PROJECTS{$project}) {
+    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project."\n";
+    $score = 1;
+    $verdict = "(skipped)";
+  } else {
+    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== processing commit ".$ref." in ".$project."\n";
+    my $GIT_DIR = $GIT_BASEDIR."/".$project.".git";
+    if (!-d $GIT_DIR) {
+      mkpath $GIT_DIR or die "cannot create ".$GIT_DIR.": ".$!;
+    }
+    chdir $GIT_DIR or die "cannot change to ".$GIT_DIR.": ".$!;
+    if ($GIT_DO_FETCH) {
+      if (!-d $GIT_DIR."/refs/remotes" and `git config remote.origin.url` eq "") {
+        if (!-d $GIT_DIR."/refs") {
+          if (system("git", "init", "--bare")) {
+            printerr "Init of ".$project." failed";
+            return;
+          }
+        }
+        if (system("git", "remote", "add", "origin", 'ssh://'.$GERRIT_HOST.'/'.$project)) {
+          printerr "Adding remote for ".$project." failed";
           return;
         }
       }
-      if (system("git", "remote", "add", "origin", 'ssh://'.$GERRIT_HOST.'/'.$project)) {
-        printerr "Adding remote for ".$project." failed";
+      my @mainlines;
+      if (!defined $skipfetch{$project}) {
+        # Update refs, otherwise the selective fetches start from scratch each time.
+        chomp(@mainlines = `git config remote.origin.fetch`);
+        $skipfetch{$project} = 1;
+      }
+      if (system("git", "fetch", "-f", "origin", $ref.":refs/changes/".$number, @mainlines)) {
+        printerr "GIT fetch of ".$ref." from ".$project." failed";
         return;
       }
+      $verbose and print "===== ".strftime("%c", localtime(time()))." ===== fetched change\n";
     }
-    my @mainlines;
-    if (!defined $skipfetch{$project}) {
-      # Update refs, otherwise the selective fetches start from scratch each time.
-      chomp(@mainlines = `git config remote.origin.fetch`);
-      $skipfetch{$project} = 1;
+    my $worker = $WORKER;
+    $worker =~ s/\@SHA1\@/$rev/g;
+    open VERDICT, $worker." 2>&1 |" or die "cannot run worker: ".$!;
+    my @verdict = <VERDICT>;
+    close VERDICT;
+    die "Worker for commit ".$ref." in ".$project." crashed with signal ".$?.".\n" if ($? & 127);
+    $score = $? >> 8;
+    die "Worker returned invalid score ".$score." for commit ".$ref." in ".$project.".\n" if ($score > 20);
+    $score -= 10;
+    $verdict = "@verdict";
+    if (length($verdict) > 20000) {
+      $verdict = substr($verdict, 0, 20000)."\n\n**** Output truncated. Fix the problems above to get more output.\n";
     }
-    if (system("git", "fetch", "-f", "origin", $ref.":refs/changes/".$number, @mainlines)) {
-      printerr "GIT fetch of ".$ref." from ".$project." failed";
-      return;
-    }
-    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== fetched change\n";
+    $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
+    $verdict =~ s/^\s+|\s+$//g;
   }
-  my $worker = $WORKER;
-  $worker =~ s/\@SHA1\@/$rev/g;
-  open VERDICT, $worker." 2>&1 |" or die "cannot run worker: ".$!;
-  my @verdict = <VERDICT>;
-  close VERDICT;
-  die "Worker for commit ".$ref." in ".$project." crashed with signal ".$?.".\n" if ($? & 127);
-  my $score = $? >> 8;
-  die "Worker returned invalid score ".$score." for commit ".$ref." in ".$project.".\n" if ($score > 20);
-  $score -= 10;
-  my $verdict = "@verdict";
-  if (length($verdict) > 20000) {
-    $verdict = substr($verdict, 0, 20000)."\n\n**** Output truncated. Fix the problems above to get more output.\n";
-  }
-  $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
-  $verdict =~ s/^\s+|\s+$//g;
   my @args = ();
 #  push @args, ("--project", $project);
   push @args, ("--project", $orig_project);  # XXX Workaround QTQAINFRA-381
