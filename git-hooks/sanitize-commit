@@ -40,6 +40,7 @@ if (defined $config{flags}) {
 }
 my $fail = 0;
 my $printed = $gerrit;
+my $complained = 0;
 our $file = "";  # 'our' for usage of 'local'
 my $fail_file = "-";
 my $summary;
@@ -63,6 +64,7 @@ sub complain()
         print "***\n*** Suspicious changes in commit ".$sha1." (".$summary."):\n";
         $printed = 1;
     }
+    $complained = 1;
     if (length($file)) {
         if ($file ne $fail_file) {
             print $elpfx.$lpfx.$file.":\n";
@@ -572,6 +574,10 @@ if (%footnotes) {
     for my $fn (sort keys %footnotes) {
         print $lpfx.$fn."\n";
     }
+}
+
+if ($complained) {
+    print $elpfx.$lpfx."See http://qt-project.org/wiki/Early-Warning-System for explanations.\n";
 }
 
 exit ($gerrit ? (!$fail ? 11 : (10 - $fail)) : $fail)
