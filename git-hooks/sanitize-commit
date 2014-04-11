@@ -235,7 +235,7 @@ while (<MSG>) {
                 $ftr = 1;
             } elsif (/^[A-Z][a-z]+(-[A-Za-z][a-z]+)+: /) {
                 $ftr = 1;
-            } elsif (/^\[change-?log\]/i) {
+            } elsif (/^(\[change-?log\]|change-?log: )/i) {
                 $inchangelog = 1;
             }
             if ($inchangelog) {
