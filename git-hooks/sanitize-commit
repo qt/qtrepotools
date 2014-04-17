@@ -419,7 +419,7 @@ sub flushFile()
 my $merge;
 my $new_file;
 my $maybe_bin;
-my $is_submodule;
+my $is_special;
 my $clike;
 my $size;
 my $check_gen = 0;
@@ -512,7 +512,7 @@ while (<DIFF>) {
             $in_plus = 0;
             next;
         }
-        if (/^\\ No newline/) {
+        if (!$is_special && /^\\ No newline/) {
             if ($in_plus) {
                 &complain("No newline at end of file", "fileend") if (!defined($cfg{fileend}));
             }
@@ -538,7 +538,7 @@ while (<DIFF>) {
             my $foreign = ($file =~ /\/3rdparty\//);
             $new_file = 0;
             $maybe_bin = 0;
-            $is_submodule = 0;
+            $is_special = 0;
             $crlf_fail = defined($cfg{crlf});
             $in_plus = 0;
             $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
@@ -566,11 +566,11 @@ while (<DIFF>) {
             }
             next;
         }
-        if ($_ eq "new file mode 160000\n") {
-            $is_submodule = 1;
+        if ($_ eq "new file mode 160000\n" || $_ eq "new file mode 120000\n") {
+            $is_special = 1;
             next;
         }
-        if (!$is_submodule && /^index ([\w,]+)\.\.(\w+)(?! 160000)( |$)/) {
+        if (!$is_special && /^index ([\w,]+)\.\.(\w+)(?! 160000)( |$)/) {
             my ($old_trees, $new_tree) = ($1, $2);
             #print "*** got index $old_trees $new_tree.\n";
             $size = `git cat-file -s $new_tree`;
