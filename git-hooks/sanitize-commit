@@ -226,7 +226,7 @@ while (<MSG>) {
                 &complain("URL pointing to Gerrit or JIRA", "url");
             }
             my $ftr = 0;
-            if (/^\(cherry[- ]picked /) {
+            if (/^\((partial(ly)? )?(cherry[- ]pick|(back)?port)(ed)? /) {
                 $cherry = 1 if (!/\)/);
                 # Some bad footers are ok above cherry-pick lines.
                 $badrev = 0;
