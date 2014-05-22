@@ -1,5 +1,6 @@
 #! /usr/bin/perl
-# Copyright (C) 2013 Digia Plc and/or its subsidiary(-ies).
+# Copyright (C) 2014 Digia Plc and/or its subsidiary(-ies).
+# Copyright (C) 2014 Petroules Corporation.
 # Contact: http://www.qt-project.org/legal
 #
 # You may use this file under the terms of the 3-clause BSD license.
@@ -93,6 +94,8 @@ sub complain()
 }
 
 my $lineno = 0;
+my $clike = 0;
+my $qmake = 0;
 my $iswip = defined($cfg{wip});
 my $badrev = 0;
 my $badsign = 0;
@@ -159,6 +162,53 @@ sub check_spelling
 
     if ($complain) {
         complain_spelling($out);
+    }
+}
+
+sub check_apple_terminology
+{
+    my ($text) = @_;
+
+    if ($clike) {
+        if (/\bQ_OS_MAC\b.*&&.*!.*\bQ_OS_IOS\b/) {
+            &complain("$lineno: use of deprecated idiom 'defined(Q_OS_MAC) && !defined(Q_OS_IOS)';" .
+                      "use Q_OS_OSX instead", "terminology");
+        }
+
+        # Not invalid, but remind people about how the unfortunately named Q_OS_MAC must be used
+        if (/\bQ_OS_MAC\b/) {
+            &complain("$lineno: Q_OS_MAC covers both OS X and iOS; if you meant only OS X, use Q_OS_OSX",
+                      "", -1);
+        }
+
+        if (/\bQ_OS_MACX\b/) {
+            &complain("$lineno: using deprecated define Q_OS_MACX; use Q_OS_OSX instead", "terminology");
+        }
+    } elsif ($qmake) {
+        # check qmake scopes
+        if (/\bmac\s*:\s*!\s*ios\b/) {
+            &complain("$lineno: use of deprecated idiom 'mac:!ios', use 'osx' instead",
+                      "terminology");
+        }
+
+        # Not invalid, but remind people about how the unfortunately named 'mac' must be used
+        if (/\bmac\b/) {
+            &complain("$lineno: possible use of qmake scope 'mac': this covers both OS X and iOS;" .
+                      " if you meant only OS X, use 'osx'", "", -1);
+        }
+
+        # Match the word macx but avoid matching macx- and macx* since these are valid for mkspecs
+        if (/\bmacx\b(?![-*])/) {
+            &complain("$lineno: using deprecated qmake scope 'macx'; use 'osx' instead",
+                      "terminology");
+        }
+    }
+
+    # Note that Mac(intosh)? is the name of the hardware that runs the OS X operating system and is
+    # valid for use, however users are likely to use Mac(intosh)? to incorrectly refer to the OS so
+    # we'll still flag it
+    if (/\bmac(([\s_-]*os)([\s_-]*x)?)?\b/i or /\bmacintosh\b/i) {
+        &complain("$lineno: possible incorrect use of Apple-related terminology", "", -1);
     }
 }
 
@@ -264,6 +314,8 @@ while (<MSG>) {
     if ($spell_check) {
         check_spelling($_, \%logspellerrors);
     }
+
+    check_apple_terminology($_);
 }
 close MSG;
 printerr;
@@ -421,7 +473,6 @@ my $merge;
 my $new_file;
 my $maybe_bin;
 my $is_special;
-my $clike;
 my $size;
 my $check_gen = 0;
 my $crlf_fail;
@@ -506,6 +557,7 @@ while (<DIFF>) {
         if ($spell_check) {
             check_spelling($_);
         }
+        check_apple_terminology($_);
     } else {
         flushChunk() if ($chunk);
         if (/^ /) {
@@ -536,6 +588,7 @@ while (<DIFF>) {
             $file = $1;
             #print "*** got file ".$file.".\n";
             $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|qdoc|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
+            $qmake = ($file =~ /\.pr[filo]$/i);
             my $foreign = ($file =~ /\/3rdparty\//);
             $new_file = 0;
             $maybe_bin = 0;
