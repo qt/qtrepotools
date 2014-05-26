@@ -165,7 +165,7 @@ sub load_aliases
     foreach (@gitconfigs) {
         if (/^gpush\.(remote|ref-from|ref-to) (\w+)/) {
             $self->{$1} = $2;
-        } elsif (/^gpush\.alias.([^ ]*) (.+)/) {
+        } elsif (/^gpush\.alias\.([^ ]*) (.+)/) {
             $self->{'aliases'}->{$1} = $2;
         } # else ignore
     }
