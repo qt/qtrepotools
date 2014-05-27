@@ -105,6 +105,20 @@ sub format_cmd(@)
     return join(' ', map { /\s/ ? '"' . $_ . '"' : $_ } @_);
 }
 
+sub read_git_line(@)
+{
+    print "+ " . format_cmd('git', @_) . "\n" if ($verbose);
+    open PROC, '-|', 'git', @_
+        or die("Failed to run " . format_cmd('git', @_) . ": $!\n");
+    my $line = <PROC>;
+    if (defined($line)) {
+        chomp $line ;
+        print "- $line\n" if ($verbose);
+    }
+    close PROC;
+    return $line;
+}
+
 sub parse_arguments(@)
 {
     while (scalar @_) {
@@ -220,17 +234,13 @@ sub determine_target()
     if ($ref_to eq "") {
         my $ref = $ref_from;
         $ref =~ s/[~^].*$//;
-        my $sref = `git symbolic-ref -q $ref`;
-        if ($? == 0) {
-            chomp $sref;
-            $ref = $sref;
-        }
+        my $sref = read_git_line("symbolic-ref", "-q", $ref);
+        $ref = $sref if ($? == 0);
         $ref =~ s,^refs/heads/,,;
-        `git rev-parse --verify -q refs/heads/$ref`;
+        read_git_line("rev-parse", "--verify", "-q", "refs/heads/".$ref);
         die "Cannot detect tracking branch, $ref is not a valid ref.\n" if ($? != 0);
-        $ref_to = `git config branch.$ref.merge`;
+        $ref_to = read_git_line("config", "branch.$ref.merge");
         die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
-        chomp $ref_to;
         $ref_to =~ s,^refs/heads/,,;
     }
     if ($ref_to =~ m,^refs/for/,) {
