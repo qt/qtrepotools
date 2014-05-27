@@ -71,8 +71,7 @@ Description:
 
 Options:
     -v, --verbose
-        Shows the alias resolving, and final 'git push' command as a
-        comma-separated list of arguments.
+        Shows the alias resolving, and external command invocations.
 
     --aliases
         Reports all registered aliases.
@@ -100,6 +99,11 @@ my @reviewers = ();
 my @CCs = ();
 
 my @arguments = ();
+
+sub format_cmd(@)
+{
+    return join(' ', map { /\s/ ? '"' . $_ . '"' : $_ } @_);
+}
 
 sub parse_arguments(@)
 {
@@ -242,7 +246,7 @@ sub push_patches()
     push @gitcmd, @arguments;
     push @gitcmd, $remote, "$ref_from:$ref_to";
 
-    print '+'.join(',', @gitcmd)."\n" if ($verbose);
+    print '+ '.format_cmd(@gitcmd)."\n" if ($verbose);
     exit system(@gitcmd);
 }
 
