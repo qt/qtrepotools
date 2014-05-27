@@ -526,6 +526,13 @@ sub changes_from_commits($)
     return [ map { $$_{change} } @$commits ];
 }
 
+sub get_1st_commit($)
+{
+    my ($parents) = @_;
+
+    return @$parents ? $$parents[0] : 'ROOT';
+}
+
 sub get_1st_parent($)
 {
     my ($commit) = @_;
@@ -1189,6 +1196,8 @@ sub analyze_local_branch($)
         $seen{$changeid} = $commit;
     }
 
+    # Iff we have a detached HEAD, we don't know the tip yet, because
+    # we resolve only named branches. In other cases, this is a no-op.
     $local_tip = $$raw_commits[-1]{id};
 
     my $commits = get_commits_free($local_tip);
