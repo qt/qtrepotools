@@ -210,7 +210,7 @@ sub add_reviewers()
     }
 }
 
-sub push_patches()
+sub determine_target()
 {
     # Detect tracking branch if ref-to is not set
     if ($ref_to eq "") {
@@ -234,7 +234,10 @@ sub push_patches()
     } else {
         $ref_to = "refs/for/".$ref_to;
     }
+}
 
+sub push_patches()
+{
     my @gitcmd = ("git", "push");
     push @gitcmd, @arguments;
     push @gitcmd, $remote, "$ref_from:$ref_to";
@@ -246,4 +249,5 @@ sub push_patches()
 load_aliases();
 parse_arguments(@ARGV);
 add_reviewers();
+determine_target();
 push_patches();
