@@ -199,6 +199,17 @@ sub lookup_alias($)
     return $user;
 }
 
+sub add_reviewers()
+{
+    if (@reviewers || @CCs) {
+        my @dudes = ();
+        push @dudes, "--receive-pack=git receive-pack";
+        push @dudes, map { " --reviewer=$_" } @reviewers;
+        push @dudes, map { " --cc=$_" } @CCs;
+        push @arguments, join('', @dudes); # Single argument to git push
+    }
+}
+
 sub push_patches()
 {
     # Detect tracking branch if ref-to is not set
@@ -224,16 +235,8 @@ sub push_patches()
         $ref_to = "refs/for/".$ref_to;
     }
 
-    my @dudes = ();
-    if (@reviewers || @CCs) {
-        push @dudes, "--receive-pack=git receive-pack";
-        push @dudes, map { " --reviewer=$_" } @reviewers;
-        push @dudes, map { " --cc=$_" } @CCs;
-    }
-
     my @gitcmd = ("git", "push");
     push @gitcmd, @arguments;
-    push @gitcmd, join('', @dudes) if (scalar @dudes); # Single argument to git push
     push @gitcmd, $remote, "$ref_from:$ref_to";
 
     print '+'.join(',', @gitcmd)."\n" if ($verbose);
@@ -242,4 +245,5 @@ sub push_patches()
 
 load_aliases();
 parse_arguments(@ARGV);
+add_reviewers();
 push_patches();
