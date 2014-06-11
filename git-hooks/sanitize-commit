@@ -99,6 +99,7 @@ my $qmake = 0;
 my $iswip = defined($cfg{wip});
 my $badrev = 0;
 my $badsign = 0;
+my $badtask = 0;
 my $badid = defined($cfg{changeid});
 my $badurl = defined($cfg{url});
 my $badlog = defined($cfg{log});
@@ -267,6 +268,10 @@ while (<MSG>) {
             }
             if (!$badsign && /^Signed-off-by:/i) {
                 $badsign = 1;
+            }
+            if (!$badtask && /^Task-number:/i && !/^Task-number:/) {
+                $badtask = 1;
+                &complain("Capitalization of \"Task-number\" is wrong", "");
             }
             if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
                 $badid = 1;
