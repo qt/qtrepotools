@@ -9,8 +9,6 @@
 use strict;
 use warnings;
 
-package Git::Gerrit::Push;
-
 use File::Basename;
 
 # Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
@@ -67,7 +65,7 @@ Description:
     options are passed on directly to the normal 'git push' command.
     If you want to avoid specifying all options first, any options
     specified after a '--' are also passed on directly to the
-    underlying 'git push' command. This is can be particularly useful
+    underlying 'git push' command. This can be particularly useful
     with the -n/--dry-run options, which make git do everything except
     actually sending the updates.
 
@@ -88,50 +86,64 @@ License:
 EOM
 }
 
-sub parse_arguments
-{
-    my ($self, @arguments) = @_;
+my $verbose = 0;
 
-    while (scalar @arguments) {
-        my $arg = shift @arguments;
+my $remote = "gerrit";
+my $remote_override = 0;
+my $ref_from = "HEAD";
+my $ref_to = "";
+my $ref_override = 0;
+
+my %aliases = ();
+
+my @reviewers = ();
+my @CCs = ();
+
+my @arguments = ();
+
+sub parse_arguments(@)
+{
+    while (scalar @_) {
+        my $arg = shift @_;
 
         if ($arg eq "-v" || $arg eq "--verbose") {
-            $self->{'verbose'} = 1;
-            push @{$self->{'arguments'}}, $arg;
+            $verbose = 1;
+            push @arguments, $arg;
         } elsif ($arg eq "--aliases") {
-            foreach my $key (sort(keys %{$self->{'aliases'}})) {
-                print "$key = $self->{'aliases'}->{$key}\n";
+            foreach my $key (sort(keys %aliases)) {
+                print "$key = $aliases{$key}\n";
             }
             exit 0;
         } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
-            $self->usage();
+            usage();
             exit 0;
         } elsif ($arg eq "--") {
-            push @{$self->{'arguments'}}, @arguments;
+            push @arguments, @_;
             return;
         } elsif ($arg =~ /^\+(.+)/) {
-            push @{$self->{'reviewers'}}, split(/,/, $self->lookup_alias($1));
+            push @reviewers, split(/,/, lookup_alias($1));
         } elsif ($arg =~ /^\=(.+)/) {
-            push @{$self->{'CCs'}}, split(/,/, $self->lookup_alias($1));
+            push @CCs, split(/,/, lookup_alias($1));
         } elsif ($arg =~ /^\-(.+)/) {
-            push @{$self->{'arguments'}}, $arg;
-        } elsif (!$self->{'remote-override'} || !$self->{'ref-override'}) {
+            push @arguments, $arg;
+        } elsif (!$remote_override || !$ref_override) {
             if ($arg =~ /(.*):(.*)/) {
-                $self->{'ref-from'} = $1 if (defined $1 && $1 ne "");
-                $self->{'ref-to'} = $2 if (defined $2 && $2 ne "");
-                $self->{'ref-override'} = 1;
+                $ref_from = $1 if (defined $1 && $1 ne "");
+                $ref_to = $2 if (defined $2 && $2 ne "");
+                $ref_override = 1;
             } else {
-                $self->{'remote'} = $arg;
-                $self->{'remote-override'} = 1;
+                $remote = $arg;
+                $remote_override = 1;
             }
         } else {
-            push @{$self->{'arguments'}}, $arg;
+            push @arguments, $arg;
         }
     }
 }
 
-sub fileContents {
-    my ($self, $filename) = @_;
+sub fileContents($)
+{
+    my ($filename) = @_;
 
     my @contents = "";
     my $fh;
@@ -142,18 +154,17 @@ sub fileContents {
     return @contents;
 }
 
-sub load_aliases
+sub load_aliases()
 {
-    my ($self) = @_;
     my $script_path = dirname($0);
 
     # Read aliases from .git-gpush-aliases file
-    foreach my $line ($self->fileContents("$script_path/.git-gpush-aliases")) {
+    foreach my $line (fileContents("$script_path/.git-gpush-aliases")) {
         chomp $line;
         $line =~ s,(#|//).*$,,;             # Remove any comments
         if ($line =~ /([^ ]+)\s*=\s*(\S+)/) {  # Capture the alias
             for my $alias (split(/,/, $1)) {
-                $self->{'aliases'}->{$alias} = $2;
+                $aliases{$alias} = $2;
             }
         }
     }
@@ -163,34 +174,36 @@ sub load_aliases
     return if ($?); # just return if no git configs for gpush
 
     foreach (@gitconfigs) {
-        if (/^gpush\.(remote|ref-from|ref-to) (\w+)/) {
-            $self->{$1} = $2;
+        if (/^gpush\.remote (\w+)/) {
+            $remote = $2;
+        } elsif (/^gpush\.ref-from (.+)/) {
+            $ref_from = $2;
+        } elsif (/^gpush\.ref-to (.+)/) {
+            $ref_to = $2;
         } elsif (/^gpush\.alias\.([^ ]*) (.+)/) {
-            $self->{'aliases'}->{$1} = $2;
+            $aliases{$1} = $2;
         } # else ignore
     }
 }
 
-sub lookup_alias
+sub lookup_alias($)
 {
-    my ($self, $user) = @_;
+    my ($user) = @_;
 
-    my $alias = $self->{'aliases'}->{$user};
+    my $alias = $aliases{$user};
     if (defined $alias && $alias ne "") {
-        print " $user = $alias\n" if ($self->{'verbose'});
+        print " $user = $alias\n" if ($verbose);
         return $alias;
     }
 
     return $user;
 }
 
-sub push_patches
+sub push_patches()
 {
-    my ($self) = @_;
-
     # Detect tracking branch if ref-to is not set
-    if ($self->{'ref-to'} eq "") {
-        my $ref = $self->{'ref-from'};
+    if ($ref_to eq "") {
+        my $ref = $ref_from;
         $ref =~ s/[~^].*$//;
         my $sref = `git symbolic-ref -q $ref`;
         if ($? == 0) {
@@ -200,68 +213,33 @@ sub push_patches
         $ref =~ s,^refs/heads/,,;
         `git rev-parse --verify -q refs/heads/$ref`;
         die "Cannot detect tracking branch, $ref is not a valid ref.\n" if ($? != 0);
-        my $trackref = `git config branch.$ref.merge`;
+        $ref_to = `git config branch.$ref.merge`;
         die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
-        chomp $trackref;
-        $trackref =~ s,^refs/heads/,,;
-        $self->{'ref-to'} = $trackref;
+        chomp $ref_to;
+        $ref_to =~ s,^refs/heads/,,;
     }
-    if ($self->{'ref-to'} =~ m,^refs/for/,) {
+    if ($ref_to =~ m,^refs/for/,) {
         print STDERR "Notice: it is unnecessary to specify refs/for/ in the target ref.\n";
     } else {
-        $self->{'ref-to'} = "refs/for/".$self->{'ref-to'};
+        $ref_to = "refs/for/".$ref_to;
     }
 
-    my @reviewers = ();
-    if (@{$self->{'reviewers'}} || @{$self->{'CCs'}}) {
-        push @reviewers, "--receive-pack=git receive-pack";
-        push @reviewers, map { " --reviewer=$_" } @{$self->{'reviewers'}};
-        push @reviewers, map { " --cc=$_" } @{$self->{'CCs'}};
+    my @dudes = ();
+    if (@reviewers || @CCs) {
+        push @dudes, "--receive-pack=git receive-pack";
+        push @dudes, map { " --reviewer=$_" } @reviewers;
+        push @dudes, map { " --cc=$_" } @CCs;
     }
 
     my @gitcmd = ("git", "push");
-    push @gitcmd, @{$self->{'arguments'}};
-    push @gitcmd, join '', @reviewers if(scalar @reviewers); # Single argument to git push
-    push @gitcmd, $self->{'remote'}, "$self->{'ref-from'}:$self->{'ref-to'}";
+    push @gitcmd, @arguments;
+    push @gitcmd, join('', @dudes) if (scalar @dudes); # Single argument to git push
+    push @gitcmd, $remote, "$ref_from:$ref_to";
 
-    print '+'.join(',', @gitcmd)."\n" if ($self->{'verbose'});
+    print '+'.join(',', @gitcmd)."\n" if ($verbose);
     exit system(@gitcmd);
 }
 
-sub new
-{
-    my ($class, @arguments) = @_;
-
-    my $self = {};
-    bless $self, $class;
-
-    $self->{'verbose'} = 0;
-
-    $self->{'remote'} = "gerrit";
-    $self->{'remote-override'} = 0;
-    $self->{'ref-from'} = "HEAD";
-    $self->{'ref-to'} = "";
-    $self->{'ref-override'} = 0;
-
-    $self->{'aliases'} = ();
-
-    $self->{'reviewers'} = [];
-    $self->{'CCs'} = [];
-
-    $self->{'arguments'} = [];
-
-    $self->load_aliases;
-    $self->parse_arguments(@arguments);
-    return $self;
-}
-
-sub run
-{
-    my ($self) = @_;
-    $self->push_patches;
-}
-
-#==============================================================================
-
-Git::Gerrit::Push->new(@ARGV)->run if (!caller);
-1;
+load_aliases();
+parse_arguments(@ARGV);
+push_patches();
