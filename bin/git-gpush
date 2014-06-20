@@ -228,6 +228,13 @@ sub add_reviewers()
     }
 }
 
+sub goto_gitdir()
+{
+    my $cdup = read_git_line('rev-parse', '--show-cdup');
+    exit $? >> 8 if $?;
+    chdir($cdup) unless $cdup eq "";
+}
+
 sub determine_target()
 {
     # Detect tracking branch if ref-to is not set
@@ -263,5 +270,6 @@ sub push_patches()
 load_aliases();
 parse_arguments(@ARGV);
 add_reviewers();
+goto_gitdir();
 determine_target();
 push_patches();
