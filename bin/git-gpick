@@ -57,10 +57,12 @@ Description:
     Local commits may be specified as either SHA1s or Gerrit Change-Ids,
     possibly abbreviated. Git rev-spec suffixes like '~2' are allowed; if
     only a suffix is specified, it is understood to be relative to 'HEAD'.
-    It is also possible to specify ranges, either as <base>..<tip> or as
-    <tip>:<count>. An empty <tip> means 'HEAD'. Similarly, an empty <base>
-    means the merge base with the upstream branch; this also works in the
-    parent specification.
+
+    Every Change specification denotes a range, either explicitly when
+    written as <base>..<tip> or <tip>:<count>, or implicitly as the tip
+    of a series (as determined by its previous push). An empty <tip>
+    means 'HEAD'. Similarly, an empty <base> means the merge base with
+    the upstream branch; this also works in the parent specification.
 
     This program uses the most recent PatchSets which are not newer than
     the reference date, which defaults to 'now'. See the git-rev-parse
@@ -174,9 +176,13 @@ Console Output:
     command line are shown in parentheses.
 
 Examples:
-    git gpick ~1
+    git gpick ~1:1
         Replace the last-but-one local commit with the latest PatchSet from
         Gerrit.
+
+    git gpick ~1
+        Replace the series identified by the last-but-one local commit with
+        the latest PatchSets from Gerrit.
 
     git gpick +I21f8ef385d1793757149dfa5cc69e4e907cb1c04
         Add a series from Gerrit on top of the local branch.
@@ -184,7 +190,7 @@ Examples:
     git gpick +Idc2d0ac4f7d95a5f3bad24e82114e23ada79a542{yesterday}
         The same, using the most recent PatchSets as of one day ago.
 
-    git gpick /HEAD \@ ~1:2\@ +I1ad95db7c99018e92d2b2556e4789951b51b2fff:1
+    git gpick /HEAD:1 \@ ~1:2\@ +I1ad95db7c99018e92d2b2556e4789951b51b2fff:1
         Drop the top commit, move the next two commits to the start of the
         local branch and replace them with the latest PatchSets, and add
         another Change right on top of them. The other commits in the local
@@ -194,7 +200,7 @@ Examples:
         Bootstrap git-gpush before using it the first time with pre-existing
         pending Changes.
 
-    git gpick --check HEAD
+    git gpick --check :1
         Check whether a new PatchSet was pushed to the Change corresponding
         with the HEAD commit.
 
@@ -357,6 +363,187 @@ sub get_changes()
     # The tip is also the branch base.
     $local_base = $local_tip;
     return [];
+}
+
+# Deduce series grouping from picked Changes.
+# The grouping on Gerrit is considered authoritative, which may result
+# in previously assigned local series being split or joined. This
+# affects even Changes which are not being updated, as long as they
+# are part of a series which any Change of is being updated; this is
+# done to avoid that partial picks tear apart series. Locally assigned
+# Changes which are not claimed by an applied remote series remain
+# assigned to their previous series, unless they lie between Changes
+# which are claimed by separate remote series.
+#
+# The algorithm sequentially interates through all Changes passed to it.
+# The "prefix" state prepresents a local series which may still overlap
+# with a remote series. The "suffix" state represents a local series
+# which extends beyond an overlap with a remote series. A "hold" state
+# is entered from the respective "plain" state when the local series
+# runs into the start of a remote series which does not overlap a local
+# series (yet). The state table can be viewed at
+# https://docs.google.com/spreadsheets/d/1z2BkqggoYvAe3guPrhPf96Y7lx8JJqB9iUmBx1bISgs/edit?usp=sharing
+
+use constant {
+    DSS_DEFAULT => 0,
+    DSS_PREFIX => 1,
+    DSS_PREFIX_HOLD => 2,
+    DSS_SUFFIX => 3,
+    DSS_SUFFIX_HOLD => 4
+};
+
+use constant {
+    DSC_LCL_NONE => 0,   # Neither current nor previous Change have gid.
+    DSC_LCL_START => 1,  # Current Change has gid while previous didn't.
+    DSC_LCL_RESUME => 2, # Same, but the gid equals the last seen one.
+    DSC_LCL_CONT => 3,   # Current and previous Change have same gid.
+    DSC_LCL_SWITCH => 4, # Current and previous Change have different gids.
+    DSC_LCL_END => 5,    # Current Change has no gid while previous did.
+    DSC_RMT_NONE => 0x00,
+    DSC_RMT_START => 0x10,
+    DSC_RMT_RESUME => 0x20,
+    DSC_RMT_CONT => 0x30,
+    DSC_RMT_SWITCH => 0x40,
+    DSC_RMT_END => 0x50
+};
+
+sub deduce_series($)
+{
+    my ($changes) = @_;
+
+    my %groups;  # { group-id => [ change, ... ] }
+    my $state = DSS_DEFAULT;
+    my @backlog;
+
+    local *drop = sub {
+        my ($sts) = @_;
+        print "... dropping backlog.\n" if ($debug);
+        @backlog = ();
+        $state = $sts // DSS_DEFAULT;
+    };
+
+    local *flush = sub {
+        my ($grp, $sts) = @_;
+        print "... committing backlog to $grp.\n" if ($debug);
+        push @{$groups{$grp}}, @backlog;
+        @backlog = ();
+        $state = $sts // DSS_DEFAULT;
+    };
+
+    print "Deducing series from picked Changes ...\n" if ($debug);
+    my ($good_lcl_grp, $good_rmt_grp) = (0, "");  # The last non-null value.
+    my ($prev_lcl_grp, $prev_rmt_grp) = (0, "");  # From the immediately preceding Change.
+    foreach my $change (@$changes, undef) {
+        my ($curr_lcl_grp, $curr_rmt_grp) = (0, "");
+        if ($change) {
+            $curr_lcl_grp = $$change{grp} // 0;
+            my $ginfo = $$change{gerrit};
+            # Ungrouped Changes which also are not being picked are
+            # completely ignored.
+            next if (!$curr_lcl_grp && !$ginfo);
+            $curr_rmt_grp = $$ginfo{pick_commit}{pgrp} if ($ginfo);
+        } else {
+            # When we run out of Changes, we still synthetize a pair of
+            # commands, so a pending backlog is flushed if necessary.
+        }
+        my $lcl_cmd = $curr_lcl_grp
+            ? $prev_lcl_grp
+                ? ($curr_lcl_grp == $prev_lcl_grp) ? DSC_LCL_CONT : DSC_LCL_SWITCH
+                : ($curr_lcl_grp == $good_lcl_grp) ? DSC_LCL_RESUME : DSC_LCL_START
+            : $prev_lcl_grp ? DSC_LCL_END : DSC_LCL_NONE;
+        my $rmt_cmd = length($curr_rmt_grp)
+            ? length($prev_rmt_grp)
+                ? ($curr_rmt_grp eq $prev_rmt_grp) ? DSC_RMT_CONT : DSC_RMT_SWITCH
+                : ($curr_rmt_grp eq $good_rmt_grp) ? DSC_RMT_RESUME : DSC_RMT_START
+            : length($prev_rmt_grp) ? DSC_RMT_END : DSC_RMT_NONE;
+        printf("sts=%d lcl=%d rmt=%d chg=%s\n",
+               $state, $lcl_cmd, $rmt_cmd >> 4, $change ? $$change{id} : "<end>")
+            if ($debug);
+        my $cmd = $lcl_cmd | $rmt_cmd;
+        if ($state == DSS_PREFIX) {
+            if ($cmd == (DSC_LCL_CONT | DSC_RMT_START) ||
+                $cmd == (DSC_LCL_CONT | DSC_RMT_RESUME)) {
+                flush($curr_rmt_grp);
+            } elsif ($cmd == (DSC_LCL_SWITCH | DSC_RMT_START) ||
+                     $cmd == (DSC_LCL_SWITCH | DSC_RMT_RESUME) ||
+                     $cmd == (DSC_LCL_END | DSC_RMT_NONE)) {
+                drop();
+            } elsif ($cmd == (DSC_LCL_SWITCH | DSC_RMT_NONE)) {
+                drop(DSS_PREFIX);
+            } elsif ($cmd == (DSC_LCL_END | DSC_RMT_START) ||
+                     $cmd == (DSC_LCL_END | DSC_RMT_RESUME)) {
+                $state = DSS_PREFIX_HOLD;
+            }
+        } elsif ($state == DSS_PREFIX_HOLD) {
+            if ($cmd == (DSC_LCL_RESUME | DSC_RMT_CONT)) {
+                flush($curr_rmt_grp);
+            } elsif ($cmd == (DSC_LCL_NONE | DSC_RMT_SWITCH) ||
+                     $cmd == (DSC_LCL_NONE | DSC_RMT_END) ||
+                     $cmd == (DSC_LCL_START | DSC_RMT_CONT) ||
+                     $cmd == (DSC_LCL_START | DSC_RMT_SWITCH) ||
+                     $cmd == (DSC_LCL_RESUME | DSC_RMT_SWITCH)) {
+                drop();
+            } elsif ($cmd == (DSC_LCL_START | DSC_RMT_END)) {
+                drop(DSS_PREFIX);
+            } elsif ($cmd == (DSC_LCL_RESUME | DSC_RMT_END)) {
+                $state = DSS_PREFIX;
+            }
+        } elsif ($state == DSS_SUFFIX) {
+            if ($cmd == (DSC_LCL_CONT | DSC_RMT_RESUME) ||
+                $cmd == (DSC_LCL_SWITCH | DSC_RMT_START) ||
+                $cmd == (DSC_LCL_SWITCH | DSC_RMT_RESUME) ||
+                $cmd == (DSC_LCL_END | DSC_RMT_NONE) ||
+                $cmd == (DSC_LCL_END | DSC_RMT_RESUME)) {
+                flush($good_rmt_grp);
+            } elsif ($cmd == (DSC_LCL_SWITCH | DSC_RMT_NONE)) {
+                flush($good_rmt_grp, DSS_PREFIX);
+            } elsif ($cmd == (DSC_LCL_CONT | DSC_RMT_START)) {
+                drop();
+            } elsif ($cmd == (DSC_LCL_END | DSC_RMT_START)) {
+                $state = DSS_SUFFIX_HOLD;
+            }
+        } elsif ($state == DSS_SUFFIX_HOLD) {
+            if ($cmd == (DSC_LCL_NONE | DSC_RMT_SWITCH) ||
+                $cmd == (DSC_LCL_NONE | DSC_RMT_END) ||
+                $cmd == (DSC_LCL_START | DSC_RMT_CONT) ||
+                $cmd == (DSC_LCL_START | DSC_RMT_SWITCH) ||
+                $cmd == (DSC_LCL_RESUME | DSC_RMT_SWITCH)) {
+                flush($good_rmt_grp);
+            } elsif ($cmd == (DSC_LCL_START | DSC_RMT_END)
+                  || $cmd == (DSC_LCL_RESUME | DSC_RMT_END)) {
+                flush($good_rmt_grp, DSS_PREFIX);
+            } elsif ($cmd == (DSC_LCL_RESUME | DSC_RMT_CONT)) {
+                drop();
+            }
+        } else {  # DSS_DEFAULT
+            if ($cmd == (DSC_LCL_START | DSC_RMT_NONE) ||
+                $cmd == (DSC_LCL_START | DSC_RMT_END) ||
+                $cmd == (DSC_LCL_SWITCH | DSC_RMT_END)) {
+                $state = DSS_PREFIX;
+            } elsif ($cmd == (DSC_LCL_RESUME | DSC_RMT_END) ||
+                     $cmd == (DSC_LCL_CONT | DSC_RMT_END)) {
+                $state = DSS_SUFFIX;
+            }
+        }
+
+        last if (!$change);
+
+        if (length($curr_rmt_grp)) {
+            print "... comitting Change to $curr_rmt_grp.\n" if ($debug);
+            push @{$groups{$curr_rmt_grp}}, $change;
+        } else {
+            print "... backlogging Change.\n" if ($debug);
+            push @backlog, $change;
+        }
+
+        ($prev_lcl_grp, $prev_rmt_grp) = ($curr_lcl_grp, $curr_rmt_grp);
+        $good_lcl_grp = $curr_lcl_grp if ($curr_lcl_grp);
+        $good_rmt_grp = $curr_rmt_grp if (length($curr_rmt_grp));
+    }
+
+    foreach my $group (values %groups) {
+        assign_series($group);
+    }
 }
 
 sub is_closed_status($)
@@ -541,8 +728,12 @@ sub resolve_specs($)
             my $base = parse_local_rev($raw_base, SPEC_BASE);
             $range = changes_from_commits(get_commits_base($base, $tip, $raw_base, $raw_tip));
         } else {
+            my $gid;
             my $pivot = $commit_by_id{$tip}{change};
-            $range = [ $pivot ];
+            ($range, $gid) = do_determine_series($pivot);
+            wfail("Spec $$spec{orig} points at loose Change(s)."
+                    ." Please specify an exact range.\n")
+                if (!defined($gid));
         }
         wfail("Range $$spec{orig} is empty.\n") if (!@$range);
         foreach my $change (@$range) {
@@ -1262,6 +1453,9 @@ sub advance_remote_series($$@)
 
 # Assemble a remote series from its tip commit. On the way record required
 # Changes that we didn't query yet, and fail the operation if there are any.
+# Additionally, determine the remote group id for the series, which is
+# needed for deduce_series(); this is the reason why we always traverse down
+# to the bottom of the series even if we need only a part of it.
 sub assemble_remote_series($$$$$$$)
 {
     my ($ginfo, $base, $stamp, $bmap, $seen, $missing, $fails) = @_;
@@ -1272,6 +1466,13 @@ sub assemble_remote_series($$$$$$$)
     my ($series, $anchor) = assemble_series(
             $$ginfo{id}, $sha1, $rbase, $seen, \&advance_remote_series,
             $stamp, $bmap, $missing, $fails);
+    if (!$$fails) {  # Only an optimization.
+        # The first Change in the series identifies it. If we got
+        # cut off, get the ID from the already seen parents.
+        my $pgrp = $anchor ? $$anchor{pgrp} : $$series[0]{changeid};
+        #print "Assigning remote group $pgrp.\n" if ($debug);
+        $$_{pgrp} = $pgrp foreach (@$series);
+    }
     return ($series, $anchor);
 }
 
@@ -1595,16 +1796,14 @@ sub complete_spec_tails($)
         my (%bmap, %pmap);
         foreach my $change (@{$$spec{range}}) {
             my $changeid = $$change{id};
-            next if ($ignore_struct);
             my $base = $$change{base};
             $bmap{$changeid} = $base if (defined($base));
-            next if ($force_struct);
+            next if ($ignore_struct || $force_struct);
             my $pushed = $$change{pushed};
             $pmap{$changeid} = $pushed if (defined($pushed));
         }
-        next if ($ignore_struct);
         $$spec{bmap} = \%bmap;
-        next if ($force_struct);
+        next if ($ignore_struct || $force_struct);
         $$spec{pmap} = \%pmap;
     }
 
@@ -1628,8 +1827,6 @@ sub complete_spec_tails($)
             if ($action == INSERT) {
                 resolve_insertion_spec($spec, \%picks);
             } elsif ($action == UPDATE) {
-                next if ($ignore_struct);
-
                 # This is a local spec. We need to obtain the corresponding remote
                 # series. It might have a different structure including a different
                 # tip, so just try to collect all Changes belonging to it and sort
@@ -1638,7 +1835,9 @@ sub complete_spec_tails($)
                 # dependencies. The workaround is specifying these Changes manually.
                 complete_remote_series($spec, \%picks);
 
-                next if ($force_struct);
+                # Note that we cannot skip the above even in --ignore-struct mode,
+                # as it is necessary for deduce_series().
+                next if ($ignore_struct || $force_struct);
 
                 # Prepare reconstruction of the series' last push from this repo.
                 complete_pushed_series($spec, \%pushes);
@@ -1805,12 +2004,20 @@ sub finalize_specs($)
     }
 }
 
-sub prepare_specs()
+sub prepare_specs($)
 {
+    my ($raw_changes) = @_;
+
     my $specs = parse_specs(\@commit_specs);
     resolve_specs($specs);
     complete_spec_heads($specs);
     complete_spec_tails($specs);
+
+    # In --check mode we skip the post-adjust series deduction,
+    # as the adjusted Change list is not committed. Instead, do
+    # it before any adjustments are made.
+    deduce_series($raw_changes) if ($check);
+
     check_specs($specs);
     finalize_specs($specs);
     return $specs;
@@ -2346,7 +2553,7 @@ sub do_adjust_changes($)
 
     my ($need_force_del, $need_force_repl, $can_merge);
     my ($any_missing, $any_crossed, $any_merged);
-    my (@commits, @reports);
+    my (@commits, @changes, @reports);
     foreach my $pair (@$pairs) {
         my ($action, $change) = @$pair;
         my $ginfo = $$change{gerrit};
@@ -2431,6 +2638,7 @@ sub do_adjust_changes($)
                 $commit = $rmt_commit;
             }
             push @commits, $commit;
+            push @changes, $change;
             if ($upd & UPD_PUSHED) {
                 $$change{pushed} = $$rmt_commit{id};
                 # Make the downloaded commit recyclable. This won't help in many
@@ -2507,6 +2715,12 @@ sub do_adjust_changes($)
     }
 
     print "\n" if ($any_msg);
+
+    # All Changes which are grouped as an effect of this gpick run get
+    # a new gid assigned. A side effect of this is that series which
+    # got fragmented due to moving around Changes locally may be
+    # permanently split, which seems quite reasonable.
+    deduce_series(\@changes) if (!$check);
 
     return \@commits;
 }
@@ -2695,7 +2909,7 @@ load_state(1);
 determine_local_branch();
 my $raw_commits = get_changes();
 my $raw_changes = changes_from_commits($raw_commits);
-my $specs = prepare_specs();
+my $specs = prepare_specs($raw_changes);
 my $pairs = apply_specs($specs, $raw_changes);
 my $commits = adjust_changes($pairs);
 rewrite_changes($raw_commits, $commits) if (!$check);

@@ -639,6 +639,7 @@ our %gerrit_infos_by_id;
 # - key: Sequence number. This runs independently from Gerrit, so
 #   we can enumerate Changes which were never pushed, and to make
 #   it possible to re-associate local Changes with remote ones.
+# - grp: Group (series) sequence number.
 # - id: Gerrit Change-Id.
 # - src: Local branch name, or "-" if Change is on a detached HEAD.
 # - tgt: Target branch name.
@@ -654,6 +655,8 @@ my $next_key = 10000;
 our %change_by_key;  # { sequence-number => change-object }
 # Same, indexed by Gerrit Change-Id. A Change can exist on multiple branches.
 our %changes_by_id;  # { gerrit-id => [ change-object, ... ] }
+
+our $next_group = 10000;
 
 our $last_gc = 0;
 
@@ -695,7 +698,7 @@ sub save_state(;$$)
 
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
-    my @fkeys = ('key', 'id', 'src', 'tgt', 'topic', 'base');
+    my @fkeys = ('key', 'grp', 'id', 'src', 'tgt', 'topic', 'base');
     my @rkeys = ('pushed', 'orig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";
@@ -704,6 +707,7 @@ sub save_state(;$$)
     }
     push @lines,
         "next_key $next_key",
+        "next_group $next_group",
         "last_gc $last_gc",
         "";
     foreach my $key (sort keys %change_by_key) {
@@ -826,6 +830,8 @@ sub load_state_file(;$)
         } elsif ($inhdr) {
             if ($1 eq "next_key") {
                 $next_key = int($2);
+            } elsif ($1 eq "next_group") {
+                $next_group = int($2);
             } elsif ($1 eq "last_gc") {
                 $last_gc = int($2);
             } elsif ($new && ($1 eq "verify")) {
@@ -1211,11 +1217,14 @@ sub analyze_local_branch($)
 
     # ... and then add them to the set of local Changes.
     my $idx = 0;
+    my $prev;
     foreach my $commit (@$commits) {
         my $change = change_for_id($$commit{changeid}, CREATE);
         $$commit{change} = $change;
         $$change{local} = $commit;
         $$change{index} = $idx++;
+        $$change{parent} = $prev;
+        $prev = $change;
     }
 
     return 1;
@@ -1366,6 +1375,65 @@ sub parse_local_rev($$)
     return _finalize_parse_local_rev($rev, $out, $scope) if ($out);
     return undef if (!$analyzed_local_branch);  # Come back later!
     return _parse_local_rev_id_only($rev, $scope);
+}
+
+################
+# smart series #
+################
+
+sub assign_series($)
+{
+    my ($changes) = @_;
+
+    my $gid = $next_group++;
+    $$_{grp} = $gid foreach (@$changes);
+}
+
+# Deduce a series from a single commit.
+# Merges are treated in --first-parent mode.
+sub do_determine_series($)
+{
+    my ($change) = @_;
+
+    print "Deducing series from $$change{id}\n" if ($debug);
+    my (@prospects, @changes);
+    my $group_key;
+    while (1) {
+        my $gid = $$change{grp};
+        if (!defined($gid)) {
+            print "Prospectively capturing loose $$change{id}\n" if ($debug);
+            unshift @prospects, $change;
+        } else {
+            if (@changes) {
+                # We already have a proto-series.
+                # Check whether the new candidate is part of it.
+                if ($gid != $group_key) {
+                    # Miss; end of series.
+                    print "Breaking off at foreign bound $$change{id}\n" if ($debug);
+                    last;
+                }
+                # Hit; add the Change to the series.
+                print "Adding bound $$change{id} and ".int(@prospects)." prospect(s)\n"
+                    if ($debug);
+            } elsif (!@prospects) {
+                # The specified tip Change is bound.
+                print "Adding bound $$change{id} at tip\n"
+                    if ($debug);
+                # This Change determines the series.
+                $group_key = $gid;
+            } else {
+                # Stop when encountering a bound Change after only loose ones.
+                print "Breaking off at bound $$change{id} after only loose\n" if ($debug);
+                last;
+            }
+            unshift @changes, $change, @prospects;
+            @prospects = ();
+        }
+        $change = $$change{parent};
+        last if (!$change);
+    }
+    return (\@prospects, undef) if (!defined($group_key));
+    return (\@changes, $group_key);
 }
 
 ###################

@@ -67,6 +67,13 @@ Description:
     they default to '\@{upstream}' and 'HEAD', respectively.
     If 'from' is not specified, 'HEAD' is used.
 
+    When pushing a series for the first time, the exact range of commits
+    needs to be specified. Subsequent pushes of the same series need only
+    the tip. Loose Changes in the middle of the series will be automatically
+    captured by it.
+    It is possible to regroup series any time by specifying new exact
+    ranges.
+
     Note that this program can be used in the middle of an interactive
     rebase, to push out the amended commits instantly.
 
@@ -190,6 +197,12 @@ Examples:
     git gpush ~1:3 -b 5.4 -o 85af7f4538b
         Push the range HEAD~4..HEAD~1 for branch 5.4, rebased on top of
         commit 85af7f4538b.
+
+    git gpush Iedb5bd8ca8:3
+    ...
+    git gpush Iedb5bd8ca8
+        Push the Change Iedb5bd8ca8 and the two Changes in front of it.
+        Subsequently, re-push the Changes, specifying only the tip.
 
 Copyright:
     Copyright (C) 2017 The Qt Company Ltd.
@@ -320,17 +333,22 @@ sub parse_arguments(@)
         }
     }
 
+    my $series_specific =
+            $commit_count || $from_base
+            || defined($ref_to) || defined($topic);
     my $push_specific =
             @reviewers || @CCs || $force || $force_branch
-            || defined($remote) || defined($ref_to) || defined($topic);
+            || defined($remote);
 
     if ($list_only) {
         fail("--list/--list-online is incompatible with --quiet/--verbose.\n")
             if ($quiet || ($verbose && !$debug));
+        fail("--list/--list-online is incompatible with series-specific options.\n")
+            if ($series_specific);
         fail("--list/--list-online is incompatible with push-modifying options.\n")
             if ($push_specific || (!$list_online && $minimal_override));
-        fail("--list is incompatible with base-modifying options.\n")
-            if (defined($ref_base) && !$list_online);
+        fail("--list/--list-online is incompatible with base-modifying options.\n")
+            if (defined($ref_base));
     }
 }
 
@@ -389,6 +407,10 @@ sub caption_group($)
     my ($group) = @_;
 
     my $changes = $$group{changes};
+    if (!$$group{gid}) {
+        return (sprintf("Set of %d loose Change(s):", int(@$changes)),
+                $changes);
+    }
     my $to = $$group{branch};
     my $tos = defined($to) ? " for $to" : "";
     my $tpc = $$group{topic};
@@ -626,12 +648,42 @@ sub initialize_get_changes()
     return $commit;
 }
 
-sub finalize_get_changes($)
+sub finalize_get_changes($$)
 {
-    my ($changes) = @_;
+    my ($changes, $gid) = @_;
 
-    my %group = (changes => $changes);
+    my %group = (changes => $changes, gid => $gid);
     return \%group;
+}
+
+sub define_series($)
+{
+    my ($commits) = @_;
+
+    # A new group key is used if a series is being (re-)assigned;
+    # for simplicity, we do not bother preserving keys.
+    # Stealing Changes from existing series could dissolve these series
+    # entirely. This implementation does not do this for simplicity's
+    # sake, thus losing some expressiveness - but that might have been
+    # more annoying than helpful anyway.
+    return (changes_from_commits($commits), $next_group++);
+}
+
+sub determine_series($)
+{
+    my ($pivot_id) = @_;
+
+    my $pivot = $commit_by_id{$pivot_id}{change};
+    my ($changes, $gid) = do_determine_series($pivot);
+    if (!$gid && @$changes && !$list_only) {
+        my @reports;
+        report_fixed(\@reports, "Attempted to push ".int(@$changes)." loose Change(s):\n");
+        report_local_changes(\@reports, $changes);
+        report_fixed(\@reports, "Please specify exact ranges.\n");
+        fail_formatted(\@reports);
+    }
+    # The group key is preserved even when the series gains new Changes.
+    return ($changes, $gid);
 }
 
 # Get the list of local commits to push.
@@ -639,17 +691,17 @@ sub get_changes()
 {
     my $tip = initialize_get_changes();
     # Assemble the series of Changes to push from the pool.
-    my $changes;
+    my ($changes, $gid);
     if (defined($from_base)) {
         my $base = parse_local_rev($from_base, SPEC_BASE);
-        $changes = changes_from_commits(get_commits_base($base, $tip, $from_base, $from));
+        ($changes, $gid) = define_series(get_commits_base($base, $tip, $from_base, $from));
     } elsif ($commit_count) {
-        $changes = changes_from_commits(get_commits_count($tip, $commit_count, $from));
+        ($changes, $gid) = define_series(get_commits_count($tip, $commit_count, $from));
     } else {
-        $changes = changes_from_commits(get_commits_free($tip));
+        ($changes, $gid) = determine_series($tip);
     }
     fail("Specified commit range is empty.\n") if (!@$changes);
-    my $group = finalize_get_changes($changes);
+    my $group = finalize_get_changes($changes, $gid);
     return $group;
 }
 
@@ -1345,6 +1397,11 @@ sub annotate_changes($)
 
     foreach my $change (@{$$group{changes}}) {
         my @attribs;
+        # Changes can be loose only when listing, as
+        # otherwise they are currently being assigned, and showing
+        # them as still loose would be weird.
+        my $loose = $list_only && !defined($$change{grp});
+        push @attribs, 'LOOSE' if ($loose);
         # Changes in the 'modified' state (that is, the ones for which pushing
         # actually has an effect) are annotated, while 'unmodified' ones are not.
         # This behavior has been chosen after much deliberation following the
@@ -1353,8 +1410,13 @@ sub annotate_changes($)
         # thus potentially confusing - but as having no modified changes at all
         # leads to an additional message, the less noisy output (assuming that
         # most Changes are usually not modified) seems most sensible.
+        # For loose Changes the most sensible default assumption is that they
+        # are 'new'; deviations occur for example when cherry-picking was done
+        # without gpick, or pushing was done without (or with an older) gpush.
         my $freshness = $$change{freshness};
-        if (defined($freshness) && ($freshness ne UNMODIFIED) && ($freshness ne KNOWN)) {
+        if (defined($freshness)
+            && ($loose ? ($freshness ne NEW)
+                       : ($freshness ne UNMODIFIED) && ($freshness ne KNOWN))) {
             $freshness = "PS$$change{patchset}/$freshness"
                 if ($freshness eq OUTDATED || $freshness eq FORCE);
             push @attribs, $freshness;
@@ -1555,10 +1617,12 @@ sub update_state($)
 {
     my ($group) = @_;
 
-    my ($branch, $tpc, $base) = ($$group{branch}, $$group{topic}, $$group{base});
+    my ($gid, $branch, $tpc, $base) =
+            ($$group{gid}, $$group{branch}, $$group{topic}, $$group{base});
     # Setting an empty topic clears the previous topic from the server.
     $tpc = undef if (defined($tpc) && !length($tpc));
     foreach my $change (@{$$group{changes}}) {
+        $$change{grp} = $gid;
         my $sha1 = $$change{final}{id};
         if (($$change{pushed} // "") ne $sha1) {
             $$change{pushed} = $sha1;
