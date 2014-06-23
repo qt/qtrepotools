@@ -277,7 +277,7 @@ while (<MSG>) {
                 $badid = 1;
                 &complain("Gerrit change id outside Change-Id footer", "changeid");
             }
-            if (!$badurl && /\bhttps?:\/\/(bugreports\.qt-project\.org\/browse\/|codereview\.qt-project\.org\/(\#change,)?\d+)/) {
+            if (!$badurl && /\bhttps?:\/\/(bugreports\.qt-project\.org\/browse\/|codereview\.qt-project\.org\/(\#change,|\#\/c\/)?\d+)/) {
                 $badurl = 1;
                 &complain("URL pointing to Gerrit or JIRA", "url");
             }
