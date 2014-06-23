@@ -183,7 +183,7 @@ REVIEW: while (<STATUS>) {
   my $cps = $$review{'currentPatchSet'};
   if (defined $cps) {
     my $status = $$review{'status'};
-    if ($status ne 'NEW') {
+    if ($status ne 'NEW' and $status ne 'DRAFT') {
        next REVIEW;
     }
     my $ref = $$cps{'ref'};
