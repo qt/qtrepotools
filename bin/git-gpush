@@ -73,6 +73,12 @@ Options:
     -v, --verbose
         Shows the alias resolving, and external command invocations.
 
+    -d, --draft
+        Mark the pushed changes as drafts.
+
+    -p, --publish
+        Do not mark the pushed changes as drafts.
+
     --aliases
         Reports all registered aliases.
 
@@ -92,6 +98,7 @@ my $remote_override = 0;
 my $ref_from = "HEAD";
 my $ref_to = "";
 my $ref_override = 0;
+my $draft = 0;
 
 my %aliases = ();
 
@@ -127,6 +134,10 @@ sub parse_arguments(@)
         if ($arg eq "-v" || $arg eq "--verbose") {
             $verbose = 1;
             push @arguments, $arg;
+        } elsif ($arg eq "-d" || $arg eq "--draft") {
+            $draft = 1;
+        } elsif ($arg eq "-p" || $arg eq "--publish") {
+            $draft = -1;
         } elsif ($arg eq "--aliases") {
             foreach my $key (sort(keys %aliases)) {
                 print "$key = $aliases{$key}\n";
@@ -250,18 +261,31 @@ sub determine_target()
         die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
         $ref_to =~ s,^refs/heads/,,;
     }
-    if ($ref_to =~ m,^refs/for/,) {
+    if ($ref_to =~ s,^refs/for/,,) {
+        die "Pushing to refs/for/ is inconsistent with the --draft option.\n" if ($draft > 0);
         print STDERR "Notice: it is unnecessary to specify refs/for/ in the target ref.\n";
-    } else {
-        $ref_to = "refs/for/".$ref_to;
+    } elsif ($ref_to =~ s,^refs/drafts/,,) {
+        die "Pushing to refs/drafts/ is inconsistent with the --publish option.\n" if ($draft < 0);
+        if ($draft) {
+            print STDERR "Notice: it is unnecessary to specify refs/drafts/ in the target ref.\n";
+        } else {
+            print STDERR "Notice: prefer the --draft option over specifying refs/drafts/ in the target ref.\n";
+            $draft = 1;
+        }
     }
 }
 
 sub push_patches()
 {
+    if (!$draft) {
+        $_ = read_git_line('log', '--pretty=%s', '-1', $ref_from);
+        exit $? >> 8 if ($? != 0);
+        $draft = 1 if (/\bWIP\b|\*{3}|^(.)\1*$/i);
+    }
+
     my @gitcmd = ("git", "push");
     push @gitcmd, @arguments;
-    push @gitcmd, $remote, "$ref_from:$ref_to";
+    push @gitcmd, $remote, "$ref_from:refs/".($draft > 0 ? 'drafts' : 'for')."/$ref_to";
 
     print '+ '.format_cmd(@gitcmd)."\n" if ($verbose);
     exit system(@gitcmd);
