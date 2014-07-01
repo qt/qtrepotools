@@ -27,25 +27,7 @@ Description:
     time add reviewers and CCs to the patch sets pushed.
 
     You can use email addresses, Gerrit usernames or aliases for the
-    name of the reviewers/CCs. Aliases are read from the
-        .git-gpush-aliases
-    located next to the script, then from the git config which may
-    have aliases set either locally in the current repository,
-    globally (in your ~/.gitconfig), or system-wide.
-
-    You can add aliases to your global git config like this:
-        git config --global gpush.alias.<alias key> <alias value>
-    and if you only want it to be local to the current repository,
-    just drop the --global option.
-    Note that git config keys are constrained regarding allowed
-    characters, so it is impossible to map some IRC nicks via git
-    configuration.
-
-    An alias may contain multiple comma-separated email addresses;
-    for example, to set a single alias for an entire team.
-
-    Inside .git-gpush-aliases, each alias may also be a comma-separated
-    list, in case a user uses multiple handles.
+    name of the reviewers/CCs.
 
     If no sha1 or ref-from is specified, 'HEAD' is used.
 
@@ -77,6 +59,27 @@ Options:
 
     --aliases
         Reports all registered aliases.
+
+Configuring Aliases:
+    Aliases are read from the
+        .git-gpush-aliases
+    located next to the script, then from the git config which may
+    have aliases set either locally in the current repository,
+    globally (in your ~/.gitconfig), or system-wide.
+
+    You can add aliases to your global git config like this:
+        git config --global gpush.alias.<alias key> <alias value>
+    and if you only want it to be local to the current repository,
+    just drop the --global option.
+    Note that git config keys are constrained regarding allowed
+    characters, so it is impossible to map some IRC nicks via git
+    configuration.
+
+    An alias may contain multiple comma-separated email addresses;
+    for example, to set a single alias for an entire team.
+
+    Inside .git-gpush-aliases, each alias may also be a comma-separated
+    list, in case a user uses multiple handles.
 
 Copyright:
     Copyright (C) 2013 Digia Plc and/or its subsidiary(-ies).
