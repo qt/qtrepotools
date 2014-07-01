@@ -47,15 +47,11 @@ Description:
     Inside .git-gpush-aliases, each alias may also be a comma-separated
     list, in case a user uses multiple handles.
 
-    If no sha1 or ref-from is specified or configured, 'HEAD' is used.
-    You may configure a ref-from like this
-        git config gpush.ref-from <ref-from value>
+    If no sha1 or ref-from is specified, 'HEAD' is used.
 
-    If no ref-to is specified or configured, the remote tracking
-    branch for 'ref-from' is used as
+    If no ref-to is specified, the remote tracking branch for 'ref-from'
+    is used as
         'refs/for/<remote tracking branch>'.
-    You may configure a ref-to like this
-        git config gpush.ref-to <ref-from value>
 
     If no remote is specified or configured, 'gerrit' is used. You may
     configure a remote like this:
@@ -206,9 +202,9 @@ sub load_aliases()
         if (/^gpush\.remote (\w+)/) {
             $remote = $2;
         } elsif (/^gpush\.ref-from (.+)/) {
-            $ref_from = $2;
+            die("Configuring ref-from is not supported any more.\n");
         } elsif (/^gpush\.ref-to (.+)/) {
-            $ref_to = $2;
+            die("Configuring ref-to is not supported any more.\n");
         } elsif (/^gpush\.alias\.([^ ]*) (.+)/) {
             $aliases{$1} = $2;
         } # else ignore
