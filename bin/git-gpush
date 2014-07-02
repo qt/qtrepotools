@@ -298,8 +298,10 @@ sub determine_target()
     if ($ref_to eq "") {
         my $ref = $ref_from;
         $ref =~ s/[~^].*$//;
-        my $sref = read_git_line("symbolic-ref", "-q", $ref);
-        $ref = $sref if ($? == 0);
+        if ($ref eq "HEAD") {
+            $ref = read_git_line("symbolic-ref", "-q", "HEAD");
+            die("Cannot detect tracking branch, HEAD does not point to a branch.\n") if ($? != 0);
+        }
         $ref =~ s,^refs/heads/,,;
         read_git_line("rev-parse", "--verify", "-q", "refs/heads/".$ref);
         die "Cannot detect tracking branch, $ref is not a valid ref.\n" if ($? != 0);
