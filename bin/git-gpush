@@ -126,6 +126,8 @@ my @CCs;
 
 my @arguments;
 
+my %gitconfig;
+
 sub format_cmd(@)
 {
     return join(' ', map { /\s/ ? '"' . $_ . '"' : $_ } @_);
@@ -367,7 +369,21 @@ sub fileContents($)
     return @contents;
 }
 
-sub load_aliases()
+sub git_configs($)
+{
+    my ($key) = @_;
+    my $ref = $gitconfig{$key};
+    return defined($ref) ? @$ref : ();
+}
+
+sub git_config($;$)
+{
+    my ($key, $dflt) = @_;
+    my @cfg = git_configs($key);
+    return scalar(@cfg) ? $cfg[-1] : $dflt;
+}
+
+sub load_config()
 {
     my $script_path = dirname($0);
 
@@ -395,20 +411,22 @@ sub load_aliases()
         }
     }
 
-    # Read aliases and configurations from git config
-    my @gitconfigs = `git config --get-regexp gpush.*`;
-    return if ($?); # just return if no git configs for gpush
+    # Read all git configuration at once, as that's faster than repeated
+    # git invocations, especially under Windows.
+    my $cfg = open_cmd_pipe(0, 'git', 'config', '-l', '-z');
+    while (read_fields($cfg, my $entry)) {
+        $entry =~ /^([^\n]+)\n(.*)$/;
+        push @{$gitconfig{$1}}, $2;
+    }
+    close_process($cfg);
 
-    foreach (@gitconfigs) {
-        if (/^gpush\.remote (\w+)/) {
-            $remote = $2;
-        } elsif (/^gpush\.ref-from (.+)/) {
-            die("Configuring ref-from is not supported any more.\n");
-        } elsif (/^gpush\.ref-to (.+)/) {
-            die("Configuring ref-to is not supported any more.\n");
-        } elsif (/^gpush\.alias\.([^ ]*) (.+)/) {
-            $aliases{$1} = $2;
-        } # else ignore
+    $remote = git_config('gpush.remote', $remote);
+    die("Configuring ref-from is not supported any more.\n") if (git_config('gpush.ref-from'));
+    die("Configuring ref-to is not supported any more.\n") if (git_config('gpush.ref-to'));
+    foreach (keys %gitconfig) {
+        if (/^gpush\.alias\.(.*)$/) {
+            $aliases{$1} = git_config($_);
+        }
     }
 }
 
@@ -455,8 +473,8 @@ sub determine_target()
         $ref =~ s,^refs/heads/,,;
         run_process(SOFT_FAIL, "git", "rev-parse", "--verify", "-q", "refs/heads/".$ref);
         die "Cannot detect tracking branch, $ref is not a valid ref.\n" if ($? != 0);
-        $ref_to = read_git_line("config", "branch.$ref.merge");
-        die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
+        $ref_to = git_config("branch.$ref.merge");
+        die("$ref has no tracking branch.\n") if (!defined($ref_to));
         $ref_to =~ s,^refs/heads/,,;
     }
 }
@@ -480,7 +498,7 @@ sub push_patches()
     run_process(FWD_OUTPUT, @gitcmd);
 }
 
-load_aliases();
+load_config();
 parse_arguments(@ARGV);
 add_reviewers();
 goto_gitdir();
