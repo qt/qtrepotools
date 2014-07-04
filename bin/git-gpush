@@ -288,7 +288,9 @@ sub push_patches()
     push @gitcmd, $remote, "$ref_from:refs/".($draft > 0 ? 'drafts' : 'for')."/$ref_to";
 
     print '+ '.format_cmd(@gitcmd)."\n" if ($verbose);
-    exit system(@gitcmd);
+    my $ex = system(@gitcmd);
+    die("Failed to run ".format_cmd(@gitcmd).": $!\n") if ($ex < 0);
+    exit($ex >> 8) if ($ex);
 }
 
 load_aliases();
