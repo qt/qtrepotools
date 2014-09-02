@@ -16,34 +16,6 @@ import logging
 import subprocess
 import re
 
-DEFAULT_MODULE_LIST = [
-    'qtactiveqt',
-    'qtandroidextras',
-    'qtbase',
-    'qtconnectivity',
-    'qtdeclarative',
-    'qtdoc',
-    'qtenginio',
-    'qtgraphicaleffects',
-    'qtimageformats',
-    'qtlocation',
-    'qtmacextras',
-    'qtmultimedia',
-    'qtquickcontrols',
-    'qtquick1',
-    'qtscript',
-    'qtsensors',
-    'qtserialport',
-    'qtsvg',
-    'qttools',
-    'qtwebkit',
-    'qtwebkit-examples',
-    'qtwebsockets',
-    'qtwinextras',
-    'qtxmlpatterns',
-    'qtx11extras',
-    ]
-
 fnull = open(os.devnull, "w")
 
 class colors:
@@ -206,18 +178,36 @@ def process_modules(config):
     if len(manual_merges):
         print("Modules failed to merge: ", manual_merges)
 
+# get a list of submodules and a list of submodules that are not checked out
+def get_submodules():
+    git_submodule_status = subprocess.check_output('git submodule status'.split(' ')).strip()
+    modules = []
+    modules_not_checked_out = []
+    for line in git_submodule_status.split('\n'):
+        module = line.split(' ')[1]
+        if line[0] == '-':
+            modules_not_checked_out += [module]
+            print('WARNING:', module, 'is not checked out')
+        else:
+            if module == 'qtqa' or module == 'qtrepotools':
+                print('skipping', module)
+            else:
+                modules += [module]
+    return modules, modules_not_checked_out
+
 
 if __name__== "__main__":
+    print("Qt Project merge tool\n")
+
+    default_modules, modules_not_checked_out = get_submodules()
     class Config(object): pass
     config = Config()
     import argparse
-
     parser = argparse.ArgumentParser(prog="git-qt-merge-branches",
         description="Merge branches for the Qt Project")
-
     parser.add_argument('-s', '--status', action="store_true", help='show the status (which patches will be merged)')
     parser.add_argument('-d', '--merge', action="store_true", help='do the merge')
-    parser.add_argument('-m', '--modules', type=str, default=" ".join(DEFAULT_MODULE_LIST), help='override the list of modules (eg. -m "qtbase qtdeclarative")')
+    parser.add_argument('-m', '--modules', type=str, default=' '.join(default_modules), help='override the list of modules (eg. -m "qtbase qtdeclarative")')
     parser.add_argument('-l', '--list-modules', action="store_true", help='list the modules to be merged and exit')
     parser.add_argument('--reset', action="store_true", help='reset to origin/to_branch. this is implicit in the merge command')
     parser.add_argument('-f', '--branch-from', type=str, default='stable', help='from which branch to merge')
@@ -226,9 +216,9 @@ if __name__== "__main__":
     args = parser.parse_args(namespace=config)
 
     logging.basicConfig(format='%(levelname)s: %(message)s')
-    print("Qt Project merge tool")
 
     if not config.status and not config.merge and not config.reset and not config.list_modules and not len(config.version):
         parser.print_help()
     else:
         process_modules(config)
+    print("Submodules that are not checked out and are ignored:\n", ' '.join(modules_not_checked_out))
