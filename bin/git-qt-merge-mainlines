@@ -56,8 +56,13 @@ def do_merge(module, config):
     try:
         git_merge = "git merge origin/%(from)s --no-edit --no-ff" %opts
         ret = subprocess.call(git_merge.split(), stdout=fnull)
+        if ret != 0 and config.mergetool:
+            print("Starting mergetool")
+            ret = subprocess.call(['git', 'mergetool', '-y'])
+            if ret == 0:
+                ret = subprocess.call(['git', 'commit', '--no-edit'], stdout=fnull)
         if ret != 0:
-            print("Module $s failed to merge, manual merge needed." % module)
+            print("Module %s failed to merge, manual merge needed." % module)
             return False
 
         # Make sure we get a change-id as git merge doesn't generate it for us
@@ -216,6 +221,7 @@ if __name__== "__main__":
     parser.add_argument('-f', '--branch-from', type=str, default='stable', help='from which branch to merge')
     parser.add_argument('-t', '--branch-to', type=str, default='dev', help='the target branch')
     parser.add_argument('-v', '--version', type=str, default='', help='set version in .qmake.conf to given version string')
+    parser.add_argument('--mergetool', action="store_true", help='run mergetool for conflicts')
     args = parser.parse_args(namespace=config)
 
     logging.basicConfig(format='%(levelname)s: %(message)s')
