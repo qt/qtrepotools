@@ -184,7 +184,7 @@ def get_submodules():
     modules = []
     modules_not_checked_out = []
     for line in git_submodule_status.split('\n'):
-        module = line.split(' ')[1]
+        module = line.strip().split(' ')[1]
         if line[0] == '-':
             modules_not_checked_out += [module]
             print('WARNING:', module, 'is not checked out')
@@ -200,6 +200,9 @@ if __name__== "__main__":
     print("Qt Project merge tool\n")
 
     default_modules, modules_not_checked_out = get_submodules()
+    print("Submodules: ", default_modules)
+    print("Ignored submodules: ", modules_not_checked_out)
+
     class Config(object): pass
     config = Config()
     import argparse
