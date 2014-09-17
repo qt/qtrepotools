@@ -51,9 +51,6 @@ Description:
     actually sending the updates.
 
 Options:
-    -v, --verbose
-        Shows the alias resolving, and external command invocations.
-
     -d, --draft
         Mark the pushed changes as drafts.
 
@@ -61,7 +58,16 @@ Options:
         Do not mark the pushed changes as drafts.
 
     --aliases
-        Reports all registered aliases.
+        Report all registered aliases and quit.
+
+    -v, --verbose
+        Show the resolved aliases, SHA1s of commits, and other information.
+
+    -q, --quiet
+        Suppress the usual output about what is pushed where.
+
+    --debug
+        Print debug information.
 
 Configuring Aliases:
     Aliases are read from the
@@ -93,7 +99,9 @@ License:
 EOM
 }
 
+my $debug = 0;
 my $verbose = 0;
+my $quiet = 0;
 
 my $remote = "gerrit";
 my $remote_override = 0;
@@ -116,13 +124,13 @@ sub format_cmd(@)
 
 sub read_git_line(@)
 {
-    print "+ " . format_cmd('git', @_) . "\n" if ($verbose);
+    print "+ " . format_cmd('git', @_) . "\n" if ($debug);
     open PROC, '-|', 'git', @_
         or die("Failed to run \"git\": $!\n");
     my $line = <PROC>;
     if (defined($line)) {
         chomp $line ;
-        print "- $line\n" if ($verbose);
+        print "- $line\n" if ($debug);
     }
     close PROC;
     return $line;
@@ -135,7 +143,11 @@ sub parse_arguments(@)
 
         if ($arg eq "-v" || $arg eq "--verbose") {
             $verbose = 1;
-            push @arguments, $arg;
+        } elsif ($arg eq "-q" || $arg eq "--quiet") {
+            $quiet = 1;
+        } elsif ($arg eq "--debug") {
+            $debug = 1;
+            $verbose = 1;
         } elsif ($arg eq "-d" || $arg eq "--draft") {
             $draft = 1;
         } elsif ($arg eq "-p" || $arg eq "--publish") {
@@ -170,6 +182,9 @@ sub parse_arguments(@)
             push @arguments, $arg;
         }
     }
+
+    die("--quiet and --verbose/--debug are mutually exclusive.\n")
+        if ($quiet && $verbose);
 }
 
 sub fileContents($)
@@ -223,7 +238,7 @@ sub lookup_alias($)
 
     my $alias = $aliases{$user};
     if (defined $alias && $alias ne "") {
-        print " $user = $alias\n" if ($verbose);
+        print "Resolved $user to $alias.\n" if ($verbose);
         return $alias;
     }
 
@@ -265,13 +280,13 @@ sub determine_target()
     }
     if ($ref_to =~ s,^refs/for/,,) {
         die "Pushing to refs/for/ is inconsistent with the --draft option.\n" if ($draft > 0);
-        print STDERR "Notice: it is unnecessary to specify refs/for/ in the target ref.\n";
+        print STDERR "Notice: it is unnecessary to specify refs/for/ in the target ref.\n" if (!$quiet);
     } elsif ($ref_to =~ s,^refs/drafts/,,) {
         die "Pushing to refs/drafts/ is inconsistent with the --publish option.\n" if ($draft < 0);
         if ($draft) {
-            print STDERR "Notice: it is unnecessary to specify refs/drafts/ in the target ref.\n";
+            print STDERR "Notice: it is unnecessary to specify refs/drafts/ in the target ref.\n" if (!$quiet);
         } else {
-            print STDERR "Notice: prefer the --draft option over specifying refs/drafts/ in the target ref.\n";
+            print STDERR "Notice: prefer the --draft option over specifying refs/drafts/ in the target ref.\n" if (!$quiet);
             $draft = 1;
         }
     }
@@ -285,11 +300,15 @@ sub push_patches()
         $draft = 1 if (/\bWIP\b|\*{3}|^(.)\1*$/i);
     }
 
+    print "Pushing $ref_from for $ref_to on $remote ...\n" if (!$quiet);
+
     my @gitcmd = ("git", "push");
+    push @gitcmd, '-v' if ($verbose);
+    push @gitcmd, '-q' if ($quiet);
     push @gitcmd, @arguments;
     push @gitcmd, $remote, "$ref_from:refs/".($draft > 0 ? 'drafts' : 'for')."/$ref_to";
 
-    print '+ '.format_cmd(@gitcmd)."\n" if ($verbose);
+    print '+ '.format_cmd(@gitcmd)."\n" if ($debug);
     my $ex = system(@gitcmd);
     die("Failed to run \"git\": $!\n") if ($ex < 0);
     exit($ex >> 8) if ($ex);
