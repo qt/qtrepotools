@@ -337,6 +337,62 @@ sub load_config()
 # current branch). May be undef.
 our $local_branch;
 
+# The name of the local branch's upstream remote, or a configurable fallback.
+our $upstream_remote;
+# The name of the Gerrit remote, possibly identical to the upstream remote.
+our $remote;
+
+sub setup_remotes($)
+{
+    my ($source) = @_;
+
+    my %remotes;
+    for my $ky (keys %gitconfig) {
+        if ($ky =~ /^remote\.(.*)\.url$/) {
+            $remotes{$1} = 1;
+        }
+    }
+    fail("No remotes configured.\n")
+        if (!%remotes);
+    if (defined($local_branch)) {
+        $upstream_remote = git_config("branch.$local_branch.remote");
+        fail("$source has invalid upstream remote '$upstream_remote'.\n")
+            if (defined($upstream_remote) && !defined($remotes{$upstream_remote}));
+    }
+    if (!defined($upstream_remote)) {
+        $upstream_remote = git_config('gpush.upstream');
+        if (defined($upstream_remote)) {
+            fail("Remote '$upstream_remote' configured in gpush.upstream is invalid.\n")
+                if (!defined($remotes{$upstream_remote}));
+        } else {
+            $upstream_remote = 'origin';
+            if (!defined($remotes{$upstream_remote})) {
+                my @remotes_arr = keys %remotes;
+                fail("$source has no upstream remote, and cannot guess one.\n")
+                    if (@remotes_arr != 1);
+                $upstream_remote = $remotes_arr[0];
+            }
+        }
+        wout("Notice: $source has no upstream remote; defaulting to $upstream_remote.\n")
+            if (!$quiet);
+    }
+    if (defined($remote)) {
+        fail("Specified Gerrit remote '$remote' is invalid.\n")
+            if (!defined($remotes{$remote}));
+    } else {
+        $remote = git_config('gpush.remote');
+        # If a remote is configured, use exactly that one.
+        if (defined($remote)) {
+            fail("Remote '$remote' configured in gpush.remote is invalid.\n")
+                if (!defined($remotes{$remote}));
+        } else {
+            # Otherwise try 'gerrit', and fall back to the upstream remote.
+            $remote = 'gerrit';
+            $remote = $upstream_remote if (!defined($remotes{$remote}));
+        }
+    }
+}
+
 #############################
 # export all public symbols #
 #############################

@@ -85,7 +85,13 @@ Configuration:
 
     remote
         The default git remote to use for pushing to Gerrit.
-        Defaults to 'gerrit' if not configured.
+        When not configured, 'gerrit' is used if present, otherwise the
+        pushed branch's upstream remote is used.
+
+    upstream
+        The git remote to assume to be the upstream if the pushed branch
+        does not have a remote-tracking branch configured.
+        Defaults to 'origin' or the only present remote if not configured.
 
     In addition to the git configuration (which takes precedence), the file
     .git-gpush-aliases located next to this program is also read. It may
@@ -105,7 +111,6 @@ License:
 EOM
 }
 
-my $remote = "gerrit";
 my $ref_from;
 my $ref_to;
 
@@ -177,8 +182,6 @@ sub parse_arguments(@)
 sub process_config()
 {
     load_config();
-
-    $remote = git_config('gpush.remote', $remote);
 }
 
 sub lookup_alias($)
@@ -259,6 +262,7 @@ sub determine_local_branch()
         # Next, try to deduce a branch from the commit.
         $local_branch = branch_for_commit($ref_from);
     }
+    setup_remotes($ref_from);
 }
 
 # Obtain the upstream branch for the local branch, unless the remote
