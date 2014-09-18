@@ -15,6 +15,7 @@ use Carp;
 $SIG{__WARN__} = \&Carp::cluck;
 $SIG{__DIE__} = \&Carp::confess;
 
+use List::Util qw(min max);
 use File::Spec;
 use IPC::Open3 qw(open3);
 use Term::ReadKey;
@@ -345,6 +346,20 @@ our $upstream_remote;
 # The name of the Gerrit remote, possibly identical to the upstream remote.
 our $remote;
 
+# The tips of the remote branches which are excluded from commit listings.
+# The commits are already prepared for git-rev-list (prefixed with '^').
+our @upstream_excludes;
+
+sub update_excludes()
+{
+    my %heads;
+    my $urefs = $remote_refs{$upstream_remote};
+    if ($urefs) {
+        $heads{$_} = 1 foreach (values %$urefs);
+    }
+    @upstream_excludes = map { "^$_" } keys %heads;
+}
+
 sub setup_remotes($)
 {
     my ($source) = @_;
@@ -394,11 +409,80 @@ sub setup_remotes($)
             $remote = $upstream_remote if (!defined($remotes{$remote}));
         }
     }
+    update_excludes();
+}
+
+###################
+# commit metadata #
+###################
+
+our %commit_by_id;
+
+sub init_commit($)
+{
+    my ($commit) = @_;
+
+    my $id = $$commit{id};
+    # Duplicating is bad, because it would discard members which are not
+    # necessarily re-instantiated. Also, it's an indicator of inefficiency.
+    die("Commit $id already instantiated")
+        if ($commit_by_id{$id});
+    $commit_by_id{$id} = $commit;
+}
+
+sub changes_from_commits($)
+{
+    my ($commits) = @_;
+
+    return [ map { $$_{change} } @$commits ];
 }
 
 ##################
 # state handling #
 ##################
+
+# This is built upon Change objects with these attributes:
+# - id: Gerrit Change-Id.
+# - src: Local branch name, or "-" if Change is on a detached HEAD.
+
+# Known Gerrit Changes for the current repository, indexed by Change-Id.
+# A Change can exist on multiple branches, so the values are arrays.
+our %changes_by_id;  # { gerrit-id => [ change-object, ... ] }
+
+# Constructor for the Change object.
+sub _init_change($$)
+{
+    my ($change, $changeid) = @_;
+
+    print "Creating Change $changeid.\n" if ($debug);
+    $$change{id} = $changeid;
+    push @{$changes_by_id{$changeid}}, $change;
+}
+
+use constant {
+    CREATE => 1
+};
+
+# Get a Change object for a given Id on the _local_ branch. If no such
+# object exists, create a new one if requested, otherwise return undef.
+sub change_for_id($;$)
+{
+    my ($changeid, $create) = @_;
+
+    my $br = $local_branch // "-";
+    my $chgs = $changes_by_id{$changeid};
+    if ($chgs) {
+        foreach my $chg (@$chgs) {
+            return $chg if ($$chg{src} eq $br);
+        }
+    }
+    if ($create) {
+        my %chg = (src => $br);
+        _init_change(\%chg, $changeid);
+        return \%chg;
+    }
+    return undef;
+}
 
 sub load_refs(@)
 {
@@ -419,6 +503,183 @@ sub load_state()
 {
     print "Loading state ...\n" if ($debug);
     load_refs("refs/heads/", "refs/remotes/");
+}
+
+##########################
+# commit metadata output #
+##########################
+
+# Elide over-long Change subjects, as they add nothing but noise.
+use constant _SUBJECT_WIDTH => 70;
+# Truncation width for Change-Ids and SHA1s; empirically determined to be
+# "sufficiently unambiguous".
+use constant _ID_WIDTH => 10;
+
+sub format_id($)
+{
+    my ($id) = @_;
+
+    return substr($id, 0, _ID_WIDTH);
+}
+
+sub format_subject($$;$)
+{
+    my ($id, $subject, $max) = @_;
+
+    $max = _SUBJECT_WIDTH if (!defined($max));
+    $max += $tty_width if ($max < 0);
+    $max -= _ID_WIDTH + 3 if (defined($id));
+    $max = max(25, min(_SUBJECT_WIDTH, $max)) - 5;
+    # Right-elide if subject is longer than $max + ellipsis:
+    $subject =~ s/^(.{$max}).{6,}$/$1\[...]/;
+    return $subject if (!defined($id));
+    return format_id($id)." ($subject)";
+}
+
+sub _unpack_report($@)
+{
+    my $report = shift @_;
+    my @a = ($$report{id}, $$report{subject},
+             $$report{prefix} // "");
+    push @a, length($a[2]);
+    for (@_) { $_ = shift @a; }
+}
+
+sub format_reports($)
+{
+    my ($reports) = @_;
+
+    my $output = "";
+    foreach my $report (@$reports) {
+        my $type = $$report{type} // "";
+        if ($type eq "flowed") {
+            $output .= wrap("", "", $_)."\n" foreach (@{$$report{texts}});
+        } elsif ($type eq "change") {
+            _unpack_report($report, my ($id, $subject, $prefix, $fixlen));
+            my $str = format_subject($id, $subject, -$fixlen);
+            $output .= $prefix.$str."\n";
+        } else {
+            die("Unknown report type '$type'.\n");
+        }
+    }
+    return $output;
+}
+
+sub report_flowed($@)
+{
+    my ($reports, @texts) = @_;
+
+    push @$reports, {
+        type => "flowed",
+        texts => \@texts
+    };
+}
+
+sub report_local_changes($$)
+{
+    my ($reports, $changes) = @_;
+
+    foreach my $change (@$changes) {
+        my $commit = $$change{local};
+        push @$reports, {
+            type => "change",
+            id => $$commit{changeid},
+            subject => $$commit{subject},
+            prefix => "  ",
+        };
+    }
+}
+
+#############################
+# commit metadata retrieval #
+#############################
+
+use constant _GIT_LOG_ARGS =>
+        ('-z', '--pretty=%H%x00%P%x00%T%x00%B%x00%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd');
+
+# Retrieve metadata for commits reachable from the specified tips.
+sub visit_commits_raw($$;$)
+{
+    my ($tips, $args, $cid_opt) = @_;
+
+    return if (!@$tips);
+
+    my @commits;
+    my $log = open_process(USE_STDIN | USE_STDOUT | FWD_STDERR,
+                           'git', 'log', _GIT_LOG_ARGS, @$args, '--stdin');
+    write_process($log, map { "$_\n" } @$tips);
+    my @author = (undef, undef, undef);
+    my @committer = (undef, undef, undef);
+    while (read_fields($log, my ($id, $parents, $tree, $message), @author, @committer)) {
+        # We truncate the subject anyway, so using just the first line is OK.
+        $message =~ /^(.*)$/m;
+        my $subject = $1;
+
+        my @cids = ($message =~ /^Change-Id: (.+)$/mg);
+        my $changeid;
+        if (!@cids) {
+            fail(format_subject($id, $subject, -18)." has no Change-Id.\n")
+                if (!$cid_opt);
+        } else {
+            # Gerrit uses the last Change-Id if multiple are present.
+            $changeid = $cids[-1];
+        }
+
+        print "-- $id: ".format_subject($changeid, $subject, -45)."\n" if ($debug);
+
+        unshift @commits, {
+            id => $id,
+            parents => [ split(/ /, $parents) ],
+            changeid => $changeid,
+            subject => $subject,
+            message => $message,
+            tree => $tree,
+            author => [ @author ],  # Force copy, as these are ...
+            committer => [ @committer ]  # ... not loop-local.
+        };
+    }
+    close_process($log);
+    return \@commits;
+}
+
+sub visit_commits($$;$)
+{
+    my ($tips, $args, $cid_opt) = @_;
+
+    my $commits = visit_commits_raw($tips, $args, $cid_opt);
+    foreach my $commit (@$commits) {
+        init_commit($commit);
+    }
+    return $commits;
+}
+
+sub visit_local_commits($;$)
+{
+    my ($tips, $cid_opt) = @_;
+
+    # We exclude all upstream heads instead of only that of the current branch,
+    # because Gerrit will ignore all known commits (reviewed or not).
+    # This matters for cross-branch pushes and re-targeted Changes, where a commit
+    # can have known ancestors which aren't on its upstream branch.
+    return visit_commits($tips, \@upstream_excludes, $cid_opt);
+}
+
+sub analyze_local_branch($)
+{
+    my ($tip) = @_;
+
+    # Get the revs ...
+    print "Enumerating local Changes ...\n" if ($debug);
+    my $commits = visit_local_commits([ $tip ]);
+
+    # ... and then add them to the set of local Changes.
+    foreach my $commit (@$commits) {
+        my $change = change_for_id($$commit{changeid}, CREATE);
+        $$commit{change} = $change;
+        $$change{local} = $commit;
+    }
+
+    return $commits;
 }
 
 #############################

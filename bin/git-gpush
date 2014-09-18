@@ -39,6 +39,10 @@ Description:
     You can use email addresses, Gerrit usernames, or aliases for the
     name of the reviewers/CCs.
 
+    The pushed commits are listed by default. Conforming with Gerrit,
+    these are the commits which are not on any branch of the pushed
+    branch's upstream remote.
+
     If no sha1 or ref-from is specified, 'HEAD' is used.
 
     Note that this program can be used in the middle of an interactive
@@ -197,6 +201,35 @@ sub lookup_alias($)
     return $user;
 }
 
+sub caption_group($)
+{
+    my ($group) = @_;
+
+    my $changes = $$group{changes};
+    my $to = $$group{branch};
+    return (sprintf("Pushing %d Change(s) for %s to '%s':",
+                    int(@$changes), $to, $remote),
+            $changes);
+}
+
+sub report_pushed_group($$)
+{
+    my ($reports, $group) = @_;
+
+    my ($title, $changes) = caption_group($group);
+    report_flowed($reports, $title);
+    report_local_changes($reports, $changes);
+}
+
+sub report_pushed_changes($)
+{
+    my ($group) = @_;
+
+    my @reports;
+    report_pushed_group(\@reports, $group);
+    return \@reports;
+}
+
 # Find _the_ branch the specified commit lives on. This can be the current
 # branch (and other branches are ignored), or _one_ other branch.
 sub branch_for_commit($)
@@ -283,21 +316,45 @@ sub determine_remote_branch($)
     $$group{branch} = $br;
 }
 
+sub finalize_get_changes($)
+{
+    my ($changes) = @_;
+
+    my %group = (changes => $changes);
+    return \%group;
+}
+
+# Get the list of local commits to push.
 sub get_changes()
 {
-    my %group;
-    $group{tip} = $ref_from;
-    return \%group;
+    my $commits = analyze_local_branch($ref_from);
+    my $changes = changes_from_commits($commits);
+    fail("Specified commit range is empty.\n") if (!@$changes);
+    my $group = finalize_get_changes($changes);
+    return $group;
+}
+
+sub make_listing($)
+{
+    my ($group) = @_;
+
+    return report_pushed_changes($group);
+}
+
+sub show_changes($)
+{
+    my ($group) = @_;
+
+    print format_reports(make_listing($group));
 }
 
 sub push_changes($)
 {
     my ($group) = @_;
 
-    my $tip = $$group{tip};
+    my $from = $$group{changes}[-1];
+    my $tip = $$from{local}{id};
     my $to = $$group{branch};
-
-    print "Pushing $tip for $to on $remote ...\n" if (!$quiet);
 
     my @push_options;
     push @push_options, map { "r=$_" } @reviewers;
@@ -317,6 +374,7 @@ sub execute_pushing()
 {
     my $group = get_changes();
     determine_remote_branch($group);
+    show_changes($group) if (!$quiet);
     push_changes($group);
 }
 
