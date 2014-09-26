@@ -52,10 +52,12 @@ Description:
 
 Options:
     -d, --draft
-        Mark the pushed changes as drafts.
+        Mark the pushed changes as drafts. This switch is usually
+        unnecessary, as gpush will recognize WIP changes by subject.
 
     -p, --publish
-        Do not mark the pushed changes as drafts.
+        Do not mark the pushed changes as drafts even if they have
+        WIP markers.
 
     --aliases
         Report all registered aliases and quit.
