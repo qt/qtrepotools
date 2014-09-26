@@ -49,6 +49,9 @@ Description:
     rebase, to push out the amended commits instantly.
 
 Options:
+    -f, --force
+        Push despite newer PatchSets being on Gerrit.
+
     -r, --remote
         Specify the git remote to push to.
 
@@ -132,6 +135,7 @@ EOM
 my $ref_from;
 my $ref_to;
 my $force_branch = 0;
+my $force = 0;
 my $list_only = 0;
 my $list_online = 0;
 
@@ -152,6 +156,8 @@ sub parse_arguments(@)
             $verbose = 1;
         } elsif ($arg eq "-n" || $arg eq "--dry-run") {
             $dry_run = 1;
+        } elsif ($arg eq "-f" || $arg eq "--force") {
+            $force = 1;
         } elsif ($arg eq "-r" || $arg eq "--remote") {
             fail("--remote needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $remote = shift @_;
@@ -207,7 +213,7 @@ sub parse_arguments(@)
     }
 
     my $push_specific =
-            @reviewers || @CCs || $force_branch
+            @reviewers || @CCs || $force || $force_branch
             || defined($remote) || defined($ref_to);
 
     if ($list_only) {
@@ -460,6 +466,8 @@ sub map_remote_changes($)
 
 use constant {
     NEW => 'NEW',
+    FORCE => 'FORCE',
+    MISSING => 'MISSING',
     MODIFIED => 'MODIFIED',
     UNMODIFIED  => 'UNMODIFIED',
     OUTDATED => 'OUTDATED',
@@ -488,6 +496,7 @@ sub classify_changes_offline($)
 
 my $have_rejected = 0;
 my $have_modified = 0;
+my $need_force = 0;
 
 sub classify_changes_online($)
 {
@@ -522,10 +531,25 @@ sub classify_changes_online($)
             $$change{freshness} = REJECTED;
             $have_rejected++;
         } else {
+            # Finally, check whether the current PatchSet on Gerrit meets our
+            # expectations, so we don't accidentally play ping-pong.
+            my $pushed = $$change{pushed};
             if ($ginfo) {
-                $$change{freshness} = MODIFIED;
+                if (!defined($pushed) || ($pushed ne $curr_sha1)) {
+                    my $pushed_rev = defined($pushed) && $$chg_revs{$pushed};
+                    $$change{patchset} = $pushed_rev ? $$pushed_rev{ps} : "?";
+                    $$change{freshness} = FORCE;
+                    $need_force = 1;
+                } else {
+                    $$change{freshness} = MODIFIED;
+                }
             } else {
-                $$change{freshness} = NEW;
+                if (defined($pushed)) {
+                    $$change{freshness} = MISSING;
+                    $need_force = 1;
+                } else {
+                    $$change{freshness} = NEW;
+                }
             }
             $have_modified++;
         }
@@ -549,7 +573,7 @@ sub annotate_changes($)
         my $freshness = $$change{freshness};
         if ($freshness ne UNMODIFIED) {
             $freshness = "PS$$change{patchset}/$freshness"
-                if ($freshness eq OUTDATED);
+                if ($freshness eq OUTDATED || $freshness eq FORCE);
             push @attribs, $freshness;
         }
         $$change{annotation} = '  ['.join('; ', @attribs).']'
@@ -587,6 +611,9 @@ sub print_errors($)
 
     fail_push($group, "Giving up - push is going to be rejected.\n")
         if ($have_rejected);
+    fail_push($group, "Local state is out of sync with Gerrit.\n",
+                      "Please specify --force to push nonetheless.\n")
+        if ($need_force && !$force);
 }
 
 sub push_changes($)
