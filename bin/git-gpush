@@ -500,6 +500,34 @@ sub determine_topic($)
     $$group{topic} = $tpc;
 }
 
+sub scan_pushed_group($$)
+{
+    my ($group, $commits) = @_;
+
+    my $changes = $$group{changes};
+    foreach my $change (@$changes) {
+        my $pcommit = $$change{pushed};
+        if (!defined($pcommit)) {
+            # We stop at the 1st not previously pushed commit, as subsequent
+            # commits are obviously modified anyway.
+            last;
+        }
+        push @$commits, $pcommit;
+    }
+}
+
+# Retrieve metadata for commits corresponding with previous pushes
+# of one ordered series of Changes.
+sub visit_pushed_changes($)
+{
+    my ($group) = @_;
+
+    my @commits;
+    scan_pushed_group($group, \@commits);
+    print "Visiting pushed commits ...\n" if ($debug);
+    visit_local_commits(\@commits);
+}
+
 sub initialize_get_changes()
 {
     my $commit = parse_local_rev($from, SPEC_TIP);
@@ -734,12 +762,66 @@ sub determine_base($)
     $$group{base} = $base;
 }
 
-sub rebase_commit($$)
+sub prepare_rebase($$)
 {
-    my ($commit, $base_id) = @_;
+    my ($change, $base_id) = @_;
+
+    my $old_id = $$change{pushed};
+    if (!defined($old_id)) {
+        print "Not previously pushed.\n" if ($debug);
+        return;
+    }
+    my $old_commit = $commit_by_id{$old_id};
+    if (!$old_commit) {
+        # Previously pushed Changes on top of fresh ones may be unvisited,
+        # as visit_pushed_changes() skips them.
+        print "Previously pushed, but not visited.\n" if ($debug);
+        return;
+    }
+
+    my $old_base_id = get_1st_parent($old_commit);
+    if ($base_id eq $old_base_id) {
+        # We are picking the same Change to the same base.
+        print "Previously pushed, same base SHA1.\n" if ($debug);
+        return ($old_commit, $old_base_id);
+    }
+
+    # The Change had previously a different parent commit. It is
+    # irrelevant whether the Changes were re-shuffled or the parent
+    # Change was amended - a new base will yield a new commit.
+    print "Previously pushed, different base SHA1.\n" if ($debug);
+    return;
+}
+
+sub commits_equal($$$$)
+{
+    my ($base_id, $tree, $commit, $old_commit) = @_;
+
+    return $old_commit
+        && ($tree eq $$old_commit{tree})
+        && ($base_id eq get_1st_parent($old_commit))
+        && (get_more_parents($commit) eq get_more_parents($old_commit))
+        && ($$commit{message} eq $$old_commit{message})
+        && ("@{$$commit{author}}" eq "@{$$old_commit{author}}");
+}
+
+sub rebase_commit($$$)
+{
+    my ($commit, $base_id, $old_commit) = @_;
 
     my $parents = $$commit{parents};
     my $parent_id = get_1st_commit($parents);
+
+    if ($base_id eq $parent_id) {
+        # Same base, so no need to actually rebase.
+        if (commits_equal($base_id, $$commit{tree}, $commit, $old_commit)) {
+            # The source commit was amended, but without real change.
+            return ($old_commit, 're-created w/o rebase');
+        }
+        # No previously pushed commit or it does not match,
+        # so use the source commit as-is.
+        return ($commit, 'verbatim');
+    }
 
     # Technically, it would be possible to rebase merges along the
     # first parents, but there is no point in supporting this here.
@@ -753,16 +835,25 @@ sub rebase_commit($$)
         $tree = $$commit{tree};
     } else {
         ($tree, $errors) = apply_diff($commit, $base_id, USE_STDERR);
-        return (undef, $errors) if (!defined($tree));
+        return (undef, undef, $errors) if (!defined($tree));
     }
 
+    if (commits_equal($base_id, $tree, $commit, $old_commit)) {
+        # If we produced the same contents as last time, we re-use the
+        # commit we already have in the _pushed ref - that way, we save
+        # some work, and any local rebasing will not affect the final SHA1.
+        return ($old_commit, 're-created w/rebase');
+    }
+
+    # No previously pushed commit or it does not match,
+    # so create a new one.
     my $new_parents = ($base_id eq 'ROOT') ? [] : [ $base_id ];
     my $new_commit = create_commit(
             $new_parents, $tree, $$commit{message},
             $$commit{author}, $$commit{committer});
     $$new_commit{changeid} = $$commit{changeid};
     $$new_commit{subject} = $$commit{subject};
-    return $new_commit;
+    return ($new_commit, 'fresh');
 }
 
 my $have_conflicts = 0;
@@ -772,12 +863,6 @@ sub do_rebase_changes($)
     my ($group) = @_;
     my ($base, $changes) = ($$group{base}, $$group{changes});
 
-    if (get_1st_parent($$changes[0]{local}) eq $base) {
-        $$_{final} = $$_{local} foreach (@$changes);
-        print "Not rebasing - base is already $base.\n" if ($verbose);
-        return;
-    }
-
     printf("Rebasing %d commit(s) to %s.\n", int(@$changes), format_id($base))
         if ($verbose);
 
@@ -785,7 +870,12 @@ sub do_rebase_changes($)
         my $change = $$changes[$idx];
         my $commit = $$change{local};
         printf("Rebasing [%d] %s\n", $idx, format_commit($commit, -14)) if ($debug);
-        my ($new_commit, $errors) = rebase_commit($commit, $base);
+        # We attempt to re-create the exact same commits we pushed previously,
+        # so we don't create new PatchSets for umodified Changes regardless of
+        # any local rebasing.
+        my $old_commit = prepare_rebase($change, $base);
+        my ($new_commit, $did, $errors) =
+                rebase_commit($commit, $base, $old_commit);
         if (!$new_commit) {
             if (!defined($errors)) {
                 set_change_error($change, 'oneline',
@@ -800,7 +890,7 @@ sub do_rebase_changes($)
             $have_conflicts++;
             last;
         }
-        printf("Picked as %s\n", format_id($$new_commit{id})) if ($debug);
+        printf("Picked as %s (%s)\n", format_id($$new_commit{id}), $did) if ($debug);
         %commit2diff = ();
         $$change{final} = $new_commit;
         $base = $$new_commit{id};
@@ -1113,6 +1203,7 @@ sub execute_pushing()
     determine_topic($group);
     if ($online) {
         determine_base($group);
+        visit_pushed_changes($group);
         rebase_changes($group);
         classify_changes_online($group);
     } elsif (!$quiet) {
