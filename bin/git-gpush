@@ -9,6 +9,9 @@
 use strict;
 use warnings;
 
+use Carp;
+$SIG{__WARN__} = \&Carp::cluck;
+
 use File::Basename;
 
 # Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
