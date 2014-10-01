@@ -544,6 +544,8 @@ sub scan_pushed_group($$)
             last;
         }
         push @$commits, $pcommit;
+        my $ocommit = $$change{orig};
+        push @$commits, $ocommit if (defined($ocommit));
     }
 }
 
@@ -859,9 +861,9 @@ sub commits_equal($$$$)
         && ("@{$$commit{author}}" eq "@{$$old_commit{author}}");
 }
 
-sub rebase_commit($$$)
+sub rebase_commit($$$$$)
 {
-    my ($commit, $base_id, $old_commit) = @_;
+    my ($commit, $base_id, $old_commit, $old_base_id, $orig_id) = @_;
 
     my $parents = $$commit{parents};
     my $parent_id = get_1st_commit($parents);
@@ -883,6 +885,32 @@ sub rebase_commit($$$)
 
     my ($tree, $errors);
     my $parent = $commit_by_id{$parent_id};
+    if ($old_commit && ($base_id eq $old_base_id) && defined($orig_id)) {
+        if ($$commit{id} eq $orig_id) {
+            # We are picking the same commit to the same base, so
+            # we can just recycle the previously created commit.
+            return ($old_commit, 'recycled unmodified');
+        }
+        my $orig_commit = $commit_by_id{$orig_id};
+        if ($orig_commit && ($$commit{tree} eq $$orig_commit{tree})) {
+            # Upstream commits are not visited, so we get no tree id. However,
+            # as this code aims at series which were not rebased, using the base
+            # commit itself will work just as well for the series' first commit.
+            if (($parent ? $$parent{tree} : $parent_id)
+                    eq get_1st_parent_tree($orig_commit)) {
+                if (($$commit{message} eq $$orig_commit{message})
+                        && ("@{$$commit{author}}" eq "@{$$orig_commit{author}}")) {
+                    # We are picking the same content to the same base, so
+                    # we can just recycle the previously created commit.
+                    return ($old_commit, 'recycled amended');
+                }
+                # We are picking the same diff to the same base, so
+                # we can recycle the previously created tree.
+                $tree = $$old_commit{tree};
+                goto COMMIT;
+            }
+        }
+    }
     my $base = $commit_by_id{$base_id};
     if ($base && $parent && ($$base{tree} eq $$parent{tree})) {
         # The parent commits differ, but their trees are the same.
@@ -901,6 +929,7 @@ sub rebase_commit($$$)
 
     # No previously pushed commit or it does not match,
     # so create a new one.
+  COMMIT:
     my $new_parents = ($base_id eq 'ROOT') ? [] : [ $base_id ];
     my $new_commit = create_commit(
             $new_parents, $tree, $$commit{message},
@@ -927,9 +956,9 @@ sub do_rebase_changes($)
         # We attempt to re-create the exact same commits we pushed previously,
         # so we don't create new PatchSets for umodified Changes regardless of
         # any local rebasing.
-        my $old_commit = prepare_rebase($change, $base);
+        my ($old_commit, $old_base) = prepare_rebase($change, $base);
         my ($new_commit, $did, $errors) =
-                rebase_commit($commit, $base, $old_commit);
+                rebase_commit($commit, $base, $old_commit, $old_base, $$change{orig});
         if (!$new_commit) {
             if (!defined($errors)) {
                 set_change_error($change, 'oneline',
@@ -1246,6 +1275,7 @@ sub update_state($)
         }
         $$change{tgt} = $branch;
         my $commit = $$change{local};
+        $$change{orig} = $$commit{id};
         # --rebase would be required after redoing a merge with a different
         # 1st parent anyway, so just don't save the base for merges.
         # Regular commits on top of merges are auto-rebased as well.

@@ -647,6 +647,7 @@ our %gerrit_infos_by_id;
 #   from this repository.
 # - base: SHA1 of commit on top of which the entire series which this
 #   Change is part of was pushed.
+# - orig: SHA1 of the _local_ commit 'pushed' was derived from.
 
 my $next_key = 10000;
 # All known Gerrit Changes for the current repository.
@@ -695,7 +696,7 @@ sub save_state(;$$)
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
     my @fkeys = ('key', 'id', 'src', 'tgt', 'topic', 'base');
-    my @rkeys = ('pushed');
+    my @rkeys = ('pushed', 'orig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";
         push @fkeys, @rkeys;

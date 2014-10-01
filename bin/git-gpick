@@ -1554,6 +1554,8 @@ sub complete_spec_heads($)
                     # To be able to set {did_query} once we have the commits.
                     push @queried, $pushed;
                 }
+                my $orig = $$change{orig};
+                $visits{$orig} = undef if (defined($orig));
             }
         }
     }
@@ -1976,6 +1978,36 @@ sub apply_specs($$)
     return \@pairs;
 }
 
+sub can_recycle($$$)
+{
+    my ($commit, $orig_id, $pushed_commit) = @_;
+
+    return 0 if (!$pushed_commit || !defined($orig_id));
+    return 1 if ($$commit{id} eq $orig_id);
+
+    # If we have no direct hit, we may still get lucky with
+    # the commit's contents. First compare the trees themselves ...
+    my $orig_commit = $commit_by_id{$orig_id};
+    return 0 if (!$orig_commit || ($$commit{tree} ne $$orig_commit{tree}));
+
+    # ... and then also the base trees, as otherwise we would miss
+    # it if commits were split or joined.
+    my $parent_tree = get_1st_parent_tree($commit);
+    return 0 if ($parent_tree ne get_1st_parent_tree($orig_commit));
+
+    # Finally compare the meta data.
+    return 1 if (($$commit{message} eq $$orig_commit{message})
+                 && ("@{$$commit{author}}" eq "@{$$orig_commit{author}}")
+                 && (get_more_parents($commit) eq get_more_parents($orig_commit)));
+
+    # While the commit is not the same, the diff is, so pre-populate
+    # the tree cache for later comparisons.
+    my $pushed_parent_tree = get_1st_parent_tree($pushed_commit);
+    my $ck = $pushed_parent_tree.$parent_tree.$$commit{tree};
+    $commit2diff{$ck} = $$pushed_commit{tree};
+    return 0;
+}
+
 sub format_parts($;$)
 {
     my ($parts, $masked) = @_;
@@ -2359,14 +2391,24 @@ sub do_adjust_changes($)
                 my $pushed_rev = $$ginfo{rev_by_id}{$pushed_id};
                 $pushed_ps = $pushed_rev ? $$pushed_rev{ps} : "?";
             }
+            my $commit = $lcl_commit;
+            if (can_recycle($commit, $$change{orig}, $pushed_commit)) {
+                # If we are testing a commit which did not change since the last time
+                # it was pushed, we can just use the rebased pushed commit instead.
+                # This makes some of the verify_commit() calls very cheap.
+                printf("Recycling for verification (local %s => pushed %s).\n",
+                       format_id($$commit{id}), format_id($pushed_id))
+                    if ($debug);
+                $commit = $pushed_commit;
+            }
             my ($pfx, $annot);
             if ($action == DELETE) {
                 ($upd, $pfx, $annot) =
-                    verify_delete(\@reports, $lcl_commit, $rmt_commit, $rmt_ps,
+                    verify_delete(\@reports, $commit, $rmt_commit, $rmt_ps,
                                   $pushed_commit, $pushed_ps, \$need_force_del);
             } else {
                 ($upd, $parts, $pfx, $annot) =
-                    verify_update(\@reports, $lcl_commit, $rmt_commit, $rmt_ps,
+                    verify_update(\@reports, $commit, $rmt_commit, $rmt_ps,
                                   $pushed_commit, $pushed_ps, \$need_force_repl, \$can_merge);
             }
             report_update(\@reports, $pfx, $annot, $lcl_commit, $ginfo) if (defined($pfx));
@@ -2391,6 +2433,11 @@ sub do_adjust_changes($)
             push @commits, $commit;
             if ($upd & UPD_PUSHED) {
                 $$change{pushed} = $$rmt_commit{id};
+                # Make the downloaded commit recyclable. This won't help in many
+                # cases, as any added/dropped/tree-modified commits will invalidate
+                # it anyway, but tracking that would add complexity for little benefit.
+                $$change{orig} = $$commit{id}
+                    if ($parts == NO_PARTS);
             }
             # Generally, the base should match the latest PatchSet even if
             # we push over it in the end, to optimize inter-diffs.
