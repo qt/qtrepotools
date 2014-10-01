@@ -52,10 +52,11 @@ Description:
     them onto a new base. This has the advantage that you can keep many
     unrelated "series" in your local branch without creating spurious
     dependencies on Gerrit, effectively pretending that you have a separate
-    branch for every series. Furthermore, you can keep the base of
-    subsequent pushes of the same series constant, which means that you
-    can closely track the upstream branch without pushing needless rebases
-    to Gerrit (which would obfuscate inter-PatchSet diffs).
+    branch for every series. Furthermore, gpush will keep the base of
+    subsequent pushes of the same series constant (unless told otherwise),
+    which means that you can closely track the upstream branch without
+    pushing needless rebases to Gerrit (which would obfuscate inter-PatchSet
+    diffs).
 
     'From' may be specified as either a ref, a SHA1, or a Gerrit Change-Id,
     possibly abbreviated. Git rev-spec suffixes like '~2' are allowed; if
@@ -92,10 +93,14 @@ Options:
         Specify the commit to rebase the pushed series onto. It is possible
         to specify arbitrary other commits already known to Gerrit, including
         still pending PatchSets. Use 'ROOT' to orphan the series.
-        If no base is specified, gpush will use the head of the target branch
-        on the gerrit remote. That means that you can set a new default base
-        by fetching your gerrit remote, which you should do much less often
-        than fetching the origin remote.
+        Except for merge commits and their children, once chosen, the base
+        will persist through subsequent pushes until overridden, even when
+        the series grows.
+        By default, the local branch's base is used.
+
+    --rebase
+        Reset the base of a previously pushed series to the local branch's
+        base. Typically used after a conflicted pull.
 
     -l, --list
         Report all Changes that would be pushed, then quit.
@@ -158,13 +163,14 @@ Configuration:
 
 Examples:
     git gpush .. +alex
-        Push HEAD and its ancestors for the upstream branch of HEAD,
-        rebased on top of the current tip of that branch, and add 'alex'
-        as a reviewer.
+        Push HEAD and its ancestors for the upstream branch of HEAD, and
+        add 'alex' as a reviewer. No rebasing is initially done, but note
+        that the remote base will stick even if you subsequently rebase
+        the local branch.
 
     git gpush I2c9ccbc26..I9434d28fc
         Push the range identified by Gerrit Change-Ids for the upstream
-        branch of HEAD, rebased on top of the current tip of that branch.
+        branch of HEAD, rebased on top of the local branch's base.
 
     git gpush ~1:3 -b 5.4 -o 85af7f4538b
         Push the range HEAD~4..HEAD~1 for branch 5.4, rebased on top of
@@ -198,6 +204,7 @@ my @CCs;
 
 sub parse_arguments(@)
 {
+    my $rebase = 0;
     while (scalar @_) {
         my $arg = shift @_;
 
@@ -226,6 +233,8 @@ sub parse_arguments(@)
         } elsif ($arg eq "-o" || $arg eq "--onto" || $arg eq "--base") {
             fail("--onto needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $ref_base = shift @_;
+        } elsif ($arg eq "--rebase") {
+            $rebase = 1;
         } elsif ($arg eq "-l" || $arg eq "--list") {
             $list_only = 1;
         } elsif ($arg eq "-ll" || $arg eq "--list-online") {
@@ -272,6 +281,10 @@ sub parse_arguments(@)
 
     fail("--quiet and --verbose/--debug are mutually exclusive.\n")
         if ($quiet && $verbose);
+
+    fail("--base and --rebase are mutually exclusive.\n")
+        if (defined($ref_base) && $rebase);
+    $ref_base = "" if ($rebase);
 
     if (!defined($from)) {
         $from = "HEAD";
@@ -749,15 +762,38 @@ sub determine_base($)
     confirm_ref_base();
     my $base = $ref_base;
     if (!defined($base)) {
-        # We base this on the target remote under the assumption that it will
-        # be updated only when really necessary, unlike the origin remote.
-        my $refs = $remote_refs{$remote};
-        my $to = $$group{branch};
-        $base = $refs && $$refs{$to};
-        wfail("Remote '$remote' does not appear to have branch '$to'."
-                ." Maybe fetch it?\n")
-            if (!defined($base));
-        print "Using upstream $base as base.\n" if ($verbose);
+        # We have no base yet, so deduce it from the previous push(es).
+        # The simple approach would be using the merge-base(s) of the
+        # previous push(es) and upstream. However, that would not work
+        # if we based the series on another pending series. To address
+        # this, we could stop the ancestor traversal at the first Change
+        # which is not part of this series. But then Changes dropped from
+        # the bottom of the series would appear to be bases. That means
+        # that we need to record the base of each push explicitly.
+        #
+        # Note that gpick'ing (or re-syncing after manual picking) records
+        # the base of the Change's series as seen on Gerrit. That implies
+        # that if a series was picked only partially, re-pushing it with
+        # gpush will "rebase up" these Changes, thus making their order
+        # relative to the omitted Changes ambiguous on Gerrit. This may
+        # be surprising at first, but it makes sense, as a partial pick
+        # is functionally equivalent to gpick-ing the entire series and
+        # subsequently dropping some Changes locally.
+        $base = aggregate_property($group, 'base',
+                                   sub { $_[0]->{base} },
+                                   sub { '  @'.substr($_[0], 0, 8) });
+        # Technically, we should re-validate the base before each push,
+        # because pending PatchSets (or entire Changes) can be deleted,
+        # and upstream commits can disappear due to forced pushes.
+        # While querying base PatchSets along with the pushed Changes
+        # would be cheap and easy, we'd still need a fallback for direct-
+        # pushed base commits, and we'd need to fetch the target remote
+        # if we wanted to catch forced pushes reliably.
+        # This all doesn't appear to be worth it ...
+    }
+    if (!length($base)) {
+        $base = $local_base;
+        print "Basing series on local branch's base.\n" if ($verbose);
     }
     $$group{base} = $base;
 }
@@ -1039,7 +1075,7 @@ sub print_errors($)
 {
     my ($group) = @_;
 
-    fail_push($group, "Please specify a different base.\n")
+    fail_push($group, "Please use --rebase or specify a different base.\n")
         if ($have_conflicts);
     fail_push($group, "Giving up - push is going to be rejected.\n")
         if ($have_rejected);
@@ -1163,7 +1199,7 @@ sub update_state($)
 {
     my ($group) = @_;
 
-    my ($branch, $tpc) = ($$group{branch}, $$group{topic});
+    my ($branch, $tpc, $base) = ($$group{branch}, $$group{topic}, $$group{base});
     # Setting an empty topic clears the previous topic from the server.
     $tpc = undef if (defined($tpc) && !length($tpc));
     foreach my $change (@{$$group{changes}}) {
@@ -1173,6 +1209,12 @@ sub update_state($)
             $$change{topic} = $tpc;
         }
         $$change{tgt} = $branch;
+        my $commit = $$change{local};
+        # --rebase would be required after redoing a merge with a different
+        # 1st parent anyway, so just don't save the base for merges.
+        # Regular commits on top of merges are auto-rebased as well.
+        $base = undef if (@{$$commit{parents}} > 1);
+        $$change{base} = $base;
     }
 }
 

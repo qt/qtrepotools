@@ -645,6 +645,8 @@ our %gerrit_infos_by_id;
 # - topic: Gerrit topic. Persisted only as a cache.
 # - pushed: SHA1 of the commit this Change was pushed as last time
 #   from this repository.
+# - base: SHA1 of commit on top of which the entire series which this
+#   Change is part of was pushed.
 
 my $next_key = 10000;
 # All known Gerrit Changes for the current repository.
@@ -692,7 +694,7 @@ sub save_state(;$$)
 
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
-    my @fkeys = ('key', 'id', 'src', 'tgt', 'topic');
+    my @fkeys = ('key', 'id', 'src', 'tgt', 'topic', 'base');
     my @rkeys = ('pushed');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";

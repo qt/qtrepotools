@@ -972,6 +972,23 @@ sub drop_merged_patchsets($$)
     }
 }
 
+# Traverse a series until we hit the upstream. On the way back,
+# set each visited commit's push base to the found merge base.
+sub set_base_deduced($);
+
+sub set_base_deduced($)
+{
+    my ($sha1) = @_;
+
+    my $commit = $commit_by_id{$sha1};
+    return $sha1 if (!$commit);
+    my $base = $$commit{base};
+    return $base if (defined($base));
+    $base = set_base_deduced(get_1st_parent($commit));
+    $$commit{base} = $base;
+    return $base;
+}
+
 sub analyze_patchset($$)
 {
     my ($ginfo, $cat) = @_;
@@ -987,6 +1004,7 @@ sub analyze_patchset($$)
     wfail("PatchSet $$rev{ps} of Change $$ginfo{key} is apparently upstream?!\n")
         if (!$commit);
     $$ginfo{"${cat}_commit"} = $commit;
+    set_base_deduced($rev_id);
 }
 
 # Extract additional information from the fetched PatchSets.
@@ -1044,9 +1062,9 @@ sub attach_series($$$)
     }
 }
 
-sub assemble_series($$$$@)
+sub assemble_series($$$$$@)
 {
-    my ($changeid, $sha1, $seen, $callback, @args) = @_;
+    my ($changeid, $sha1, $base, $seen, $callback, @args) = @_;
 
     my $commit = $commit_by_id{$sha1};
     if (!$commit) {
@@ -1068,11 +1086,16 @@ sub assemble_series($$$$@)
         unshift @series, $commit;
 
         $sha1 = get_1st_parent($commit);
+        if (defined($base) && ($sha1 eq $base)) {
+            print "Hit base.\n" if ($debug);
+            $commit = undef;
+            last;
+        }
         if (!($commit = $commit_by_id{$sha1})) {
             print "Hit upstream.\n" if ($debug);
             last;
         }
-        my ($nsha1, $stop) = $callback->($commit, @args);
+        my ($nsha1, $stop) = $callback->($commit, \$base, @args);
         if ($stop) {
             $commit = undef;
             last;
@@ -1089,9 +1112,9 @@ sub assemble_series($$$$@)
     return (\@series, $commit);
 }
 
-sub advance_pushed_series($@)
+sub advance_pushed_series($$@)
 {
-    my ($commit, $stamp, $pmap, $missing, $fails) = @_;
+    my ($commit, $base, $stamp, $pmap, $bmap, $missing, $fails) = @_;
 
     my ($sha1, $changeid) = ($$commit{id}, $$commit{changeid});
     my $ginfo = $gerrit_info_by_sha1{$sha1};
@@ -1113,6 +1136,8 @@ sub advance_pushed_series($@)
         }
         # The ancestors must be younger. See below.
         $$stamp = $$rev{ts};
+        my $nbase = $$bmap{$changeid};
+        $$base = $nbase if (defined($nbase));
         return $nsha1;
     }
     #print "$changeid ($sha1) is only deduced.\n" if ($debug);
@@ -1174,17 +1199,18 @@ sub complete_pushed_series($$)
             next;
         }
         my $stamp = $$rev{ts};
+        my $base = $$change{base};
         my ($series, $anchor) = assemble_series(
-                $changeid, $sha1, \%seen, \&advance_pushed_series,
-                \$stamp, $$spec{pmap}, $missing, \$fails);
+                $changeid, $sha1, $base, \%seen, \&advance_pushed_series,
+                \$stamp, $$spec{pmap}, $$spec{bmap}, $missing, \$fails);
         attach_series($series, $anchor, \%result) if (!$fails);
     }
     $$spec{pushed_changes} = \%result if (!$fails);
 }
 
-sub advance_remote_series($@)
+sub advance_remote_series($$@)
 {
-    my ($commit, $stamp, $missing, $fails) = @_;
+    my ($commit, $base, $stamp, $bmap, $missing, $fails) = @_;
 
     my ($sha1, $changeid) = ($$commit{id}, $$commit{changeid});
     my $ginfo = $gerrit_info_by_sha1{$sha1};
@@ -1202,20 +1228,22 @@ sub advance_remote_series($@)
         return undef;
     }
     my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
+    my $nbase = $$bmap{$changeid};
+    $$base = $nbase if (defined($nbase));
     return $$rev{id};
 }
 
 # Assemble a remote series from its tip commit. On the way record required
 # Changes that we didn't query yet, and fail the operation if there are any.
-sub assemble_remote_series($$$$$)
+sub assemble_remote_series($$$$$$$)
 {
-    my ($ginfo, $stamp, $seen, $missing, $fails) = @_;
+    my ($ginfo, $base, $stamp, $bmap, $seen, $missing, $fails) = @_;
 
     my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
     my $sha1 = $$rev{id};
     my ($series, $anchor) = assemble_series(
-            $$ginfo{id}, $sha1, $seen, \&advance_remote_series,
-            $stamp, $missing, $fails);
+            $$ginfo{id}, $sha1, $base, $seen, \&advance_remote_series,
+            $stamp, $bmap, $missing, $fails);
     return ($series, $anchor);
 }
 
@@ -1238,7 +1266,7 @@ sub complete_remote_series($$)
             next;
         }
         my ($series, $anchor) = assemble_remote_series(
-                $ginfo, $$spec{stamp}, \%seen, $missing, \$fails);
+                $ginfo, $$change{base}, $$spec{stamp}, $$spec{bmap}, \%seen, $missing, \$fails);
         attach_series($series, $anchor, \%result) if (!$fails);
     }
     $$spec{changes} = \%result if (!$fails);
@@ -1257,7 +1285,7 @@ sub resolve_insertion_spec($$)
     # First assemble the entire series.
     my $fails = 0;
     my ($series, undef) = assemble_remote_series(
-            $tip, $stamp, undef, $missing, \$fails);
+            $tip, undef, $stamp, {}, undef, $missing, \$fails);
     wfail("Range $$spec{orig} is empty.\n") if (!@$series);
     return if ($fails);
 
@@ -1534,15 +1562,18 @@ sub complete_spec_tails($)
     foreach my $spec (@$specs) {
         next if ($$spec{action} != UPDATE);
 
-        my %pmap;
+        my (%bmap, %pmap);
         foreach my $change (@{$$spec{range}}) {
             my $changeid = $$change{id};
             next if ($ignore_struct);
+            my $base = $$change{base};
+            $bmap{$changeid} = $base if (defined($base));
             next if ($force_struct);
             my $pushed = $$change{pushed};
             $pmap{$changeid} = $pushed if (defined($pushed));
         }
         next if ($ignore_struct);
+        $$spec{bmap} = \%bmap;
         next if ($force_struct);
         $$spec{pmap} = \%pmap;
     }
@@ -2117,6 +2148,11 @@ sub verify_update($$$$$$$$)
             ($pfx, $annot) = ("Keep      ",
                               "PS$pushed_ps ".format_parts($rmt_parts)." (IGNORED)")
                 if (!$quiet);
+            # Do not update the base when ignoring. The presumption
+            # is that the push was wholly bogus and should be reverted
+            # including the base, so inter-diffs can skip over it. And
+            # if we are actually seeing a bona fide conflict, the base
+            # was probably not modified anyway.
             # INFO, as the source is "applied" even if the update is ignored.
             return (UPD_PUSHED | UPD_INFO, NO_PARTS, $pfx, $annot);
         }
@@ -2328,6 +2364,10 @@ sub do_adjust_changes($)
             if ($upd & UPD_PUSHED) {
                 $$change{pushed} = $$rmt_commit{id};
             }
+            # Generally, the base should match the latest PatchSet even if
+            # we push over it in the end, to optimize inter-diffs.
+            $$change{base} = $$rmt_commit{base}
+                if (($upd & UPD_META) || ($ginfo && !defined($$change{base})));
             # If {pushed} was already set, branch tracking already made this a no-op.
             $$change{tgt} = $$ginfo{branch}
                 if (($upd & UPD_META) || ($ginfo && !defined($$change{tgt})));
