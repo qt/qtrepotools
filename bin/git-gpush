@@ -118,7 +118,7 @@ sub read_git_line(@)
 {
     print "+ " . format_cmd('git', @_) . "\n" if ($verbose);
     open PROC, '-|', 'git', @_
-        or die("Failed to run " . format_cmd('git', @_) . ": $!\n");
+        or die("Failed to run \"git\": $!\n");
     my $line = <PROC>;
     if (defined($line)) {
         chomp $line ;
@@ -291,7 +291,7 @@ sub push_patches()
 
     print '+ '.format_cmd(@gitcmd)."\n" if ($verbose);
     my $ex = system(@gitcmd);
-    die("Failed to run ".format_cmd(@gitcmd).": $!\n") if ($ex < 0);
+    die("Failed to run \"git\": $!\n") if ($ex < 0);
     exit($ex >> 8) if ($ex);
 }
 
