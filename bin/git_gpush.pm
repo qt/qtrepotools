@@ -86,7 +86,7 @@ sub fail($)
 use constant {
     NUL_STDIN => 0,
     USE_STDIN => 1,
-    # FWD_STDIN is not needed
+    FWD_STDIN => 2,
     NUL_STDOUT => 0,
     USE_STDOUT => 4,
     FWD_STDOUT => 8,
@@ -120,6 +120,12 @@ sub open_process($@)
     my ($in, $out, $err);
     if ($flags & USE_STDIN) {
         $in = \$process{stdin};
+    } elsif ($flags & FWD_STDIN) {
+        # open3() closes the handle input is redirected from, which is
+        # most definitely not what we want to happen to stdin.
+        no warnings 'once';  # The parser doesn't see the string reference.
+        open INPUT, '<&STDIN' or wfail("Failed to dup() stdin: $!\n");
+        $in = \'<&INPUT';
     } else {
         $in = \'<&NUL';
     }
@@ -533,6 +539,8 @@ our %change_by_key;  # { sequence-number => change-object }
 # Same, indexed by Gerrit Change-Id. A Change can exist on multiple branches.
 our %changes_by_id;  # { gerrit-id => [ change-object, ... ] }
 
+our $last_gc = 0;
+
 my $state_lines;
 my $state_updater = ($0 =~ s,^.*/,,r)." @ARGV";
 
@@ -571,6 +579,7 @@ sub save_state(;$)
     my @rkeys = ('pushed');
     push @lines,
         "next_key $next_key",
+        "last_gc $last_gc",
         "";
     foreach my $key (sort keys %change_by_key) {
         my $change = $change_by_key{$key};
@@ -672,6 +681,8 @@ sub load_state_file()
         } elsif ($inhdr) {
             if ($1 eq "next_key") {
                 $next_key = int($2);
+            } elsif ($1 eq "last_gc") {
+                $last_gc = int($2);
             } else {
                 fail("Bad state file: Unknown header keyword '$1' at line $line.\n");
             }

@@ -1,0 +1,90 @@
+#!/usr/bin/perl
+# Copyright (C) 2018 The Qt Company Ltd.
+# Copyright (C) 2019 Oswald Buddenhagen
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use v5.14;
+use strict;
+use warnings;
+no warnings qw(io);
+
+our ($script, $script_path);
+BEGIN {
+    use Cwd qw(abs_path);
+    if ($^O eq "msys") {
+        $0 =~ s,\\,/,g;
+        $0 =~ s,^(.):/,/$1/,g;
+    }
+    $script_path = $script = abs_path($0);
+    $script_path =~ s,/[^/]+$,,;
+    unshift @INC, $script_path;
+}
+use git_gpush;
+
+sub usage()
+{
+    print << "EOM";
+Usage:
+    git gpull [<git-pull options>]
+
+    This command should be used instead of 'git pull --rebase'
+    when git-gpush is being used.
+
+    In addition to updating the local branch with upstream, it
+    will also call git-ggc at regular intervals (default 30 days,
+    configurable with gpush.gcInterval).
+
+Copyright:
+    Copyright (C) 2018 The Qt Company Ltd.
+    Copyright (C) 2019 Oswald Buddenhagen
+    Contact: http://www.qt.io/licensing/
+
+License:
+    You may use this file under the terms of the 3-clause BSD license.
+EOM
+}
+
+while (@ARGV) {
+    my $arg = $ARGV[0];
+    if ($arg eq "--debug") {
+        $debug = 1;
+        shift @ARGV;
+    } elsif ($arg eq "-n" || $arg eq "--dry-run") {
+        $dry_run = 1;
+        shift @ARGV;
+    } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
+        usage();
+        exit;
+    } else {
+        fail("Unrecognized command line argument '$arg'.\n");
+    }
+}
+
+goto_gitdir();
+load_config();
+my $gc_interval = git_config('gpush.gcInterval', 30);
+if ($gc_interval != 0) {
+    load_state_file();  # No load_state(), and thus no load_refs().
+    my $next_gc = $last_gc + $gc_interval * 24 * 60 * 60;
+    if ($next_gc < time()) {
+        # It's seems backwards that we do this *before* pulling (which
+        # is likely to release more garbage), but chaining to the pull
+        # would be unreliable (the post-rewrite hook is not invoked when
+        # no local commits remain, and relying on the user to remember
+        # to use gpull instead of rebase with --continue is suboptimal).
+        # In the big picture the delay doesn't matter, as the gc interval
+        # is likely much bigger than the pull frequency anyway.
+        run_process(DRY_RUN, $script_path."/git-ggc");
+    } else {
+        printf("Next gc date %d not reached yet (now is %d).\n", $next_gc, time())
+            if ($debug);
+    }
+} else {
+    print "gpull auto-gc is disabled.\n" if ($debug);
+}
+
+exec("git", "pull", "--rebase", @ARGV) or fail("Cannot exec git: $!\n");

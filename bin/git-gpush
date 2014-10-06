@@ -532,7 +532,7 @@ sub check_merges($)
             if (!check_merge($parents, \@failed)) {
                 $header = ",----- Merge of non-upstream commit(s) -----\n";
                 set_group_error($group, 'fixed',
-                                "Maybe you forgot to use git pull's --rebase option?\n");
+                                "Maybe you forgot to use git gpull instead of git pull?\n");
             } elsif (!parents_pushed($parents, \@failed)) {
                 $header = ",----- Parent merge(s) not pushed yet ------\n";
                 set_group_error($group, 'fixed', "Please push the parent(s) first.\n");
@@ -647,7 +647,7 @@ sub classify_changes_online($)
             # We are attempting a push which Gerrit will reject anyway.
             my $err;
             if ($status eq 'MERGED') {
-                $err = "Change is already MERGED; please pull/rebase.";
+                $err = "Change is already MERGED; use git gpull to rebase.";
             } elsif ($status eq 'STAGED' || $status eq 'INTEGRATING') {
                 $err = "Change is currently $status; cannot proceed.";
             } elsif ($status eq 'DEFERRED' || $status eq 'ABANDONED') {

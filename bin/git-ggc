@@ -1,0 +1,251 @@
+#!/usr/bin/perl
+# Copyright (C) 2018 The Qt Company Ltd.
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use v5.14;
+use strict;
+use warnings;
+no warnings qw(io);
+
+our ($script, $script_path);
+BEGIN {
+    use Cwd qw(abs_path);
+    if ($^O eq "msys") {
+        $0 =~ s,\\,/,g;
+        $0 =~ s,^(.):/,/$1/,g;
+    }
+    $script_path = $script = abs_path($0);
+    $script_path =~ s,/[^/]+$,,;
+    unshift @INC, $script_path;
+}
+use git_gpush;
+
+use JSON;
+
+sub usage()
+{
+    print << "EOM";
+Usage:
+    git ggc [options]
+
+    This program cleans up state from git-gpush that became stale due
+    to local Changes disappearing (most likely being upstreamed).
+
+    You should use git-gpull instead of 'git pull --rebase', to make
+    sure that git-ggc is called at regular intervals (default 30 days,
+    configurable with gpush.gcInterval).
+
+    The only recognized options are --help (-h, -?), --dry-run (-n),
+    --verbose (-v), --quiet (-q), and --debug with the usual meanings
+    (see git-gpush help).
+
+Copyright:
+    Copyright (C) 2018 The Qt Company Ltd.
+    Contact: http://www.qt.io/licensing/
+
+License:
+    You may use this file under the terms of the 3-clause BSD license.
+EOM
+}
+
+sub parse_arguments(@)
+{
+    while (scalar @_) {
+        my $arg = shift @_;
+        if ($arg eq "-v" || $arg eq "--verbose") {
+            $verbose = 1;
+        } elsif ($arg eq "-q" || $arg eq "--quiet") {
+            $quiet = 1;
+        } elsif ($arg eq "--debug") {
+            $debug = 1;
+            $verbose = 1;
+        } elsif ($arg eq "-n" || $arg eq "--dry-run") {
+            $dry_run = 1;
+        } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
+            usage();
+            exit;
+        } else {
+            fail("Unrecognized command line argument '$arg'.\n");
+        }
+    }
+    fail("--quiet and --verbose/--debug are mutually exclusive.\n")
+        if ($quiet && $verbose);
+}
+
+my %upstream_remotes;
+
+sub get_gerrit_config()
+{
+    $remote = git_config('gpush.remote');
+    # If a remote is specified, use exactly that one.
+    if (!$remote) {
+        # Otherwise try 'gerrit', and fall back to the origin.
+        $remote = 'gerrit';
+        if (!git_config('remote.'.$remote.'.url')) {
+            my @remotes = keys %upstream_remotes;
+            if (@remotes == 1) {
+                $remote = shift @remotes;
+            } else {
+                $remote = git_config('gpush.upstream', 'origin');
+                werr("Notice: Upstream remote is ambiguous; defaulting to '$remote'.\n")
+                    if (!$quiet);
+            }
+        }
+    }
+    set_gerrit_config($remote);
+}
+
+my %change2active;
+
+sub query_gerrit_pull($)
+{
+    my ($ids) = @_;
+
+    my $status = open_cmd_pipe(0, 'ssh', @gerrit_ssh, 'gerrit',
+                                  'query', '--format', 'JSON', '--no-limit',
+                                  "project:$gerrit_project", '\\('.join(' OR ', @$ids).'\\)');
+    while (read_process($status)) {
+        my $review = decode_json($_);
+        defined($review) or fail("Cannot decode JSON string '".chomp($_)."'\n");
+        my $changeid = $$review{'id'};
+        next if (!defined($changeid));
+        my ($branch, $status) = ($$review{'branch'}, $$review{'status'});
+        defined($branch) or fail("Huh?! $changeid has no branch?\n");
+        defined($status) or fail("Huh?! $changeid has no status?\n");
+        my $active = (($status ne 'MERGED') && ($status ne 'ABANDONED'));
+        print "$changeid is ".($active ? "" : "NOT ")."active on $branch.\n" if ($debug);
+        $change2active{$changeid} ||= $active;
+    }
+    close_process($status);
+}
+
+sub visit_revs_pull(@)
+{
+    my %changeids;
+    my $log = open_cmd_pipe(USE_STDIN, 'git', 'log', '-z', '--pretty=%H%x00%B', '--stdin',
+                                       @upstream_excludes);
+    write_process($log, map { "$_\n" } @_);
+    while (read_fields($log, my ($id, $message))) {
+        $message =~ /^(.*)$/m;
+        my $subject = $1;
+
+        # Gerrit uses the last Change-Id if multiple are present.
+        my @cids = ($message =~ /^Change-Id: (.+)$/mg);
+        next if (!@cids);
+        my $changeid = $cids[-1];
+
+        print "-- $id: $subject\n" if ($debug);
+
+        $changeids{$changeid} = 1;
+    }
+    close_process($log);
+    return \%changeids;
+}
+
+# The garbage-collecting workhorse.
+# Note that we entirely ignore branches. A Change is assumed to be still
+# relevant if it exists on any local branch or exists in a non-terminal
+# state on Gerrit for any branch.
+sub perform_gc()
+{
+    print "Loading refs ...\n" if ($debug);
+    my %zaps;  # { sequence-number => [ state-ref, ... ] }
+    my @local_refs;  # These define which Changes are still active.
+    my %remote_refs;  # Used for quickly validating upstreams.
+    my $branches = open_cmd_pipe(0, "git", "for-each-ref", "--format=%(objectname) %(refname)",
+                                    "refs/heads/", "refs/remotes/", "refs/gpush/");
+    while (read_process($branches)) {
+        if (s,^.{40} refs/remotes/,,) {
+            $remote_refs{$_} = 1;
+        } elsif (s,^.{40} refs/heads/,,) {
+            push @local_refs, $_;
+        } elsif (s,^.{40} refs/gpush/,,) {
+            if (m,^i(\d+)_.*$,) {
+                push @{$zaps{$1}}, $_;
+            } elsif (!m,^state$,) {
+                print "Keeping unrecognized '$_'.\n" if ($debug);
+            }
+        }
+    }
+    close_process($branches);
+
+    my %upstream_refs;
+    foreach my $ref (@local_refs) {
+        my ($uprm, $upbr) = (git_config("branch.$ref.remote"), git_config("branch.$ref.merge"));
+        # Local WIP branches typically have no upstream.
+        next if (!$uprm || !$upbr);
+        $upbr =~ s,^refs/heads/,,;
+        my $upref = $uprm.'/'.$upbr;
+        # The upstream branch may have been pruned. Don't error out when this happens.
+        next if (!defined($remote_refs{$upref}));
+        # Note that multiple branches may have the same upstream.
+        $upstream_refs{$upref} = 1;
+        # Record which remotes are used as upstreams.
+        $upstream_remotes{$uprm} = 1;
+    }
+    @upstream_excludes = map { '^refs/remotes/'.$_ } keys %upstream_refs;
+
+    # Changes which are on local branches are excluded from pruning. Obviously.
+    print "Visiting local branches ...\n" if ($debug);
+    my $local_changes = visit_revs_pull('HEAD', (map { 'refs/heads/'.$_ } @local_refs));
+
+    print "Collecting locally present Changes ...\n" if ($debug);
+    my %zap_ids;  # { gerrit-id => 1 }
+    foreach my $key (keys %zaps) {
+        my $change = $change_by_key{$key};
+        if ($change) {
+            my $changeid = $$change{id};
+            if (defined($$local_changes{$changeid})) {
+                print "Keeping $key ($changeid): exists locally.\n"
+                    if ($verbose);
+                delete $zaps{$key};
+                next;
+            }
+            $zap_ids{$changeid} = 1;
+        }
+    }
+
+    print "Querying Gerrit for prunable Changes ...\n" if ($debug);
+    get_gerrit_config();
+    query_gerrit_pull([ map { "change:".$_ } keys %zap_ids ]) if (%zap_ids);
+
+    print "Pruning stale Changes ...\n" if ($debug);
+    foreach my $key (sort keys %zaps) {
+        my $change = $change_by_key{$key};
+        if ($change) {
+            # Even Changes which are absent from the local branch are pruned
+            # only if they are in a terminal state. Otherwise, there is reason
+            # to believe that they might be used again at a later point.
+            my $changeid = $$change{id};
+            if ($change2active{$changeid}) {
+                print "Keeping $key ($changeid): active on Gerrit.\n"
+                    if ($verbose);
+                delete $zaps{$key};
+                next;
+            }
+            print "Pruning $key ($changeid).\n" if ($verbose);
+            $$change{garbage} = 1;
+        } else {
+            print "Pruning $key (unrecognized Change).\n" if ($verbose);
+        }
+    }
+
+    # We completely bypass the regular state handling when it comes
+    # to refs, as we want to also prune refs in our namespace that
+    # don't correspond with known state keys.
+    update_refs(DRY_RUN, [
+        map { "delete refs/gpush/$_\n" } map { @$_ } values %zaps
+    ]);
+}
+
+parse_arguments(@ARGV);
+goto_gitdir();
+load_config();
+load_state_file();  # No load_state(), and thus no load_refs().
+perform_gc();
+$last_gc = time();
+save_state($dry_run);
