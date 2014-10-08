@@ -99,6 +99,7 @@ sub get_gerrit_config()
     set_gerrit_config($remote);
 }
 
+my %gerrit2change;
 my %change2active;
 
 sub query_gerrit_pull($)
@@ -111,14 +112,15 @@ sub query_gerrit_pull($)
     while (read_process($status)) {
         my $review = decode_json($_);
         defined($review) or fail("Cannot decode JSON string '".chomp($_)."'\n");
-        my $changeid = $$review{'id'};
-        next if (!defined($changeid));
+        my ($key, $changeid) = ($$review{'number'}, $$review{'id'});
+        next if (!defined($key) || !defined($changeid));
         my ($branch, $status) = ($$review{'branch'}, $$review{'status'});
         defined($branch) or fail("Huh?! $changeid has no branch?\n");
         defined($status) or fail("Huh?! $changeid has no status?\n");
         my $active = (($status ne 'MERGED') && ($status ne 'ABANDONED'));
         print "$changeid is ".($active ? "" : "NOT ")."active on $branch.\n" if ($debug);
         $change2active{$changeid} ||= $active;
+        $gerrit2change{$key} = $changeid;
     }
     close_process($status);
 }
@@ -154,6 +156,7 @@ sub perform_gc()
 {
     print "Loading refs ...\n" if ($debug);
     my %zaps;  # { sequence-number => [ state-ref, ... ] }
+    my %fzaps;  # { gerrit-number => [ fetched-ref, ... ] }
     my @local_refs;  # These define which Changes are still active.
     my %remote_refs;  # Used for quickly validating upstreams.
     my $branches = open_cmd_pipe(0, "git", "for-each-ref", "--format=%(objectname) %(refname)",
@@ -166,7 +169,9 @@ sub perform_gc()
         } elsif (s,^.{40} refs/gpush/,,) {
             if (m,^i(\d+)_.*$,) {
                 push @{$zaps{$1}}, $_;
-            } elsif (!m,^state$,) {
+            } elsif (m,^g(\d+)_.*$,) {
+                push @{$fzaps{$1}}, $_;
+            } elsif (!m,^state(-new)?$,) {
                 print "Keeping unrecognized '$_'.\n" if ($debug);
             }
         }
@@ -211,7 +216,8 @@ sub perform_gc()
 
     print "Querying Gerrit for prunable Changes ...\n" if ($debug);
     get_gerrit_config();
-    query_gerrit_pull([ map { "change:".$_ } keys %zap_ids ]) if (%zap_ids);
+    query_gerrit_pull([ map { "change:".$_ } (keys %zap_ids, keys %fzaps) ])
+        if (%zap_ids || %fzaps);
 
     print "Pruning stale Changes ...\n" if ($debug);
     foreach my $key (sort keys %zaps) {
@@ -224,6 +230,7 @@ sub perform_gc()
             if ($change2active{$changeid}) {
                 print "Keeping $key ($changeid): active on Gerrit.\n"
                     if ($verbose);
+                $$local_changes{$changeid} = 1;
                 delete $zaps{$key};
                 next;
             }
@@ -234,11 +241,26 @@ sub perform_gc()
         }
     }
 
+    # Keep all fetched PatchSets that correspond with kept Changes.
+    foreach my $key (sort keys %fzaps) {
+        my $changeid = $gerrit2change{$key};
+        if (!defined($changeid)) {
+            print "Pruning fetched $key (disappeared from Gerrit).\n" if ($verbose);
+        } else {
+            if (defined($$local_changes{$changeid})) {
+                print "Keeping fetched $key ($changeid): corresponds with kept Change.\n"
+                    if ($verbose);
+                delete $fzaps{$key};
+                next;
+            }
+        }
+    }
+
     # We completely bypass the regular state handling when it comes
     # to refs, as we want to also prune refs in our namespace that
     # don't correspond with known state keys.
     update_refs(DRY_RUN, [
-        map { "delete refs/gpush/$_\n" } map { @$_ } values %zaps
+        map { "delete refs/gpush/$_\n" } map { @$_ } (values %zaps, values %fzaps)
     ]);
 }
 

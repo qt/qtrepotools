@@ -740,7 +740,7 @@ sub print_errors($)
     fail_push($group, "Giving up - push is going to be rejected.\n")
         if ($have_rejected);
     fail_push($group, "Local state is out of sync with Gerrit.\n",
-                      "Please specify --force to push nonetheless.\n")
+                      "Please use git gpick, or specify --force to push nonetheless.\n")
         if ($need_force && !$force);
 }
 
@@ -924,6 +924,6 @@ sub execute_pushing()
 process_config();
 parse_arguments(@ARGV);
 goto_gitdir();
-load_state();
+load_state(0);
 execute_pushing();
 save_state($dry_run);

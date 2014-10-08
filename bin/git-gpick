@@ -1,0 +1,866 @@
+#!/usr/bin/perl
+# Copyright (C) 2018 The Qt Company Ltd.
+# Copyright (C) 2019 Oswald Buddenhagen
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use v5.14;
+use strict;
+use warnings;
+
+our ($script, $script_path);
+BEGIN {
+    use Cwd qw(abs_path);
+    if ($^O eq "msys") {
+        $0 =~ s,\\,/,g;
+        $0 =~ s,^(.):/,/$1/,g;
+    }
+    $script_path = $script = abs_path($0);
+    $script_path =~ s,/[^/]+$,,;
+    unshift @INC, $script_path;
+}
+use git_gpush;
+
+use List::Util qw(first);
+use Digest::SHA qw(sha1_hex);
+use JSON;
+
+sub usage
+{
+    print << "EOM";
+Usage:
+    git gpick [options] {[\@parent] [+]Changes[\@] | /Changes[\@]}...
+
+    Updates local commits with the newest PatchSets from Gerrit.
+
+Description:
+    This program fetches the current PatchSets of the specified Changes
+    from Gerrit, and updates the local commits with them.
+
+    Commits are updated in place, unless a parent to rebase them onto
+    is specified. Changes with no corresponding local commit need to be
+    prefixed with a plus sign, and are picked on top of HEAD by default.
+    If a Change is suffixed with an at-sign, it is made the parent of
+    the subsequent Change specification.
+
+    Remote commits may be specified only by complete Gerrit Change-Id.
+
+    Local commits may be specified as either SHA1s or Gerrit Change-Ids,
+    possibly abbreviated. Git rev-spec suffixes like '~2' are allowed; if
+    only a suffix is specified, it is understood to be relative to 'HEAD'.
+    It is also possible to specify ranges, either as <base>..<tip> or as
+    <tip>:<count>. An empty <tip> means 'HEAD'. Similarly, an empty <base>
+    means the merge base with the upstream branch; this also works in the
+    parent specification. Note that within a range, the local order of the
+    commits will be preserved even if the series was re-ordered remotely.
+
+    Local commits may be dropped by prefixing them with a slash.
+
+    This program uses 'git rebase' as a workhorse. If the rebase aborts,
+    follow the usual instructions on screen.
+
+Options:
+    -r, --remote
+        Specify the remote used to determine the Gerrit server to fetch
+        PatchSets from. The fallback behavior matches git-gpush.
+
+    -b, --branch
+        Specify the branch for which the Changes to download were pushed
+        to Gerrit. In case of ambiguity, the default is the upstram branch
+        of the current local branch.
+
+    -n, --dry-run
+        Do everything except actually replacing any commits and updating
+        state.
+
+    -v, --verbose
+        Show additional progress output.
+
+    -q, --quiet
+        Suppress the usual progress output.
+
+    --debug
+        Print debug information.
+
+Examples:
+    git gpick ~1
+        Replace the last-but-one local commit with the latest PatchSet from
+        Gerrit.
+
+    git gpick +I21f8ef385d1793757149dfa5cc69e4e907cb1c04
+        Add a Change from Gerrit on top of the local branch.
+
+    git gpick /HEAD \@ ~1:2\@ +I1ad95db7c99018e92d2b2556e4789951b51b2fff
+        Drop the top commit, move the next two commits to the start of the
+        local branch and replace them with the latest PatchSets, and add
+        another Change right on top of them. The other commits in the local
+        branch are rebased on top of these three commits.
+
+Copyright:
+    Copyright (C) 2018 The Qt Company Ltd.
+    Copyright (C) 2019 Oswald Buddenhagen
+    Contact: http://www.qt.io/licensing/
+
+License:
+    You may use this file under the terms of the 3-clause BSD license.
+EOM
+}
+
+use constant {
+    NO_PARTS => 0,
+    ALL_PARTS => 15
+};
+
+my $branch;
+my $upstream_branch;
+my @commit_specs;
+
+sub parse_arguments(@)
+{
+    while (scalar @_) {
+        my $arg = shift @_;
+
+        if ($arg eq "-v" || $arg eq "--verbose") {
+            $verbose = 1;
+        } elsif ($arg eq "-q" || $arg eq "--quiet") {
+            $quiet = 1;
+        } elsif ($arg eq "--debug") {
+            $debug = 1;
+            $verbose = 1;
+        } elsif ($arg eq "-n" || $arg eq "--dry-run") {
+            $dry_run = 1;
+        } elsif ($arg eq "-r" || $arg eq "--remote") {
+            fail("--remote needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
+            $remote = shift @_;
+        } elsif ($arg eq "-b" || $arg eq "--branch") {
+            fail("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
+            $branch = shift @_;
+        } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
+            usage();
+            exit 0;
+        } elsif ($arg !~ /^-/) {
+            push @commit_specs, $arg;
+        } else {
+            fail("Invalid option '$arg'.\n");
+        }
+    }
+
+    fail("--quiet and --verbose/--debug are mutually exclusive.\n")
+        if ($quiet && $verbose);
+}
+
+sub determine_local_branch()
+{
+    my $branches = open_cmd_pipe(0, "git", "branch", "--points-at", "HEAD");
+    while (read_process($branches)) {
+        if (/^\* \(/) {
+            # Unlike in gpush, it makes no sense to work with mid-rebase states
+            # (as we are going to rewrite the branch ourselves).
+            fail("Cannot proceed, a rebase is currently in progress.\n")
+                if (/^\* \(no branch, rebasing (.*)\)$/);
+            # This does not work, because the SHA1 is truncated,
+            # and --no-abbrev appears to have no effect on that.
+            #if (/^\* \(HEAD detached at (.*)\)$/) {
+            #    # This potentially saves a `git rev-parse HEAD` call.
+            #    $local_tip = $1;
+            #}
+            last;
+        } elsif (/^\* (.*)$/) {
+            $local_branch = $1;
+            $local_tip = $local_refs{$local_branch};
+            last;
+        }
+    }
+    close_process($branches);
+
+    if (defined($local_branch)) {
+        $upstream_branch = git_config("branch.$local_branch.merge");
+        $upstream_branch =~ s,^refs/heads/,, if (defined($upstream_branch));
+    }
+
+    setup_remotes($local_branch // 'HEAD');
+    set_gerrit_config($remote);
+}
+
+# Get the list of local commits (which can be replaced).
+sub get_changes()
+{
+    return get_commits_free($local_tip)
+        if (analyze_local_branch('HEAD'));
+    # We get here if we have no local Changes ...
+    if (!defined($local_tip)) {
+        # ...when working on a detached HEAD.
+        $local_tip = read_cmd_line(0, 'git', 'rev-parse', 'HEAD');
+    }
+    # The tip is also the branch base.
+    $local_base = $local_tip;
+    return [];
+}
+
+# Report the chosen source for a Change.
+sub report_source($$$$$)
+{
+    my ($reports, $prefix, $annot, $id, $subject) = @_;
+
+    push @$reports, {
+        type => "change",
+        id => $id,
+        subject => $subject,
+        prefix => $prefix,
+        annotation => length($annot) ? "  [$annot]" : ""
+    };
+}
+
+# Report source using the remote Change's metadata for identification.
+sub report_remote($$$$)
+{
+    my ($reports, $prefix, $annot, $ginfo) = @_;
+
+    report_source($reports, $prefix, $annot,
+                  $$ginfo{id}, $$ginfo{subject});
+}
+
+# Report source using the local commit's metadata for identification.
+sub report_local($$$$)
+{
+    my ($reports, $prefix, $annot, $commit) = @_;
+
+    report_source($reports, $prefix, $annot,
+                  $$commit{changeid}, $$commit{subject});
+}
+
+use constant {
+    HOLD => 0,
+    INSERT => 1,
+    UPDATE => 2,
+    DELETE => 3
+};
+
+# Process the parent and Change specifications from the command line
+# into an array of "modifier" objects.
+sub parse_specs($)
+{
+    my ($raw_specs) = @_;
+
+    print "Parsing commit specs ...\n" if ($debug);
+
+    my $parent;
+    my @specs;
+    foreach my $cs (@$raw_specs) {
+        if ($cs =~ s,^\@(?!\{),,) {
+            $cs = '@{u}' if (!length($cs));
+            wfail("Cannot specify adjacent parents (2nd is $cs).\n") if (defined($parent));
+            my $sha1 = parse_local_rev($cs, SPEC_PARENT);
+            my $commit = $commit_by_id{$sha1};
+            $parent = $commit ? $$commit{changeid} : '*';
+        } else {
+            my %spec;
+            $spec{parent} = $parent;
+            my $isparent = ($cs =~ s,\@$,,);
+            $spec{orig} = $cs;
+            my $action;
+            if ($cs =~ s,^\+,,) {
+                fail("Missing specification of remote Change.\n") if (!length($cs));
+                $action = INSERT;
+            } else {
+                if ($cs =~ s,^/,,) {
+                    wfail("Cannot specify a removal (/$cs) with a parent.\n")
+                        if (defined($parent));
+                    $action = DELETE;
+                } else {
+                    $action = UPDATE;
+                }
+            }
+            $spec{action} = $action;
+            if ($cs =~ s,^(.*)\.\.,,) {
+                $spec{base} = $1;
+            } elsif ($cs =~ s,:(\d+)$,,) {
+                $spec{count} = $1;
+            }
+            $spec{tip} = $cs;
+            push @specs, \%spec;
+
+            # Note that it's actually possible to use Changes we delete as parents.
+            $parent = $isparent ? '@' : undef;
+        }
+    }
+    fail("Cannot specify a parent without a subsequent commit.\n") if (defined($parent));
+    fail("No Changes specified.\n") if (!@specs);
+    return \@specs;
+}
+
+# Resolve the local specs into series.
+sub resolve_specs($)
+{
+    my ($specs) = @_;
+
+    print "Resolving commit specs ...\n" if ($debug);
+
+    foreach my $spec (@$specs) {
+        my $action = $$spec{action};
+        next if ($action == INSERT);
+        my ($raw_tip, $count, $raw_base) = ($$spec{tip}, $$spec{count}, $$spec{base});
+        $raw_tip = 'HEAD' if (!length($raw_tip));
+        my $tip = parse_local_rev($raw_tip, SPEC_TIP);
+        my $range;
+        if (defined($count)) {
+            $range = changes_from_commits(get_commits_count($tip, $count, $raw_tip));
+        } elsif (defined($raw_base)) {
+            $raw_base = '@{u}' if (!length($raw_base));
+            my $base = parse_local_rev($raw_base, SPEC_BASE);
+            $range = changes_from_commits(get_commits_base($base, $tip, $raw_base, $raw_tip));
+        } else {
+            my $pivot = $commit_by_id{$tip}{change};
+            $range = [ $pivot ];
+        }
+        wfail("Range $$spec{orig} is empty.\n") if (!@$range);
+        foreach my $change (@$range) {
+            my $changeid = $$change{id};
+            my $ospec = $$change{lspec};
+            wfail("Specs $$spec{orig} and $$ospec{orig} intersect (change $changeid).\n")
+                if ($ospec);
+            $$change{lspec} = $spec;
+        }
+        $$spec{range} = $range;
+    }
+}
+
+sub select_patchset($)
+{
+    my ($ginfo) = @_;
+
+    my $revs = $$ginfo{revs};
+    my $revidx = $#$revs;
+    return $revidx;
+}
+
+# Fetch the latest PatchSets for the specified Changes.
+# We don't re-fetch PatchSets which we already have.
+sub fetch_patchsets($)
+{
+    my ($ginfos) = @_;
+
+    my @refs;
+    foreach my $ginfo (@$ginfos) {
+        my ($revs, $pick_idx) = ($$ginfo{revs}, $$ginfo{pick_idx});
+        my $rev = $$revs[$pick_idx];
+        my ($rev_id, $rev_ps) = ($$rev{id}, $$rev{ps});
+        if (defined($$ginfo{fetched}{$rev_ps})) {
+            print "Already have PatchSet $rev_ps for $$ginfo{id}.\n" if ($debug);
+        } else {
+            push @refs, "+$$rev{ref}:refs/gpush/g$$ginfo{key}_$rev_ps";
+        }
+        my $commit = {
+            id => $rev_id,
+            parents => $$rev{parents}
+        };
+        init_commit($commit);
+        $$ginfo{pick_commit} = $commit;
+    }
+    if (@refs) {
+        print "Fetching PatchSets ...\n" if (!$quiet);
+        my @gitcmd = ("git", "fetch");
+        # The git-fetch output is quite noisy and unhelpful here, unless debugging.
+        push @gitcmd, '-q' if (!$debug);
+        push @gitcmd, $remote, @refs;
+        run_process(FWD_OUTPUT, @gitcmd);
+    } else {
+        print "No PatchSets need fetching.\n" if ($debug);
+    }
+}
+
+# Download the metadata and PatchSets referenced by the specs.
+sub complete_spec_heads($)
+{
+    my ($specs) = @_;
+
+    print "Completing commit specs ...\n" if ($debug);
+
+    my %picks;
+    foreach my $spec (@$specs) {
+        my $action = $$spec{action};
+        if ($action == INSERT) {
+            my ($tip, $count, $base) = ($$spec{tip}, $$spec{count}, $$spec{base});
+            fail("Ranges are not supported in remote specifications yet.\n")
+                if (defined($count) || defined($base));
+            $picks{$tip} = undef;
+        } else {
+            foreach my $change (@{$$spec{range}}) {
+                my $changeid = $$change{id};
+                $picks{$changeid} = $change if ($action != DELETE);
+            }
+        }
+    }
+    return if (!%picks);
+
+    if (defined($branch)) {
+        # If a branch is specified, it overrides everything.
+        query_gerrit([ map { "change:".$_ } keys %picks ], [ "branch:$branch" ]);
+    } else {
+        query_gerrit([
+            map {
+                my $c = $picks{$_};
+                my $p = $c && $$c{pushed};
+                if ($p) {
+                    # If we have a previous push, identify the Change by SHA1.
+                    # We cannot use the Change-Id with the target branch, as
+                    # the branch tracking kicks in only after the query.
+                    "commit:$p"
+                } else {
+                    my $b = $c && $$c{tgt} || $upstream_branch;
+                    wfail("Branch for Change $_ unknown;"
+                            ." please use --branch to specify the source.\n")
+                        if (!defined($b));
+                    "\\(change:$_ branch:$b\\)"
+                }
+            } keys %picks
+        ]);
+    }
+
+    my @fetches;
+    foreach my $id (keys %picks) {
+        my $gis = $gerrit_infos_by_id{$id};
+        if (!$gis) {
+            print "No results for $id.\n" if (!$quiet);
+        } else {
+            my $ginfo = $$gis[0];
+            $$ginfo{pick_idx} = select_patchset($ginfo);
+            my $change = change_for_id($id, CREATE);
+            $$change{gerrit} = $ginfo;
+            push @fetches, $ginfo;
+        }
+    }
+
+    fetch_patchsets(\@fetches) if (@fetches);
+}
+
+sub check_specs($)
+{
+    my ($specs) = @_;
+
+    print "Checking remote commit specs for collisions ...\n" if ($debug);
+    foreach my $spec (@$specs) {
+        my $action = $$spec{action};
+        if ($action == INSERT) {
+            my $nchange = change_for_id($$spec{tip});
+            wfail("No Change found on Gerrit for spec $$spec{orig}.\n")
+                if (!$nchange);
+            my $new_range = [ $nchange ];
+            $$spec{new_range} = $new_range;
+
+            foreach my $change (@$new_range) {
+                if (defined($$change{local})) {
+                    my $lspec = $$change{lspec};
+                    # Note: re-adding a Change which is being deleted is just fine.
+                    wfail("Cannot add $$change{id}, because it already exists locally.\n")
+                        if (!$lspec || ($$lspec{action} != DELETE));
+                }
+                my $ospec = $$change{rspec};
+                # Intersecting another remote spec is an error.
+                wfail("Specs $$spec{orig} and $$ospec{orig} intersect.\n")
+                    if ($ospec);
+                $$change{rspec} = $spec;
+            }
+        } else {
+            foreach my $change (@{$$spec{range}}) {
+                # Local specs may not intersect preceding remote specs,
+                # as that would make quite a mess in the case of deletions
+                # (and just makes no sense for updates).
+                my $ospec = $$change{rspec};
+                wfail("Spec $$spec{orig} intersects preceding $$ospec{orig}"
+                        ." (change $$change{id}).\n")
+                    if ($ospec);
+            }
+        }
+    }
+}
+
+sub prepare_specs()
+{
+    my $specs = parse_specs(\@commit_specs);
+    resolve_specs($specs);
+    complete_spec_heads($specs);
+    check_specs($specs);
+    return $specs;
+}
+
+# Modify the list of local Changes as requested, and mark the Changes
+# that should be updated.
+sub apply_specs($$)
+{
+    my ($specs, $raw_changes) = @_;
+
+    print "Applying specs ...\n" if ($debug);
+
+    # We do not store the action inside the Change itself, as a Change
+    # may be DELETEd and INSERTed in the same run, thus requiring
+    # positional assignment of multiple actions.
+    my @pairs = map { [ HOLD, $_ ] } @$raw_changes;
+    my $idx;
+    foreach my $spec (@$specs) {
+        my $action = $$spec{action};
+        my $parent = $$spec{parent};
+        if (defined($parent)) {
+            if ($parent eq '*') {
+                $idx = 0;
+            } elsif ($parent eq '@') {
+                # Use the index right after the previously manipulated Changes.
+            } else {
+                $idx = first { $pairs[$_][1]{id} eq $parent } 0..$#pairs;
+                die("Lost track of specified parent $parent.\n") if (!defined($idx));
+                # Insisting on unmanipulated Changes avoids ambiguity in case
+                # of DELETE+INSERT of the same Change. Also, it enforces the
+                # more expressive and less verbose suffix notation.
+                wfail("Specified parent $parent is being manipulated."
+                        ." Use suffix-\@ notation instead.\n")
+                    if ($pairs[$idx][0] != HOLD);
+                $idx++;
+            }
+        } else {
+            $idx = undef;
+        }
+        my @new_pairs;
+        if ($action == INSERT) {
+            my $new_range = $$spec{new_range};
+            $idx = @pairs if (!defined($idx));
+            printf("Adding +%s:%d at %d.\n", $$new_range[-1]{id}, int(@$new_range), $idx)
+                if ($debug);
+            @new_pairs = map { [ INSERT, $_ ] } @$new_range;
+        } else {
+            my $range = $$spec{range};
+            my $rmidx = first { $pairs[$_][1] == $$range[0] } 0..$#pairs;
+            for my $tidx (1..$#$range) {
+                # An insertion does not overlap existing Changes, so it's not caught earlier.
+                fail("Inconsistent operation - insertion within updated or deleted range.\n")
+                    if ($pairs[$rmidx + $tidx][1] != $$range[$tidx]);
+            }
+            if ($action == DELETE) {
+                printf("Deleting %s:%d at %d.\n", $$range[-1]{id}, int(@$range), $rmidx)
+                    if ($debug);
+                $idx = $rmidx;
+                $pairs[$idx++][0] = DELETE for (0..$#$range);
+            } else {
+                if (defined($idx) && ($idx ne $rmidx)) {
+                    printf("Moving %s:%d from %d to %d.\n",
+                           $$range[-1]{id}, int(@$range), $rmidx, $idx)
+                        if ($debug);
+                    if ($idx >= $rmidx) {
+                        wfail("Parent ".$pairs[$idx][1]{id}." lies within updated range"
+                                ." ($$spec{orig}).\n")
+                            if ($idx < $rmidx + @$range);
+                        $idx -= @$range;
+                    }
+                } else {
+                    printf("Updating %s:%d at %d.\n", $$range[-1]{id}, int(@$range), $rmidx)
+                        if ($debug);
+                    $idx = $rmidx;
+                }
+                splice @pairs, $rmidx, @$range;
+                @new_pairs = map { [ UPDATE, $_ ] } @$range;
+            }
+        }
+        splice @pairs, $idx, 0, @new_pairs;
+        $idx += @new_pairs;
+    }
+
+    return \@pairs;
+}
+
+sub format_parts($)
+{
+    my ($parts) = @_;
+
+    return "-" if (!$parts);
+    return "all";
+}
+
+use constant {
+    UPD_NOOP => 0,
+    UPD_PUSHED => 1,
+    UPD_META => 2,
+    UPD_INFO => 4,
+    UPD_DROP => 8
+};
+
+sub format_upd_cmd($)
+{
+    my ($cmd) = @_;
+
+    return "NOOP" if (!$cmd);
+    return join(",",
+                map { ('PUSHED', 'META', 'INFO', 'DROP')[$_] }
+                grep { $cmd & (1 << $_) } 0..3);
+}
+
+# Turn the list of local Changes into the final list of commits the
+# local branch should be reconstructed from.
+sub adjust_changes($)
+{
+    my ($pairs) = @_;
+
+    print "Adjusting Changes ...\n" if ($debug);
+
+    my ($any_missing, $any_merged);
+    my (@commits, @reports);
+    foreach my $pair (@$pairs) {
+        my ($action, $change) = @$pair;
+        my $ginfo = $$change{gerrit};
+        my $rmt_commit = $ginfo && $$ginfo{pick_commit};
+        my $pushed_id = $$change{pushed};
+        my $lcl_commit = $$change{local};
+
+        my ($upd, $parts) = (UPD_NOOP, NO_PARTS);
+        if ($action == HOLD) {
+            report_local(\@reports, "Hold      ", "", $lcl_commit) if ($debug);
+        } elsif ($action == INSERT) {
+            report_remote(\@reports, "Add       ", "", $ginfo) if (!$quiet);
+            ($upd, $parts) = (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS);
+        } elsif ($action == DELETE) {
+            report_local(\@reports, "Drop      ", "", $lcl_commit) if (!$quiet);
+            $upd = UPD_DROP;
+        } elsif (!$ginfo) {
+            my $sts = "NEW";
+            if (defined($pushed_id)) {
+                $sts = "ORPHANED";
+                $any_missing = 1;
+            }
+            report_local(\@reports, "Keep      ", $sts, $lcl_commit) if (!$quiet);
+        } else {
+            report_local(\@reports, "Replace   ", "", $lcl_commit) if (!$quiet);
+            ($upd, $parts) = (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS);
+        }
+
+        printf("%s %s, %s <= %s of %s\n",
+               format_id($$change{id}), format_upd_cmd($upd),
+               $lcl_commit ? format_id($$lcl_commit{id}) : "<none>", format_parts($parts),
+               $rmt_commit ? format_id($$rmt_commit{id}) : "<none>")
+            if ($debug);
+        if (!($upd & UPD_DROP)) {
+            my $commit;
+            if ($parts == NO_PARTS) {
+                $commit = $lcl_commit;
+            } else {
+                $commit = $rmt_commit;
+            }
+            push @commits, $commit;
+            if ($upd & UPD_PUSHED) {
+                $$change{pushed} = $$rmt_commit{id};
+            }
+            # If {pushed} was already set, branch tracking already made this a no-op.
+            $$change{tgt} = $$ginfo{branch}
+                if (($upd & UPD_META) || ($ginfo && !defined($$change{tgt})));
+        }
+        if ($upd & UPD_INFO) {
+            $any_merged = 1 if ($$ginfo{status} eq "MERGED");
+        }
+    }
+
+    print format_reports(\@reports);
+
+    wfail("\nDropping all Changes is not supported; use git reset --hard \@{u} instead.\n")
+        if (!@commits);
+
+    my $any_msg;
+
+    if ($any_missing && !$quiet) {
+        wout("\nWarning: Some Changes went missing on Gerrit.\n");
+        $any_msg = 1;
+    }
+
+    if ($any_merged && !$quiet) {
+        # Note: This is intentionally vague, because MERGED Changes which
+        # were targeting a different branch would be rebased out only if that
+        # branch is forward-merged into the current one. We would have to
+        # inspect the upstream branch to know, and that seems like overkill.
+        wout("\nNotice: Applying MERGED Changes. Using git gpull might rebase them out.\n");
+        $any_msg = 1;
+    }
+
+    print "\n" if ($any_msg);
+
+    return \@commits;
+}
+
+# Find the base for the rewrite, skipping over unmodified commits.
+# Git would do that for us, but writing the todo relies on skipping
+# over possibly present merge commits.
+sub determine_base($$)
+{
+    my ($raw_commits, $commits) = @_;
+
+    my $base = $local_base;
+    while (@$raw_commits) {
+        my $commit = $$raw_commits[0];
+        last if ($commit != $$commits[0]);
+        $base = $$commit{id};
+        print "Skipping over unmodified $base\n" if ($debug);
+        shift @$raw_commits;
+        shift @$commits;
+    }
+    return $base;
+}
+
+# Reconstruct the local branch from the specified commits.
+sub write_rebase_todo($$)
+{
+    my ($raw_commits, $commits) = @_;
+
+    my $todo = $gitdir.'/gpick-todo';
+    print "Writing $todo:\n" if ($debug);
+    open(TODO, "> $todo") or wfail("Cannot write $todo: $!\n");
+    my %drop = map { $$_{id} => 1 } @$raw_commits;
+    foreach (@$commits) {
+        my $sha1 = $$_{id};
+        delete $drop{$sha1};
+        print "> pick $sha1\n" if ($debug);
+        print TODO "pick $sha1\n";
+        fail("Manipulating merges is not supported (Change $$_{changeid}).\n")
+            if (@{$$_{parents}} > 1);
+    }
+    if (git_config("rebase.missingcommitscheck", "ignore") ne "ignore") {
+        foreach (keys %drop) {
+            print "> drop $_\n" if ($debug);
+            print TODO "drop $_\n";
+        }
+    }
+    close(TODO) or wfail("Failed to write $todo: $!\n");
+
+    return $todo;
+}
+
+sub install_hook($$)
+{
+    my ($hook, $code) = @_;
+
+    my $file = $gitcommondir."/hooks/".$hook;
+    my $magic = "### git-gpick $hook callback - DO NOT MODIFY\n";
+    my $content = "#!/bin/sh\n".$magic.$code."exec \"$script\" --x--$hook \"\$\@\"\n";
+
+    if (open(HOOK, $file)) {
+        my @lines = <HOOK>;
+        close(HOOK);
+        fail("There is already another $hook hook installed. Cannot proceed.\n")
+            if (@lines < 3 || ($lines[1] ne $magic));
+        if (join("", @lines) eq $content) {
+            print "$hook hook is up-to-date.\n" if ($debug);
+            return;
+        }
+        print "$hook hook is outdated; reinstalling.\n" if ($debug);
+    }
+
+    open(HOOK, "> $file") or wfail("Cannot write $file: $!\n");
+    print HOOK $content;
+    close(HOOK) or wfail("Failed to write $file: $!\n");
+    chmod(0755, $file) or wfail("Failed to make $file executable: $!\n");
+}
+
+sub invoke_rebase($$)
+{
+    my ($base, $todo) = @_;
+
+    install_hook("post-rewrite", "[ \"x\$1\" != xrebase ] && exit\n");
+
+    print "Applying modifications ...\n" if (!$quiet);
+
+    $ENV{GPICK_TODO} = $todo;
+    $ENV{GPICK_DEBUG} = $debug;
+    $ENV{GIT_EDITOR} = $script;
+
+    my @gitcmd = ('git', 'rebase', '-i', $base);
+    push @gitcmd, '-q' if ($quiet);
+    if (!$dry_run) {
+        print "+ @gitcmd\n" if ($debug);
+        exec(@gitcmd) or wfail("Cannot run git: $!\n");
+        # notreached
+    }
+    print "+ @gitcmd [DRY]\n" if ($debug);
+}
+
+sub rewrite_changes($$)
+{
+    my ($raw_commits, $commits) = @_;
+
+    my $base = determine_base($raw_commits, $commits);
+    if (!@$commits) {
+        print "Everything already up-to-date.\n" if (!$quiet);
+        return;
+    }
+
+    my $verify = sha1_hex(join(" ", map { $$_{id} } @$commits));
+    save_state($dry_run, $verify);
+
+    # Abuse git-rebase -i to do the commit replacement.
+    # We do that instead of resetting and cherry-picking ourselves, so that
+    # the user is faced with a familiar environment when something goes wrong.
+    my $todo = write_rebase_todo($raw_commits, $commits);
+    invoke_rebase($base, $todo);
+    # We get here only in dry-run mode.
+}
+
+################### main() ####################
+
+# Note: this must come before the GIT_EDITOR clause, because the
+# variable is still set when the hook is invoked after a clean rebase.
+if (@ARGV && ($ARGV[0] eq "--x--post-rewrite")) {
+    # The script was launched as a git rebase post-rewrite hook.
+
+    my @lines = <STDIN>;
+    $debug = $ENV{GPICK_DEBUG};  # Note that this may make it undefined.
+
+    print "Called as post-rewrite hook.\n" if ($debug);
+
+    goto_gitdir();
+    # The loading of the state refs is delayed until the new state was
+    # verified, so we don't accidentally delete them as orphans.
+    print "Loading new state ...\n" if ($debug);
+    my $verify = load_state_file(1);
+    if (defined($verify)) {
+        my $got_verify = sha1_hex(join(" ", map { substr($_, 0, 40 ) } @lines));
+        if ($got_verify eq $verify) {
+            # The new state is good, commit it.
+            # We still need to load the state refs to know which ones
+            # to update; they don't overwrite values from the new state.
+            load_refs("refs/gpush/i*");
+            save_state();
+        } else {
+            # We were called from an unrelated rebase after ours was aborted.
+            print "New state is outdated.\n" if ($debug);
+        }
+        update_refs(0, [ "delete refs/gpush/state-new\n" ]);
+    } else {
+        # We were called from an unrelated rebase after successfully
+        # completing the previous run.
+        print "No new state present.\n" if ($debug);
+    }
+    exit;
+}
+
+my $editor = $ENV{GIT_EDITOR};
+if (defined($editor)) {
+    if ($^O eq "msys") {
+        $editor =~ s,\\,/,g;
+        $editor =~ s,^(.):/,/$1/,g;
+    }
+    if ($editor eq $script) {
+        # The script was launched as the $GIT_EDITOR from git rebase -i.
+        # Replace the todo file and exit.
+        rename($ENV{GPICK_TODO}, $ARGV[0]) or wfail("Cannot move rebase-todo into place: $!\n");
+        exit;
+    }
+}
+
+goto_gitdir();
+parse_arguments(@ARGV);
+load_config();
+load_state(1);
+determine_local_branch();
+my $raw_commits = get_changes();
+my $raw_changes = changes_from_commits($raw_commits);
+my $specs = prepare_specs();
+my $pairs = apply_specs($specs, $raw_changes);
+my $commits = adjust_changes($pairs);
+rewrite_changes($raw_commits, $commits);
+save_state($dry_run);

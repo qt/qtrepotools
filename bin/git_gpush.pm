@@ -260,6 +260,7 @@ sub read_cmd_line($@)
 ##############
 
 our $gitdir;  # $GIT_DIR
+our $gitcommondir;  # $GIT_COMMON_DIR
 
 sub goto_gitdir()
 {
@@ -267,6 +268,7 @@ sub goto_gitdir()
     fail("fatal: This operation must be run in a work tree\n") if (!defined($cdup));
     chdir($cdup) unless ($cdup eq "");
     $gitdir = read_cmd_line(0, 'git', 'rev-parse', '--git-dir');
+    $gitcommondir = read_cmd_line(0, 'git', 'rev-parse', '--no-flags', '--git-common-dir');
 }
 
 # `git config --list` output, plus contents of .git-gpush-aliases' [config]
@@ -504,6 +506,45 @@ sub get_commits_free($)
     return \@commits;
 }
 
+# Enumerate the specified number of commits from the specified tip.
+# Merges are treated in --first-parent mode.
+sub get_commits_count($$$)
+{
+    my ($tip, $count, $tip_raw) = @_;
+
+    my @commits;
+    for (1 .. $count) {
+        my $commit = $commit_by_id{$tip};
+        wfail("Range $tip_raw:$count extends beyond the local branch.\n")
+            if (!$commit);
+        unshift @commits, $commit;
+        $tip = get_1st_parent($commit);
+    }
+    return \@commits;
+}
+
+# Enumerate commits from the specified tip down to the specified base.
+# Merges are treated in --first-parent mode.
+sub get_commits_base($$$$)
+{
+    my ($base, $tip, $base_raw, $tip_raw) = @_;
+
+    # An empty base is understood to mean the merge base with upstream.
+    # This avoids the need to figure out the actual commit, which is
+    # particularly useful in the presence of multiple bases due to merges.
+    return get_commits_free($tip) if (!length($base));
+
+    my @commits;
+    while ($tip ne $base) {
+        my $commit = $commit_by_id{$tip};
+        wfail("$base_raw is not an ancestor of $tip_raw within the local branch.\n")
+            if (!$commit);
+        unshift @commits, $commit;
+        $tip = get_1st_parent($commit);
+    }
+    return \@commits;
+}
+
 ########################
 # gerrit query results #
 ########################
@@ -558,25 +599,34 @@ sub update_refs($$)
     close_process($pipe);
 }
 
-sub _commit_state($)
+sub _commit_state($$)
 {
-    my ($blob) = @_;
+    my ($blob, $new) = @_;
 
     run_process(0, 'git', 'update-index', '--add', '--cacheinfo', "100644,$blob,state");
     my $tree = read_cmd_line(0, 'git', 'write-tree');
     my $sha1 = read_cmd_line(0, 'git', 'commit-tree', '-m', 'Saving state', $tree);
+    if ($new) {
+        run_process(0, 'git', 'update-ref', 'refs/gpush/state-new', $sha1);
+        return;
+    }
     run_process(0, 'git', 'update-ref', '-m', $state_updater,
                    '--create-reflog', 'refs/gpush/state', $sha1);
 }
 
-sub save_state(;$)
+sub save_state(;$$)
 {
-    my ($dry) = @_;
+    my ($dry, $new) = @_;
 
-    print "Saving state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
+    print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
     my @fkeys = ('key', 'id', 'src', 'tgt', 'topic');
     my @rkeys = ('pushed');
+    if ($new) {
+        push @lines, "verify $new", "updater $state_updater";
+        push @fkeys, @rkeys;
+        @rkeys = ();
+    }
     push @lines,
         "next_key $next_key",
         "last_gc $last_gc",
@@ -608,13 +658,13 @@ sub save_state(;$)
 
     # We save the state file in a git ref as well, so the entire state
     # can be synced between hosts with git operations.
-    if ("@lines" ne "@$state_lines") {
+    if ($new || ("@lines" ne "@$state_lines")) {
         my $sts = open_process(USE_STDIN | SILENT_STDIN | USE_STDOUT | FWD_STDERR,
                                'git', 'hash-object', '-w', '--stdin');
         write_process($sts, map { "$_\n" } @lines);
         my $blob = read_process($sts);
         close_process($sts);
-        with_local_git_index(\&_commit_state, $blob) if (!$dry);
+        with_local_git_index(\&_commit_state, $blob, $new) if (!$dry);
         $state_lines = \@lines;
     } else {
         print "State file unmodified.\n" if ($debug);
@@ -659,14 +709,18 @@ sub change_for_id($;$)
     return undef;
 }
 
-sub load_state_file()
+sub load_state_file(;$)
 {
+    my ($new) = @_;
+
+    my $ref = $new ? "state-new" : "state";
     my $sts = open_process(SOFT_FAIL | USE_STDOUT | NUL_STDERR,
-                           'git', 'cat-file', '-p', 'refs/gpush/state:state');
+                           'git', 'cat-file', '-p', "refs/gpush/$ref:state");
     $state_lines = read_process_all($sts);
     close_process($sts);
     return if (!@$state_lines);
 
+    my $state_verify;
     my $line = 0;
     my $inhdr = 1;
     my $change;
@@ -683,6 +737,10 @@ sub load_state_file()
                 $next_key = int($2);
             } elsif ($1 eq "last_gc") {
                 $last_gc = int($2);
+            } elsif ($new && ($1 eq "verify")) {
+                $state_verify = $2;
+            } elsif ($new && ($1 eq "updater")) {
+                $state_updater = $2;
             } else {
                 fail("Bad state file: Unknown header keyword '$1' at line $line.\n");
             }
@@ -706,6 +764,8 @@ sub load_state_file()
         $change_by_key{$key} = $change;
         push @{$changes_by_id{$id}}, $change;
     }
+
+    return $state_verify;
 }
 
 sub load_refs(@)
@@ -728,19 +788,24 @@ sub load_refs(@)
                 push @updates, "delete $ref\n";
                 next;
             }
-            $$change{$3} = $1;
+            $$change{$3} //= $1;  # Don't overwrite value from new file.
             $$change{'_'.$3} = $1;
+        } elsif (m,^(.{40}) refs/gpush/g(\d+)_(\d+)$,) {
+            my $ginfo = \%{$gerrit_info_by_key{$2}};
+            $$ginfo{fetched}{$3} = $1;
         }
     }
     close_process($info);
     update_refs(0, \@updates);
 }
 
-sub load_state()
+sub load_state($)
 {
+    my ($all) = @_;
+
     print "Loading state ...\n" if ($debug);
     load_state_file();
-    load_refs("refs/gpush/i*", "refs/heads/", "refs/remotes/");
+    load_refs($all ? "refs/gpush/" : "refs/gpush/i*", "refs/heads/", "refs/remotes/");
 }
 
 ##########################
@@ -981,6 +1046,8 @@ sub visit_local_commits($;$)
 }
 
 my $analyzed_local_branch = 0;
+# SHA1 of the local branch's merge base with upstream.
+our $local_base;
 # SHA1 of the local branch's tip.
 our $local_tip;
 # Mapping of Change-Ids to commits on the local branch.
@@ -1016,6 +1083,8 @@ sub analyze_local_branch($)
     $local_tip = $$raw_commits[-1]{id};
 
     my $commits = get_commits_free($local_tip);
+
+    $local_base = $$commits[0]{parents}[0];
 
     $changeid2local{$$_{changeid}} = $$_{id} foreach (@$commits);
 
@@ -1062,7 +1131,8 @@ sub _sha1_for_partial_local_id($)
 
 use constant {
     SPEC_BASE => 0,
-    SPEC_TIP => 1
+    SPEC_TIP => 1,
+    SPEC_PARENT => 2
 };
 
 sub _finalize_parse_local_rev($$$)
@@ -1239,7 +1309,8 @@ sub query_gerrit($;$)
         next if (!defined($key) || !defined($changeid));
         my $ginfo = \%{$gerrit_info_by_key{$key}};
         push @{$gerrit_infos_by_id{$changeid}}, $ginfo;
-        my $status = $$review{'status'};
+        my ($subject, $status) = ($$review{'subject'}, $$review{'status'});
+        defined($subject) or fail("Huh?! $changeid has no subject?\n");
         defined($status) or fail("Huh?! $changeid has no status?\n");
         my ($branch, $topic) = ($$review{'branch'}, $$review{'topic'});
         defined($branch) or fail("Huh?! $changeid has no branch?\n");
@@ -1247,18 +1318,23 @@ sub query_gerrit($;$)
         defined($pss) or fail("Huh?! $changeid has no PatchSets?\n");
         my (@revs, %rev_map);
         foreach my $cps (@{$pss}) {
-            my ($number, $revision) = ($$cps{'number'}, $$cps{'revision'});
+            my ($number, $revision, $ref) = ($$cps{'number'}, $$cps{'revision'}, $$cps{'ref'});
             defined($number) or fail("Huh?! PatchSet in $changeid has no number?\n");
             defined($revision) or fail("Huh?! PatchSet $number in $changeid has no commit?\n");
+            defined($ref) or fail("Huh?! PatchSet $number in $changeid has no ref?\n");
             my %rev = (
                 id => $revision,
-                ps => $number
+                parents => $$cps{'parents'} // [],
+                ps => $number,
+                ref => $ref
             );
             $revs[$number] = \%rev;
             $rev_map{$revision} = \%rev;
             $gerrit_info_by_sha1{$revision} = $ginfo;
         }
+        $$ginfo{key} = $key;
         $$ginfo{id} = $changeid;
+        $$ginfo{subject} = $subject;
         $$ginfo{status} = $status;
         $$ginfo{branch} = $branch;
         $$ginfo{topic} = $topic;
