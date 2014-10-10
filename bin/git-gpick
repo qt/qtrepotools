@@ -72,6 +72,14 @@ Description:
     follow the usual instructions on screen.
 
 Options:
+    -c, --check
+        Rather than replacing any commits, only show what would be done.
+        A side effect is that the state information is synchronized with
+        Gerrit, which is necessary when commits were previously pushed
+        or picked without (or with an older version of) gpush or gpick,
+        respectively.
+        Use with --quiet to show only "interesting" Changes.
+
     -m, --merge
         Attempt to merge concurrent local and remote modifications to
         the same Changes. Use only once you are sure that there are no
@@ -159,6 +167,14 @@ Examples:
         another Change right on top of them. The other commits in the local
         branch are rebased on top of these three commits.
 
+    git gpick --check ..
+        Bootstrap git-gpush before using it the first time with pre-existing
+        pending Changes.
+
+    git gpick --check HEAD
+        Check whether a new PatchSet was pushed to the Change corresponding
+        with the HEAD commit.
+
 Copyright:
     Copyright (C) 2018 The Qt Company Ltd.
     Copyright (C) 2019 Oswald Buddenhagen
@@ -181,6 +197,7 @@ use constant {
 my $pick_parts;
 my $branch;
 my $upstream_branch;
+my $check = 0;
 my $merge = 0;
 my $force = 0;
 my $ignore = 0;
@@ -206,6 +223,8 @@ sub parse_arguments(@)
         } elsif ($arg eq "-b" || $arg eq "--branch") {
             fail("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $branch = shift @_;
+        } elsif ($arg eq "-c" || $arg eq "--check") {
+            $check = 1;
         } elsif ($arg eq "-m" || $arg eq "--merge") {
             $merge = 1;
         } elsif ($arg eq "-f" || $arg eq "--force") {
@@ -230,6 +249,11 @@ sub parse_arguments(@)
 
     fail("--quiet and --verbose/--debug are mutually exclusive.\n")
         if ($quiet && $verbose);
+
+    if ($check) {
+        fail("--check and --merge/--force/--ignore are mutually exclusive.\n")
+            if ($merge || $force || $ignore);
+    }
 
     fail("--merge/--force and --ignore are mutually exclusive.\n")
         if (($merge || $force) && $ignore);
@@ -410,12 +434,14 @@ sub parse_specs($)
             $spec{orig} = $cs;
             my $action;
             if ($cs =~ s,^\+,,) {
+                fail("Cannot specify an addition when checking.\n") if ($check);
                 fail("Cannot specify an addition when omitting diffs.\n")
                     if (!($pick_parts & DIFF_PART));
                 fail("Missing specification of remote Change.\n") if (!length($cs));
                 $action = INSERT;
             } else {
                 if ($cs =~ s,^/,,) {
+                    fail("Cannot specify a removal when checking.\n") if ($check);
                     fail("Cannot specify a removal when omitting diffs.\n")
                         if (!($pick_parts & DIFF_PART));
                     wfail("Cannot specify a removal (/$cs) with a parent.\n")
@@ -437,6 +463,7 @@ sub parse_specs($)
             # Note that it's actually possible to use Changes we delete as parents.
             $parent = $isparent ? '@' : undef;
         }
+        fail("Cannot specify a parent when checking.\n") if (defined($parent) && $check);
     }
     fail("Cannot specify a parent without a subsequent commit.\n") if (defined($parent));
     fail("No Changes specified.\n") if (!@specs);
@@ -701,8 +728,9 @@ sub map_update_spec($$$)
     }
     # We permit some Changes being missing, as otherwise refreshing
     # a series which has new local Changes would be rather annoying.
-    # For deletions it is OK to have no hits at all.
-    if (($$spec{action} == UPDATE && !$found) || $ambiguous) {
+    # For deletions it is OK to have no hits at all. Likewise in
+    # --check mode.
+    if (($$spec{action} == UPDATE && !$found && !$check) || $ambiguous) {
         print_failure($spec, @results);
         $$fails = 1;
     }
@@ -1263,6 +1291,7 @@ sub verify_update($$$$$$$$)
         if (!$eff_rmt_parts) {
             # The remote modifications are masked out.
             $pfx = "Keep      " if (!$quiet);
+            return (UPD_INFO, NO_PARTS, $pfx, $annot) if ($check);
             # Forget about the modifications, as per documentation. The
             # alternative of requiring an explicit --ignore (possibly in
             # a separate run) is conceivable, but does not appear to add
@@ -1279,6 +1308,7 @@ sub verify_update($$$$$$$$)
                 # We do not merge without being asked to, as the modifications
                 # might still conflict logically.
                 $pfx = "Merge     " if (!$quiet);
+                return (UPD_INFO, NO_PARTS, $pfx, $annot) if ($check);
                 return (UPD_PUSHED | UPD_META | UPD_INFO, $eff_rmt_parts, $pfx, $annot);
             }
             if (!$force) {
@@ -1319,6 +1349,7 @@ sub verify_update($$$$$$$$)
         if (!$eff_parts) {
             # The differing parts are masked out.
             $pfx = "Keep      " if (!$quiet);
+            return (UPD_INFO, NO_PARTS, $pfx, $annot) if ($check);
             my $upd = ($pick_parts & DIFF_PART) ? UPD_META : 0;
             return (UPD_PUSHED | UPD_INFO | $upd, NO_PARTS, $pfx, $annot);
         }
@@ -1332,9 +1363,11 @@ sub verify_update($$$$$$$$)
     if ($parts & ~$pick_parts) {
         # The commits differ also in parts which are not being picked.
         $pfx = $forcing ? "P. REPL.  " : "P. Repl.  " if (!$quiet);
+        return (UPD_INFO, NO_PARTS, $pfx, $annot) if ($check);
         return (UPD_PUSHED | UPD_META | UPD_INFO, $eff_parts, $pfx, $annot);
     }
     $pfx = $forcing ? "REPLACE   " : "Replace   " if (!$quiet);
+    return (UPD_INFO, NO_PARTS, $pfx, $annot) if ($check);
     return (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS, $pfx, $annot);
 }
 
@@ -1506,7 +1539,9 @@ sub do_adjust_changes($)
                 $err .= "\nConflicting".$lmt." use --force to overwrite them,".$ipt;
             }
         }
-        nwfail($err."\n");
+        nwfail($err."\n") if (!$check);
+        nwout($err."\n");
+        $any_msg = 1;
     }
 
     print "\n" if ($any_msg);
@@ -1701,5 +1736,5 @@ my $raw_changes = changes_from_commits($raw_commits);
 my $specs = prepare_specs();
 my $pairs = apply_specs($specs, $raw_changes);
 my $commits = adjust_changes($pairs);
-rewrite_changes($raw_commits, $commits);
+rewrite_changes($raw_commits, $commits) if (!$check);
 save_state($dry_run);

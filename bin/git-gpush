@@ -664,6 +664,9 @@ sub classify_changes_online($)
             my $pushed = $$change{pushed};
             if ($ginfo) {
                 if (!defined($pushed) || ($pushed ne $curr_sha1)) {
+                    # Having no pushed commit may indicate either that gpick --check
+                    # was not used or that it found divergence. It doesn't appear
+                    # useful to differentiate between the two.
                     my $pushed_rev = defined($pushed) && $$chg_revs{$pushed};
                     $$change{patchset} = $pushed_rev ? $$pushed_rev{ps} : "?";
                     $$change{freshness} = FORCE;
