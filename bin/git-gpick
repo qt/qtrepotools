@@ -39,7 +39,8 @@ Usage:
 
 Description:
     This program fetches the specified PatchSets of the specified Changes
-    from Gerrit, and updates the local commits with them.
+    from Gerrit, and updates the local commits with them. Conflicting
+    local modifications are reported and require an override.
 
     Commits are updated in place, unless a parent to rebase them onto
     is specified. Changes with no corresponding local commit need to be
@@ -71,6 +72,18 @@ Description:
     follow the usual instructions on screen.
 
 Options:
+    -f, --force
+        Replace or merge the local commits even in case of conflicting
+        modifications.
+        Drop local commits even in case of local modifications.
+
+    -i, --ignore
+        Ignore the new PatchSets that appeared on Gerrit since the previous
+        push from this clone. The local Changes will subsequently appear
+        modified, and the following push will go through without overwrite
+        warning. For Changes that were locally modified since the previous
+        push, this option can be considered complementary to --force.
+
     -r, --remote
         Specify the remote used to determine the Gerrit server to fetch
         PatchSets from. The fallback behavior matches git-gpush.
@@ -92,6 +105,24 @@ Options:
 
     --debug
         Print debug information.
+
+Console Output:
+    During operation, output following this pattern will be produced:
+
+        <action> <id> (<subject>) [<annotation>]
+
+    <id> and <subject> describe the Change on Gerrit.
+    <action> describes what will happen with the local commit. Uppercase
+    denotes actions that lose local modifications, while parenthesization
+    denotes the need to supply additional options.
+    <annotation> has the format "<local> PS<n>:<conflicts> <remote>".
+    PS<n> is the PatchSet that was created for the Change by the last
+    push from this repository. <local> and <remote> indicate the parts
+    of the Change that were modified on the respective side relative to
+    PS<n>, while <conflicts> indicate divergent concurrent modifications;
+    convergent concurrent modifications are completely omitted for brevity.
+    When <n> is unknown, it is shown as 'x' and all differences are shown
+    as conflicts.
 
 Examples:
     git gpick ~1
@@ -122,11 +153,17 @@ EOM
 
 use constant {
     NO_PARTS => 0,
+    AUTHOR_PART => 1,
+    MESSAGE_PART => 2,
+    DIFF_PART => 4,
+    MERGE_PART => 8,  # This cannot be picked separately
     ALL_PARTS => 15
 };
 
 my $branch;
 my $upstream_branch;
+my $force = 0;
+my $ignore = 0;
 my @commit_specs;
 
 sub parse_arguments(@)
@@ -149,6 +186,10 @@ sub parse_arguments(@)
         } elsif ($arg eq "-b" || $arg eq "--branch") {
             fail("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $branch = shift @_;
+        } elsif ($arg eq "-f" || $arg eq "--force") {
+            $force = 1;
+        } elsif ($arg eq "-i" || $arg eq "--ignore") {
+            $ignore = 1;
         } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
             usage();
             exit 0;
@@ -161,6 +202,9 @@ sub parse_arguments(@)
 
     fail("--quiet and --verbose/--debug are mutually exclusive.\n")
         if ($quiet && $verbose);
+
+    fail("--force and --ignore are mutually exclusive.\n")
+        if ($force && $ignore);
 }
 
 sub determine_local_branch()
@@ -610,6 +654,9 @@ sub map_update_spec($$$)
                 if ($ret == MAP_AMBIGUOUS) {
                     # This can happen only for Changes which were not
                     # previously mapped to remote ones.
+                    # It would be possible to verify_commit() against
+                    # *all* candidates and complain only when none
+                    # match, but that seems too much trouble.
                     $ambiguous++;
                 } else {
                     $$change{gerrit} = $$rslt{match};
@@ -620,7 +667,8 @@ sub map_update_spec($$$)
     }
     # We permit some Changes being missing, as otherwise refreshing
     # a series which has new local Changes would be rather annoying.
-    if (!$found || $ambiguous) {
+    # For deletions it is OK to have no hits at all.
+    if (($$spec{action} == UPDATE && !$found) || $ambiguous) {
         print_failure($spec, @results);
         $$fails = 1;
     }
@@ -705,6 +753,8 @@ sub verify_cherrypick($$)
         $tree = $$prev{tree};
     } else {
         # Otherwise the diff needs rebasing.
+        # The rebase direction is chosen such that the diff may be re-used
+        # in verify_update(). That's also why we don't clear the diff cache.
         ($tree, undef) = apply_diff($prev, $base, NUL_STDERR);
         return 0 if (!defined($tree));
     }
@@ -808,11 +858,16 @@ sub complete_spec_heads($)
         } else {
             foreach my $change (@{$$spec{range}}) {
                 my $changeid = $$change{id};
-                $picks{$changeid} = undef if ($action != DELETE);
+                # We do this for deletions as well, to know which Changes
+                # can be dropped safely.
+                $picks{$changeid} = undef;
+                my $pushed = $$change{pushed};
+                if (defined($pushed)) {
+                    $visits{$pushed} = undef;
+                }
             }
         }
     }
-    return if (!%picks);
 
     query_gerrit([ map { "change:".$_ } keys %picks ]);
 
@@ -821,7 +876,7 @@ sub complete_spec_heads($)
         my $action = $$spec{action};
         if ($action == INSERT) {
             map_insertion_spec($spec, \@fetches, \$any_errors);
-        } elsif ($action == UPDATE) {
+        } else {
             map_update_spec($spec, \@fetches, \$any_errors);
         }
     }
@@ -829,7 +884,7 @@ sub complete_spec_heads($)
 
     fetch_patchsets(\@fetches, \%visits) if (@fetches);
 
-    print "Visiting fetched PatchSets ...\n" if ($debug);
+    print "Visiting fetched and pushed PatchSets ...\n" if ($debug);
     visit_local_commits([ keys %visits ]);
 
     analyze_patchsets(\@fetches) if (@fetches);
@@ -968,7 +1023,101 @@ sub format_parts($)
     my ($parts) = @_;
 
     return "-" if (!$parts);
-    return "all";
+    my @out;
+    for my $i (0..3) {
+        my $b = 1 << $i;
+        next if (!($parts & $b));
+        my $p = ('auth', 'msg', 'diff', 'merge')[$i];
+        push @out, $p;
+    }
+    return join(",", @out);
+}
+
+# Determine which parts of a commit differ from a reference commit.
+sub verify_commit($$)
+{
+    my ($commit, $ref_commit) = @_;
+
+    return 0 if ($commit == $ref_commit);
+
+    my ($tree, $ref_tree) = ($$commit{tree}, $$ref_commit{tree});
+    my ($base_tree, $ref_base_tree) =
+            (get_1st_parent_tree($commit), get_1st_parent_tree($ref_commit));
+    if ($base_tree eq $ref_base_tree) {
+        # We got lucky, no need to rebase.
+        print "No rebase.\n" if ($debug);
+    } else {
+        # First see if we have a cached reverse rebase.
+        my $rck = $base_tree.$ref_base_tree.$ref_tree;
+        my $rct = $commit2diff{$rck};
+        if (defined($rct)) {
+            print "Have cached reverse rebase.\n" if ($debug);
+            $ref_tree = $rct;
+        } else {
+            # Then see if we have a cached forward rebase.
+            my $ck = $ref_base_tree.$base_tree.$tree;
+            my $ct = $commit2diff{$ck};
+            if (defined($ct)) {
+                print "Have cached rebase.\n" if ($debug);
+                $tree = $ct;
+            } else {
+                if (defined($commit2diff{$$ref_commit{id}})) {
+                    print "Have cached reverse diff.\n" if ($debug);
+                    # If we have a cached reverse diff, it's more efficient to do a
+                    # reverse cherry-pick on top of the target commit's parent.
+                    ($ref_tree, undef) = apply_diff(
+                            $ref_commit, get_1st_parent($commit), NUL_STDERR);
+                    $ref_tree = 'CONFLICT-'.$rck if (!defined($ref_tree));
+                    $commit2diff{$rck} = $ref_tree;
+                } else {
+                    # Else do a cherry-pick on top of the reference commit's parent.
+                    ($tree, undef) = apply_diff(
+                            $commit, get_1st_parent($ref_commit), NUL_STDERR);
+                    $tree = 'CONFLICT-'.$ck if (!defined($tree));
+                    # ... and cache it for later.
+                    # Yes, we re-use the diff cache for that.
+                    $commit2diff{$ck} = $tree;
+                }
+            }
+        }
+    }
+
+    my $parts = 0;
+    $parts |= AUTHOR_PART
+        if ("@{$$commit{author}}" ne "@{$$ref_commit{author}}");
+    $parts |= MESSAGE_PART
+        if ($$commit{message} ne $$ref_commit{message});
+    $parts |= DIFF_PART
+        if ($tree ne $ref_tree);
+    $parts |= MERGE_PART
+        if (get_more_parents($commit) ne get_more_parents($ref_commit));
+    return $parts;
+}
+
+sub verify_local_commit($$$;$)
+{
+    my ($lcl_commit, $rmt_commit, $rmt_ps, $mask) = @_;
+
+    my $parts = verify_commit($lcl_commit, $rmt_commit);
+    printf("Verified local %s against remote %s (PS%s) on top of %s: %s%s\n",
+           format_id($$lcl_commit{id}), format_id($$rmt_commit{id}), $rmt_ps,
+           format_id(get_1st_parent($rmt_commit)), format_parts($parts),
+           defined($mask) ? " (eff ".format_parts($parts & $mask).")" : "")
+        if ($debug);
+    return $parts & ($mask // ALL_PARTS);
+}
+
+sub verify_remote_commit($$$$$)
+{
+    my ($rmt_commit, $rmt_ps, $pushed_commit, $pushed_ps, $mask) = @_;
+
+    my $parts = verify_commit($rmt_commit, $pushed_commit);
+    printf("Verified remote %s (PS%d) against remote %s (PS%s) on top of %s: %s (eff %s)\n",
+           format_id($$rmt_commit{id}), $rmt_ps, format_id($$pushed_commit{id}), $pushed_ps,
+           format_id(get_1st_parent($pushed_commit)), format_parts($parts),
+           format_parts($parts & $mask))
+        if ($debug);
+    return $parts & $mask;
 }
 
 use constant {
@@ -989,14 +1138,128 @@ sub format_upd_cmd($)
                 grep { $cmd & (1 << $_) } 0..3);
 }
 
+sub verify_delete($$$$$$$)
+{
+    my ($reports, $lcl_commit, $rmt_commit, $rmt_ps, $pushed_commit, $pushed_ps,
+        $need_force_del) = @_;
+
+    my ($pfx, $annot, $forcing) = (undef, "", 0);
+    # The current local commit can be safely discarded
+    # if it matches a PatchSet on Gerrit.
+    # TODO: Compare against all PatchSets of the Change,
+    # not just the current and the previously pushed one.
+    my $parts = verify_local_commit($lcl_commit, $rmt_commit, $rmt_ps);
+    if ($parts) {
+        if ($pushed_ps ne "?") {  # The PatchSet must be actually still present.
+            $parts = verify_local_commit($lcl_commit, $pushed_commit, $pushed_ps);
+            if ($parts) {
+                $annot = format_parts($parts)." PS$pushed_ps";
+                $forcing = 1;
+            }
+        } else {
+            # We have no previously pushed commit to compare against.
+            $annot = "PSx:".format_parts($parts);
+            $forcing = 1;
+        }
+    }
+    if ($forcing && !$force) {
+        $$need_force_del = 1;
+        $pfx = "(DROP)    ";
+        return (UPD_INFO, $pfx, $annot);
+    }
+    $pfx = $forcing ? "DROP      " : "Drop      " if (!$quiet);
+    return (UPD_DROP, $pfx, $annot);
+}
+
+sub verify_update($$$$$$$)
+{
+    my ($reports, $lcl_commit, $rmt_commit, $rmt_ps, $pushed_commit, $pushed_ps,
+        $need_force_repl) = @_;
+
+    my ($pfx, $annot, $forcing) = (undef, "", 0);
+    # First make a direct comparison. This should be the common case (the user
+    # is expected to push out updates timely), and also covers bootstrapping.
+    my $parts = verify_local_commit($lcl_commit, $rmt_commit, $rmt_ps);
+    if (!$parts) {
+        # The current local and remote commits are identical, so picking
+        # would be a no-op.
+        # It is possible that the commit was pushed/picked without gpush/gpick,
+        # and therefore the record of the previously pushed commit is outdated
+        # or missing. Therefore, we record the remote SHA1 to reflect the fact
+        # that we are actually up-to-date, but use the local commit to avoid
+        # pointless rewriting.
+        $pfx = "Keep      " if (!$quiet);
+        return (UPD_PUSHED | UPD_META | UPD_INFO, NO_PARTS, $pfx, $annot);
+    }
+    if ($pushed_commit) {
+        # Do a primitive 3-way diff with the previously pushed commit.
+        # Note that we mask away modifications which are identical on
+        # both sides. This might be mildly confusing, but otoh it is
+        # consistent with the equality shortcut above, and knowing
+        # about non-differences is not too useful anyway.
+        my $rmt_parts = verify_remote_commit($rmt_commit, $rmt_ps,
+                                             $pushed_commit, $pushed_ps, $parts);
+        if (!$rmt_parts) {
+            # As the remote commit equals the previously pushed one, but the local
+            # and remote ones differ, we know that the local one was modified.
+            ($pfx, $annot) = ("Keep      ", format_parts($parts)." PS$pushed_ps")
+                if (!$quiet);
+            return (UPD_META | UPD_INFO, NO_PARTS, $pfx, $annot);
+        }
+        # The current remote commit differs from the previously pushed one.
+        if ($ignore) {
+            ($pfx, $annot) = ("Keep      ",
+                              "PS$pushed_ps ".format_parts($rmt_parts)." (IGNORED)")
+                if (!$quiet);
+            # INFO, as the source is "applied" even if the update is ignored.
+            return (UPD_PUSHED | UPD_INFO, NO_PARTS, $pfx, $annot);
+        }
+        my $lcl_parts = verify_local_commit($lcl_commit, $pushed_commit, $pushed_ps, $parts);
+        my $fl = $lcl_parts & ~$rmt_parts;
+        my $fc = $lcl_parts & $rmt_parts;
+        my $fr = ~$lcl_parts & $rmt_parts;
+        $annot =
+             ($fl ? format_parts($fl)." " : "")
+            ."PS".$pushed_ps
+            .($fc ? ":".uc(format_parts($fc)) : "")
+            .($fr ? " ".format_parts($fr) : "");
+        if ($lcl_parts) {
+            # The current local commit differs from the previously pushed one,
+            # and we already know that the current remote commit also differs.
+            $forcing = 1;
+        } elsif ($pushed_ps eq "?") {
+            # The previously pushed commit disappeared from Gerrit.
+            # Treat it the same as if it had never been pushed.
+            $forcing = 1;
+        }
+    } else {
+        # We have no previously pushed commit to compare against.
+        if ($ignore) {
+            ($pfx, $annot) = ("Keep      ", "PSx:".format_parts($parts)." (IGNORED)")
+                if (!$quiet);
+            return (UPD_PUSHED | UPD_INFO, NO_PARTS, $pfx, $annot);
+        }
+        $annot = "PSx:".format_parts($parts);
+        $forcing = 1;
+    }
+    if ($forcing && !$force) {
+        $$need_force_repl = 1;
+        $pfx = "(REPLACE) ";
+        return (UPD_INFO, NO_PARTS, $pfx, $annot);
+    }
+    $pfx = $forcing ? "REPLACE   " : "Replace   " if (!$quiet);
+    return (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS, $pfx, $annot);
+}
+
 # Turn the list of local Changes into the final list of commits the
 # local branch should be reconstructed from.
-sub adjust_changes($)
+sub do_adjust_changes($)
 {
     my ($pairs) = @_;
 
     print "Adjusting Changes ...\n" if ($debug);
 
+    my ($need_force_del, $need_force_repl);
     my ($any_missing, $any_crossed, $any_merged);
     my (@commits, @reports);
     foreach my $pair (@$pairs) {
@@ -1012,19 +1275,45 @@ sub adjust_changes($)
         } elsif ($action == INSERT) {
             report_remote(\@reports, "Add       ", "", $ginfo) if (!$quiet);
             ($upd, $parts) = (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS);
-        } elsif ($action == DELETE) {
-            report_local(\@reports, "Drop      ", "", $lcl_commit) if (!$quiet);
-            $upd = UPD_DROP;
         } elsif (!$ginfo) {
             my $sts = "NEW";
             if (defined($pushed_id)) {
                 $sts = "ORPHANED";
                 $any_missing = 1;
             }
-            report_local(\@reports, "Keep      ", $sts, $lcl_commit) if (!$quiet);
+            if ($action == DELETE) {
+                if ($force) {
+                    report_local(\@reports, "DROP      ", $sts, $lcl_commit) if (!$quiet);
+                    $upd = UPD_DROP;
+                } else {
+                    report_local(\@reports, "(DROP)    ", $sts, $lcl_commit);
+                    $need_force_del = 1;
+                }
+            } else {
+                report_local(\@reports, "Keep      ", $sts, $lcl_commit)
+                    if (!$quiet);
+            }
         } else {
-            report_local(\@reports, "Replace   ", "", $lcl_commit) if (!$quiet);
-            ($upd, $parts) = (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS);
+            my $rmt_ps = $$ginfo{rev_by_id}{$$rmt_commit{id}}{ps};
+            my ($pushed_commit, $pushed_ps);
+            if (defined($pushed_id)) {
+                $pushed_commit = $commit_by_id{$pushed_id};
+                my $pushed_rev = $$ginfo{rev_by_id}{$pushed_id};
+                $pushed_ps = $pushed_rev ? $$pushed_rev{ps} : "?";
+            }
+            my ($pfx, $annot);
+            if ($action == DELETE) {
+                ($upd, $pfx, $annot) =
+                    verify_delete(\@reports, $lcl_commit, $rmt_commit, $rmt_ps,
+                                  $pushed_commit, $pushed_ps, \$need_force_del);
+            } else {
+                ($upd, $parts, $pfx, $annot) =
+                    verify_update(\@reports, $lcl_commit, $rmt_commit, $rmt_ps,
+                                  $pushed_commit, $pushed_ps, \$need_force_repl);
+            }
+            report_update(\@reports, $pfx, $annot, $lcl_commit, $ginfo) if (defined($pfx));
+            # Note: we don't clear the diff cache here, so entries filled
+            # by verify_cherrypick() remain available.
         }
 
         printf("%s %s, %s <= %s of %s\n",
@@ -1080,9 +1369,29 @@ sub adjust_changes($)
         $any_msg = 1;
     }
 
+    if ($need_force_repl || $need_force_del) {
+        my $err;
+        if ($need_force_del) {
+            $err .= "\nLocal modifications found in Change(s) scheduled for deletion;"
+                    ." add --force to proceed nonetheless.";
+        }
+        if ($need_force_repl) {
+            $err .= "\nConflicting local modifications found in Change(s) scheduled for update;"
+                    ." use --force to overwrite them, or --ignore to disregard any new PatchSet(s).";
+        }
+        nwfail($err."\n");
+    }
+
     print "\n" if ($any_msg);
 
     return \@commits;
+}
+
+sub adjust_changes($)
+{
+    my ($pairs) = @_;
+
+    return with_local_git_index(\&do_adjust_changes, $pairs);
 }
 
 # Find the base for the rewrite, skipping over unmodified commits.

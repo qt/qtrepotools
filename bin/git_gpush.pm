@@ -534,6 +534,27 @@ sub get_1st_parent($)
     return @$parents ? $$parents[0] : 'ROOT';
 }
 
+sub get_1st_parent_tree($)
+{
+    my ($commit) = @_;
+
+    # Upstream commits are not visited, so we get no tree id. However,
+    # as this code aims at series which were not rebased, using the base
+    # commit itself will work just as well for the series' first commit.
+    my $parents = $$commit{parents};
+    my $parent_id = @$parents ? $$parents[0] : 'ROOT';
+    my $parent = $commit_by_id{$parent_id};
+    return $parent ? $$parent{tree} : $parent_id;
+}
+
+sub get_more_parents($)
+{
+    my ($commit) = @_;
+
+    my $parents = $$commit{parents};
+    return @$parents > 1 ? "@$parents[1..$#$parents]" : "";
+}
+
 # Enumerate commits from the specified tip down to the merge base
 # with upstream. Merges are handled in --first-parent mode.
 sub get_commits_free($)
