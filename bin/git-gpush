@@ -187,6 +187,22 @@ sub parse_arguments(@)
 
     die("--quiet and --verbose/--debug are mutually exclusive.\n")
         if ($quiet && $verbose);
+
+    if ($ref_to =~ s,^refs/for/,,) {
+        die "Pushing to refs/for/ is inconsistent with the --draft option.\n" if ($draft > 0);
+        print STDERR "Notice: it is unnecessary to specify refs/for/ in the target ref.\n"
+            if (!$quiet);
+    } elsif ($ref_to =~ s,^refs/drafts/,,) {
+        die "Pushing to refs/drafts/ is inconsistent with the --publish option.\n" if ($draft < 0);
+        if ($draft) {
+            print STDERR "Notice: it is unnecessary to specify refs/drafts/ in the target ref.\n"
+                if (!$quiet);
+        } else {
+            print STDERR "Notice: prefer the --draft option over specifying refs/drafts/ in the target ref.\n"
+                if (!$quiet);
+            $draft = 1;
+        }
+    }
 }
 
 sub fileContents($)
@@ -279,18 +295,6 @@ sub determine_target()
         $ref_to = read_git_line("config", "branch.$ref.merge");
         die "Cannot detect tracking branch, 'git config branch.$ref.merge' failed.\n" if ($? != 0);
         $ref_to =~ s,^refs/heads/,,;
-    }
-    if ($ref_to =~ s,^refs/for/,,) {
-        die "Pushing to refs/for/ is inconsistent with the --draft option.\n" if ($draft > 0);
-        print STDERR "Notice: it is unnecessary to specify refs/for/ in the target ref.\n" if (!$quiet);
-    } elsif ($ref_to =~ s,^refs/drafts/,,) {
-        die "Pushing to refs/drafts/ is inconsistent with the --publish option.\n" if ($draft < 0);
-        if ($draft) {
-            print STDERR "Notice: it is unnecessary to specify refs/drafts/ in the target ref.\n" if (!$quiet);
-        } else {
-            print STDERR "Notice: prefer the --draft option over specifying refs/drafts/ in the target ref.\n" if (!$quiet);
-            $draft = 1;
-        }
     }
 }
 
