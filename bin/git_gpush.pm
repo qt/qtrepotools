@@ -969,14 +969,22 @@ sub visit_local_commits($;$)
     return visit_commits($tips, \@upstream_excludes, $cid_opt);
 }
 
+my $analyzed_local_branch = 0;
+# SHA1 of the local branch's tip.
+our $local_tip;
+# Mapping of Change-Ids to commits on the local branch.
+my %changeid2local;  # { change-id => SHA1 }
+
 sub analyze_local_branch($)
 {
     my ($tip) = @_;
 
+    $analyzed_local_branch = 1;
+
     # Get the revs ...
     print "Enumerating local Changes ...\n" if ($debug);
     my $raw_commits = visit_local_commits([ $tip ]);
-    return [] if (!@$raw_commits);
+    return 0 if (!@$raw_commits);
 
     # ... then sanity-check a bit ...
     my %seen;
@@ -994,9 +1002,11 @@ sub analyze_local_branch($)
         $seen{$changeid} = $commit;
     }
 
-    my $local_tip = $$raw_commits[-1]{id};
+    $local_tip = $$raw_commits[-1]{id};
 
     my $commits = get_commits_free($local_tip);
+
+    $changeid2local{$$_{changeid}} = $$_{id} foreach (@$commits);
 
     # ... and then add them to the set of local Changes.
     foreach my $commit (@$commits) {
@@ -1005,7 +1015,116 @@ sub analyze_local_branch($)
         $$change{local} = $commit;
     }
 
-    return $commits;
+    return 1;
+}
+
+#####################
+# change resolution #
+#####################
+
+# Resolve a possibly abbreviated Change-Id referring to a commit in
+# the local branch.
+# NB, the most likely source of abbreviated Ids is the gpush output.
+sub _sha1_for_partial_local_id($)
+{
+    my ($id) = @_;
+
+    state %changeid2local_cache;
+    return $changeid2local_cache{$id} if (exists($changeid2local_cache{$id}));
+
+    my $sha1 = $changeid2local{$id};
+    if (!defined($sha1)) {
+        my @sha1s;
+        my $rx = qr/^\Q$id\E/;
+        foreach my $changeid (keys %changeid2local) {
+            push @sha1s, $changeid2local{$changeid} if ($changeid =~ $rx);
+        }
+        if (@sha1s) {
+            fail("$id is ambiguous.\n") if (@sha1s != 1);
+            $sha1 = $sha1s[0];
+        }
+    }
+
+    $changeid2local_cache{$id} = $sha1;
+    return $sha1;
+}
+
+use constant {
+    SPEC_BASE => 0,
+    SPEC_TIP => 1
+};
+
+sub _finalize_parse_local_rev($$$)
+{
+    my ($rev, $out, $scope) = @_;
+
+    # There is no point in restricting the base here - subsequent
+    # use will find out soon enough if it is not reachable.
+    return $out if ($scope == SPEC_BASE);
+    return $out if (!$analyzed_local_branch || $commit_by_id{$out});
+    fail("$rev is outside the local branch.\n");
+}
+
+sub _parse_local_rev_sym($$)
+{
+    my ($rev, $scope) = @_;
+
+    my $out;
+    if ($rev eq 'HEAD') {
+        fail("HEAD is not valid for base revspecs.\n") if ($scope == SPEC_BASE);
+        $out = $local_tip;
+    } elsif ($rev eq 'ROOT') {
+        fail("ROOT is not valid for tip revspecs.\n") if ($scope == SPEC_TIP);
+        $out = $rev;
+    } elsif (($rev eq '@{u}') || ($rev eq '@{upstream}')) {
+        fail("\@{upstream} is not valid for tip revspecs.\n") if ($scope == SPEC_TIP);
+        $out = "";
+    } else {
+        return (undef, undef);
+    }
+    return (_finalize_parse_local_rev($rev, $out, $scope), 1);
+}
+
+sub _parse_local_rev_id_only($$)
+{
+    my ($rev, $scope) = @_;
+
+    fail("$rev is not a valid revspec.\n") if ($rev !~ /^(\w+)(.*)$/);
+
+    # This looks like a valid revspec, but git failed to parse it.
+    # Try to parse it as a Change-Id instead.
+    my ($id, $rest) = ($1, $2);
+    my $sha1 = _sha1_for_partial_local_id($id);
+    wfail("$rev does not refer to a Change on the local branch.\n") if (!$sha1);
+    return $sha1 if (!$rest);
+
+    my $out = read_cmd_line(SOFT_FAIL, 'git', 'rev-parse', '--verify', '-q', $sha1.$rest);
+    fail("$rev is not a valid revspec.\n") if (!$out);
+    return _finalize_parse_local_rev($rev, $out, $scope);
+}
+
+sub parse_local_rev_id($$)
+{
+    my ($rev, $scope) = @_;
+
+    my ($sout, $done) = _parse_local_rev_sym($rev, $scope);
+    return $sout if ($done);
+    return _parse_local_rev_id_only($rev, $scope);
+}
+
+# Parse a revision specification referring to a commit in the local branch.
+# This will return undef for @{u}, HEAD, and Change-Ids if the local branch
+# was not visited yet; call parse_local_rev_id() after doing so.
+sub parse_local_rev($$)
+{
+    my ($rev, $scope) = @_;
+
+    my ($sout, $done) = _parse_local_rev_sym($rev, $scope);
+    return $sout if ($done);
+    my $out = read_cmd_line(SOFT_FAIL, 'git', 'rev-parse', '--verify', '-q', $rev);
+    return _finalize_parse_local_rev($rev, $out, $scope) if ($out);
+    return undef if (!$analyzed_local_branch);  # Come back later!
+    return _parse_local_rev_id_only($rev, $scope);
 }
 
 ###################

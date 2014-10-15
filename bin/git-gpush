@@ -7,6 +7,7 @@
 # See the file LICENSE from this package for details.
 #
 
+use v5.14;
 use strict;
 use warnings;
 
@@ -31,7 +32,7 @@ sub usage
 {
     print << "EOM";
 Usage:
-    git gpush [opts] [sha1/ref-from] [+<reviewer>] [=<CC user>]
+    git gpush [opts] [from] [+<reviewer>] [=<CC user>]
 
     Pushes Changes to Gerrit and adds reviewers and CC to the PatchSets.
 
@@ -46,7 +47,9 @@ Description:
     these are the commits which are not on any branch of the pushed
     branch's upstream remote.
 
-    If no sha1 or ref-from is specified, 'HEAD' is used.
+    'From' may be specified as either a ref, a SHA1, or a Gerrit Change-Id,
+    possibly abbreviated. Git rev-spec suffixes like '~2' are allowed.
+    If 'from' is not specified, 'HEAD' is used.
 
     Note that this program can be used in the middle of an interactive
     rebase, to push out the amended commits instantly.
@@ -59,8 +62,8 @@ Options:
         Specify the git remote to push to.
 
     -b, --branch
-        Specify the git branch to push for. If not specified, the
-        upstream branch for 'ref-from' is used as the target branch.
+        Specify the git branch to push for. If not specified, 'from's
+        upstream branch is used as the target branch.
         This setting persists for the series, even when it grows.
 
     -fb, --force-branch
@@ -140,7 +143,7 @@ License:
 EOM
 }
 
-my $ref_from;
+my $from;
 my $ref_to;
 my $force_branch = 0;
 my $topic;
@@ -197,12 +200,12 @@ sub parse_arguments(@)
             push @CCs, split(/,/, lookup_alias($1));
         } elsif ($arg !~ /^\-/) {
             fail("Specifying multiple sources is currently not supported.\n")
-                if (defined($ref_from));
+                if (defined($from));
             if ($arg =~ /(.*):(.*)/) {
                 if (length($1)) {
-                    $ref_from = $1;
-                    print STDERR "Warning: Specifying <ref-from>: is deprecated.".
-                                 " Use just <ref-from> instead.\n";
+                    $from = $1;
+                    print STDERR "Warning: Specifying <from>: is deprecated.".
+                                 " Use just <from> instead.\n";
                 }
                 if (length($2)) {
                     $ref_to = $2;
@@ -210,7 +213,7 @@ sub parse_arguments(@)
                                  " Use --branch instead.\n";
                 }
             } else {
-                $ref_from = $arg;
+                $from = $arg;
             }
         } else {
             fail("Unrecognized option '$arg'.\n");
@@ -220,8 +223,8 @@ sub parse_arguments(@)
     fail("--quiet and --verbose/--debug are mutually exclusive.\n")
         if ($quiet && $verbose);
 
-    if (!defined($ref_from)) {
-        $ref_from = "HEAD";
+    if (!defined($from)) {
+        $from = "HEAD";
     }
 
     my $push_specific =
@@ -374,13 +377,12 @@ sub branch_for_commit($)
 #   It is the tip, as there are no references. There is no name.
 # Note that commits specified by SHA1 which live on exactly one named
 # branch fall into the first case.
-sub determine_local_branch()
+sub determine_local_branch($)
 {
-    # Validate the source commit, to avoid confusing errors later.
-    run_process(FWD_STDERR, "git", "rev-parse", $ref_from, '--');
+    my ($source) = @_;
 
     # First, try to extract a branch name directly.
-    $local_branch = ($ref_from =~ s/[~^].*$//r);
+    $local_branch = ($source =~ s/[~^].*$//r);
     if ($local_branch eq "HEAD") {
         my $sref = read_cmd_line(SOFT_FAIL, "git", "symbolic-ref", "-q", "HEAD");
         $local_branch = $sref if (!$?);
@@ -388,9 +390,9 @@ sub determine_local_branch()
     $local_branch =~ s,^refs/heads/,,;
     if (!defined($local_refs{$local_branch})) {
         # Next, try to deduce a branch from the commit.
-        $local_branch = branch_for_commit($ref_from);
+        $local_branch = branch_for_commit($source);
     }
-    setup_remotes($ref_from);
+    setup_remotes($source);
     set_gerrit_config($remote);
 }
 
@@ -408,7 +410,7 @@ sub determine_remote_branch($)
                                  sub { '  => '.$_[0] });
     }
     if (!defined($br)) {
-        fail("Cannot deduce source branch for $ref_from. Please use --branch.\n")
+        fail("Cannot deduce source branch for $from. Please use --branch.\n")
             if (!defined($local_branch));
         $br = git_config("branch.$local_branch.merge");
         fail("$local_branch has no upstream branch. Please use --branch.\n")
@@ -432,6 +434,32 @@ sub determine_topic($)
     $$group{topic} = $tpc;
 }
 
+sub initialize_get_changes()
+{
+    my $commit = parse_local_rev($from, SPEC_TIP);
+    if (!defined($commit)) {
+        # The revspec might refer to a Change-Id.
+        # We need a place to start from. We try only the current local branch -
+        # trying multiple branches would be expensive, potentially ambiguous
+        # (as the same Change-Id can exist multiple times), and probably not
+        # very useful to start with.
+        determine_local_branch('HEAD');
+        # Get the pool of Changes to search in, and later to push from.
+        analyze_local_branch('HEAD') or
+            fail("No local Changes (from HEAD).\n");
+        # Now try again.
+        $commit = parse_local_rev_id($from, SPEC_TIP);
+    } else {
+        # We did not need to visit the current branch to find the tip,
+        # so determine the branch from the tip now.
+        determine_local_branch($from);
+        # Get the pool of Changes to push from.
+        analyze_local_branch($from) or
+            fail("No local Changes (from $from).\n");
+    }
+    return $commit;
+}
+
 sub finalize_get_changes($)
 {
     my ($changes) = @_;
@@ -443,8 +471,9 @@ sub finalize_get_changes($)
 # Get the list of local commits to push.
 sub get_changes()
 {
-    my $commits = analyze_local_branch($ref_from);
-    my $changes = changes_from_commits($commits);
+    my $tip = initialize_get_changes();
+    # Assemble the series of Changes to push from the pool.
+    my $changes = changes_from_commits(get_commits_free($tip));
     fail("Specified commit range is empty.\n") if (!@$changes);
     my $group = finalize_get_changes($changes);
     return $group;
@@ -894,6 +923,5 @@ process_config();
 parse_arguments(@ARGV);
 goto_gitdir();
 load_state();
-determine_local_branch();
 execute_pushing();
 save_state($dry_run);
