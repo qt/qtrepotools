@@ -46,13 +46,11 @@ for my $key (keys %config) {
     $watch_people{$1} = $config{$key} if ($key =~ /^watches\.([^.]+)\.people/);
 }
 my $fail = 0;
-my $printed = $gerrit;
-my $complained = 0;
-our $file = "";  # 'our' for usage of 'local'
-my $fail_file = "-";
+my $file = "";
 my $lineno = 0;
 my $summary;
-my ($lpfx, $elpfx) = ($gerrit ? ("", "\n") : ("***   ", "***\n"));
+# Hash (by file) of hashes (by line) of lists (reports) of lists (msg, extra)
+my %complaints;
 my %footnotes;
 
 sub printerr()
@@ -62,42 +60,18 @@ sub printerr()
   die "git exited with status ".($? >> 8) if ($?);
 }
 
-sub do_complain($$$;$)
+sub do_complain($$$;$@)
 {
-    my ($line, $msg, $key, $level) = @_;
-    my $pfx;
+    my ($line, $msg, $key, $level, @extra) = @_;
 
-    if (!$printed) {
-        $summary =~ s/^(.{50}).{5,}$/$1\[...]/;
-        print "***\n*** Suspicious changes in commit ".$sha1." (".$summary."):\n";
-        $printed = 1;
-    }
-    $complained = 1;
-    if (length($file)) {
-        if ($file ne $fail_file) {
-            print $elpfx.$lpfx.$file.":\n";
-            $fail_file = $file;
-        }
-        $pfx = $lpfx."  - ";
-        $pfx .= "$line: " if ($line);
-    } else {
-        if ($file ne $fail_file) {
-            print $elpfx;
-            $fail_file = "";
-        }
-        $pfx = $lpfx."- ";
-    }
     $level = 0 if (!defined($level) || ($level < 0 && $strict && length($key)));
     if ($level >= 0) {
         $fail = $level + 1 if ($level >= $fail);
-        if ($gerrit) {
-            print $pfx.$msg."\n";
-        } else {
-            print $pfx.$msg." (key \"".$key."\")\n";
-        }
+        $msg .= " (key \"".$key."\")" if (!$gerrit);
     } else {
-        print $pfx."Hint: ".$msg."\n";
+        $msg = "Hint: ".$msg;
     }
+    push @{$complaints{$file}{$line}}, [ $msg, @extra ];
 }
 
 sub complain($$;$)
@@ -125,7 +99,6 @@ my $spell_check = !defined($cfg{spell});
 my $parents = 0;
 my ($inchangelog, $changelog) = (0, "");
 my ($footer, $cherry) = (0, 0);
-my ($badauthor, $badcommitter) = (0, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 
 # Load spelling errors dataset if available
@@ -146,10 +119,7 @@ my @spell_fails;
 sub complain_spelling()
 {
     if (@spell_fails) {
-        complain("Possible spelling errors", "spell");
-        for my $sf (@spell_fails) {
-            print $lpfx."    ".$sf."\n";
-        }
+        do_complain(1e9, "Possible spelling errors", "spell", 0, @spell_fails);
         @spell_fails = ();
     }
 }
@@ -168,7 +138,7 @@ sub check_spelling()
                 $correction .= ' [*]';
                 $footnotes{'[*] Please note, Qt prefers American English.'} = 1;
             }
-            push @spell_fails, $lineno.": $word -> $correction";
+            push @spell_fails, "  $lineno: $word -> $correction";
         }
     }
 }
@@ -223,9 +193,9 @@ while (<MSG>) {
         if (/^parent /) {
             $parents++ ;
         } elsif (/^author .*\.\(none\)/) {
-            $badauthor = 1;
+            complain("Bogus author email", "email", 1);
         } elsif (/^commiter .*\.\(none\)/) {
-            $badcommitter = 1;
+            complain("Bogus committer email", "email", 1);
         }
         next
     }
@@ -328,13 +298,6 @@ printerr;
 if ($revert1 && $revert2 && !$nonrevert) {
     complain("Revert without explanation", "revert", 1);
 }
-# These need to be delayed, because at the time they are found the subject is not known yet.
-if ($badauthor) {
-    complain("Bogus author email", "email", 1);
-}
-if ($badcommitter) {
-    complain("Bogus committer email", "email", 1);
-}
 if ($badrev && !defined($cfg{revby})) {
     complain("Bogus Reviewed-by footer", "revby", 1);
 }
@@ -351,10 +314,8 @@ if (length($changelog) && !defined($cfg{changelog})) {
     complain("Current repository referenced from ChangeLog", "changelog") if ($changelog =~ /\[$repo\]/si);
 }
 
-{
-    local $file = 'log message';
-    complain_spelling();
-}
+$file = "!!!!!";
+complain_spelling();
 
 my $chunk = 0;
 my @addi = ();
@@ -453,7 +414,7 @@ my @style_fails = ();
 sub styleFail($)
 {
     my $why = shift;
-    push @style_fails, $lineno.": ".$why;
+    push @style_fails, "  $lineno: ".$why;
 }
 
 my $no_copyright = 0;
@@ -465,10 +426,7 @@ sub flushFile()
     }
     complain_spelling();
     if (@style_fails) {
-        complain("Style issues", "style", -1);
-        for my $sf (@style_fails) {
-            print $lpfx."    ".$sf."\n";
-        }
+        do_complain(1e9, "Style issues", "style", -1, @style_fails);
         @style_fails = ();
     }
 }
@@ -686,22 +644,45 @@ flushFile();
 if ($mixws_check) {
     flushChunk() if ($chunk);
     if ($nonws and $ws) {
-        $file = "";
-        complain("Mixing whitespace-only changes with other changes", "mixws", -1);
+        my @extras;
         for my $fn (sort keys %ws_lines) {
-            print $lpfx."  WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}})."\n";
+            push @extras, "WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}});
+        }
+        $file = "~~~~~";
+        do_complain(1e9, "Mixing whitespace-only changes with other changes", "mixws", -1, @extras);
+    }
+}
+
+if (%complaints) {
+    if (!$gerrit) {
+        $summary =~ s/^(.{50}).{5,}$/$1\[...]/;
+        print "***\n*** Suspicious changes in commit ".$sha1." (".$summary."):\n";
+    }
+    my ($lpfx, $elpfx) = ($gerrit ? ("", "\n") : ("***   ", "***\n"));
+    foreach my $fn (sort keys %complaints) {
+        my $fpfx;
+        if (length($fn) && ($fn ne "~~~~~")) {
+            $file = ($fn eq "!!!!!") ? "commit message" : $fn;
+            print $elpfx.$lpfx.$file.":\n";
+            $fpfx = $lpfx."  - ";
+        } else {
+            print $elpfx;
+            $fpfx = $lpfx."- ";
+        }
+        foreach my $ln (sort { $a <=> $b } keys %{$complaints{$fn}}) {
+            my $pfx = $fpfx;
+            $pfx .= "$ln: " if ($ln && $ln < 1e9);
+            foreach my $ent (@{$complaints{$fn}{$ln}}) {
+                my @ry = @$ent;
+                print $pfx.(shift @ry)."\n";
+                print $lpfx."  $_\n" for (@ry);
+            }
         }
     }
-}
-
-if (%footnotes) {
-    print $elpfx;
-    for my $fn (sort keys %footnotes) {
-        print $lpfx.$fn."\n";
+    if (%footnotes) {
+        print $elpfx;
+        print $lpfx.$_."\n" for (sort keys %footnotes);
     }
-}
-
-if ($complained) {
     print $elpfx.$lpfx."See http://qt-project.org/wiki/Early-Warning-System for explanations.\n";
 }
 
