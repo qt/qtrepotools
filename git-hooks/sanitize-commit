@@ -11,12 +11,13 @@ use strict;
 use warnings;
 use Cwd;
 
-if ($#ARGV < 0 or $#ARGV > 1 || ($#ARGV == 1 && $ARGV[1] !~ /^(strict|gerrit)$/)) {
+if ($#ARGV < 0 or $#ARGV > 1 || ($#ARGV == 1 && $ARGV[1] !~ /^(strict|gerrit(-rest)?)$/)) {
     print STDERR "Usage: $0 <sha1> [strict]\n";
     exit 2;
 }
 my $sha1 = $ARGV[0];
-my $gerrit = ($#ARGV == 1 && $ARGV[1] eq "gerrit");
+my $gerrit_rest = ($#ARGV == 1 && $ARGV[1] eq "gerrit-rest");
+my $gerrit = $gerrit_rest || ($#ARGV == 1 && $ARGV[1] eq "gerrit");
 my $strict = $gerrit || ($#ARGV == 1 && $ARGV[1] eq "strict");
 
 my $repo = getcwd();
@@ -86,6 +87,12 @@ sub complain_ln($$;$)
     do_complain($lineno, $msg, $key, $level);
 }
 
+sub complain_cln($$;$)
+{
+    my ($msg, $key, $level) = @_;
+    do_complain($gerrit_rest ? $lineno : 0, $msg, $key, $level);
+}
+
 my $clike = 0;
 my $qmake = 0;
 my $iswip = defined($cfg{wip});
@@ -133,11 +140,16 @@ sub check_spelling()
         next if $seen{$word};
         $seen{$word} = 1;
         if (my $correction = $MISTAKES{$word}) {
+            my $sfx = "";
             if (!$MISTAKES_BASE{$word}) {
-                $correction .= ' [*]';
+                $sfx = ' [*]';
                 $footnotes{'[*] Please note, Qt prefers American English.'} = 1;
             }
-            push @spell_fails, "  $lineno: $word -> $correction";
+            if ($gerrit_rest) {
+                complain_ln("$word -> $correction?$sfx", "spell");
+            } else {
+                push @spell_fails, "  $lineno: $word -> $correction$sfx";
+            }
         }
     }
 }
@@ -185,6 +197,7 @@ sub check_apple_terminology()
     }
 }
 
+my $msgline = 0;
 open MSG, "git log -1 --pretty=raw ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     chomp;
@@ -192,31 +205,33 @@ while (<MSG>) {
         if (/^parent /) {
             $parents++ ;
         } elsif (/^author .*\.\(none\)/) {
-            complain("Bogus author email", "email", 1);
+            do_complain($gerrit_rest ? $parents + 1 : 0, "Bogus author email", "email", 1);
         } elsif (/^commiter .*\.\(none\)/) {
-            complain("Bogus committer email", "email", 1);
+            do_complain($gerrit_rest ? $parents + 3 : 0, "Bogus committer email", "email", 1);
         }
         next
     }
     $lineno++;
-    if ($lineno == 1) {
+    $msgline++;
+    if ($msgline == 1) {
         $summary = $_;
+        $lineno = $parents + 6 if ($gerrit_rest);
         $file = "!!!!!";
         $revert1 = 1 if (/^Revert ".*"$/);
         if (/^revert(ed|ing)? (commit )?[0-9a-f]{7,40}\.?$/i) {
-            complain("Summary of revert mentions only SHA1", "log");
+            complain_cln("Summary of revert mentions only SHA1", "log");
         }
         if (/\bQT[A-Z]+-\d+\b/) {
-            complain("Bug reference in summary", "log");
+            complain_cln("Bug reference in summary", "log");
         }
         if (!$iswip && $parents < 2 && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
-            complain("Apparently pushing a Work In Progress", "wip", 1);
+            complain_cln("Apparently pushing a Work In Progress", "wip", 1);
         } elsif (!$iswip && !$badlog && length($_) < 7) {
-            complain("Summary is too short", "log");
+            complain_cln("Summary is too short", "log");
         } elsif (!$badlog && !$revert1 && length($_) > 120) {
-            complain("Summary is excessively long", "log");
+            complain_cln("Summary is excessively long", "log");
         } elsif ($parents < 2 && !$revert1 && length($_) > 70) {
-            complain("Aim for shorter summaries", "", -1);
+            complain_cln("Aim for shorter summaries", "", -1);
         }
     } else {
         if (/^This reverts commit [[:xdigit:]]{40}\.?$/) {
@@ -224,9 +239,9 @@ while (<MSG>) {
         } elsif (!/^[-\w]+:|^$/) {
             $nonrevert = 1;
         }
-        if ($lineno == 2) {
+        if ($msgline == 2) {
             if (!$badlog && $_ ne "") {
-                complain("2nd line is not empty", "log");
+                complain_cln("2nd line is not empty", "log");
             }
         } elsif ($_ eq "") {
             $cherry = 0;
@@ -405,7 +420,11 @@ my @style_fails = ();
 sub styleFail($)
 {
     my $why = shift;
-    push @style_fails, "  $lineno: ".$why;
+    if ($gerrit_rest) {
+        complain_ln("$why", "style", -1);
+    } else {
+        push @style_fails, "  $lineno: ".$why;
+    }
 }
 
 my $no_copyright = 0;
@@ -636,15 +655,49 @@ if ($mixws_check) {
     flushChunk() if ($chunk);
     if ($nonws and $ws) {
         my @extras;
-        for my $fn (sort keys %ws_lines) {
-            push @extras, "WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}});
+        for $file (sort keys %ws_lines) {
+            if ($gerrit_rest) {
+                do_complain($_, "WS-only change", "mixws", -1) foreach (@{$ws_lines{$file}});
+            } else {
+                push @extras, "WS-only in ".$file.": ".join(", ", @{$ws_lines{$file}});
+            }
         }
         $file = "~~~~~";
         do_complain(1e9, "Mixing whitespace-only changes with other changes", "mixws", -1, @extras);
     }
 }
 
-if (%complaints) {
+if ($gerrit_rest) {
+    use JSON;
+    my %gerrit_review;
+    my @cover_texts;
+    foreach my $fn (sort keys %complaints) {
+        my $file;
+        if (length($fn) && ($fn ne "~~~~~")) {
+            $file = ($fn eq "!!!!!") ? "/COMMIT_MSG" : $fn;
+            my @comments = ();
+            foreach my $ln (keys %{$complaints{$fn}}) {
+                my @texts;
+                push @texts, @$_ foreach (@{$complaints{$fn}{$ln}});
+                my %comment;
+                $comment{line} = int($ln) if ($ln && $ln < 1e9);
+                $comment{message} = join "\n\n", @texts;
+                push @comments, \%comment;
+            }
+            $gerrit_review{comments}{$file} = \@comments;
+        } else {
+            foreach my $ln (sort { $a <=> $b } keys %{$complaints{$fn}}) {
+                push @cover_texts, @$_ foreach (@{$complaints{$fn}{$ln}});
+            }
+        }
+    }
+    if (%complaints) {
+        push @cover_texts, $_ for (sort keys %footnotes);
+        push @cover_texts, "See http://qt-project.org/wiki/Early-Warning-System for explanations.";
+        $gerrit_review{message} = join "\n\n", @cover_texts;
+    }
+    print encode_json(\%gerrit_review)."\n";
+} elsif (%complaints) {
     if (!$gerrit) {
         $summary =~ s/^(.{50}).{5,}$/$1\[...]/;
         print "***\n*** Suspicious changes in commit ".$sha1." (".$summary."):\n";
