@@ -137,13 +137,15 @@ sub process_commit($$$$$)
     my $worker = $WORKER;
     $worker =~ s/\@SHA1\@/$rev/g;
     open VERDICT, $worker." 2>&1 |" or die "cannot run worker: ".$!;
-    my @verdict = <VERDICT>;
+    {
+      local $/;
+      $verdict = <VERDICT>;
+    }
     close VERDICT;
     die "Worker for commit ".$ref." in ".$project." crashed with signal ".$?.".\n" if ($? & 127);
     $score = $? >> 8;
     die "Worker returned invalid score ".$score." for commit ".$ref." in ".$project.".\n" if ($score > 20);
     $score -= 10;
-    $verdict = "@verdict";
     if (length($verdict) > 20000) {
       $verdict = substr($verdict, 0, 20000)."\n\n**** Output truncated. Fix the problems above to get more output.\n";
     }
