@@ -20,7 +20,7 @@ sub usage
 {
     print << "EOM";
 Usage:
-    git gpush [opts] [remote] [[sha1/ref-from]:[ref-to]] [+<reviewer>] [=<CC user>] [-- <push opts>]
+    git gpush [opts] [[sha1/ref-from]:[ref-to]] [+<reviewer>] [=<CC user>] [-- <push opts>]
 
     Pushes changes to Gerrit and adds reviewers and CC to the patch
     sets
@@ -56,6 +56,9 @@ Options:
     -p, --publish
         Do not mark the pushed changes as drafts even if they have
         WIP markers.
+
+    -r, --remote
+        Specify the git remote to push to. The default is 'gerrit'.
 
     --aliases
         Report all registered aliases and quit.
@@ -158,6 +161,9 @@ sub parse_arguments(@)
             $draft = 1;
         } elsif ($arg eq "-p" || $arg eq "--publish") {
             $draft = -1;
+        } elsif ($arg eq "-r" || $arg eq "--remote") {
+            die("--remote needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
+            $remote = shift @_;
         } elsif ($arg eq "--aliases") {
             foreach my $key (sort(keys %aliases)) {
                 print "$key = $aliases{$key}\n";
@@ -181,6 +187,8 @@ sub parse_arguments(@)
                 $ref_to = $2 if (defined $2 && $2 ne "");
                 $ref_override = 1;
             } else {
+                print STDERR "Warning: Specifying a bare remote is deprecated.".
+                             " Use --remote instead.\n";
                 $remote = $arg;
                 $remote_override = 1;
             }
