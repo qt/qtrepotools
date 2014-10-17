@@ -91,13 +91,12 @@ my $qmake = 0;
 my $iswip = defined($cfg{wip});
 my $badrev = 0;
 my $badsign = 0;
-my $badtask = 0;
 my $badid = defined($cfg{changeid});
 my $badurl = defined($cfg{url});
 my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
 my $parents = 0;
-my ($inchangelog, $changelog) = (0, "");
+my $inchangelog = 0;
 my ($footer, $cherry) = (0, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 
@@ -202,6 +201,7 @@ while (<MSG>) {
     $lineno++;
     if ($lineno == 1) {
         $summary = $_;
+        $file = "!!!!!";
         $revert1 = 1 if (/^Revert ".*"$/);
         if (/^revert(ed|ing)? (commit )?[0-9a-f]{7,40}\.?$/i) {
             complain("Summary of revert mentions only SHA1", "log");
@@ -212,11 +212,11 @@ while (<MSG>) {
         if (!$iswip && $parents < 2 && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
             complain("Apparently pushing a Work In Progress", "wip", 1);
         } elsif (!$iswip && !$badlog && length($_) < 7) {
-            complain("Log message summary is too short", "log");
+            complain("Summary is too short", "log");
         } elsif (!$badlog && !$revert1 && length($_) > 120) {
-            complain("Log message summary is excessively long", "log");
+            complain("Summary is excessively long", "log");
         } elsif ($parents < 2 && !$revert1 && length($_) > 70) {
-            complain("Aim for shorter log message summaries", "", -1);
+            complain("Aim for shorter summaries", "", -1);
         }
     } else {
         if (/^This reverts commit [[:xdigit:]]{40}\.?$/) {
@@ -226,33 +226,28 @@ while (<MSG>) {
         }
         if ($lineno == 2) {
             if (!$badlog && $_ ne "") {
-                complain("2nd line of log message is not empty", "log");
+                complain("2nd line is not empty", "log");
             }
         } elsif ($_ eq "") {
             $cherry = 0;
             $inchangelog = 0;
             # Empty line following footer(s).
-            $footer = 2 if ($footer == 1);
+            $footer = -2 if ($footer == -1);
         } elsif ($cherry) {
             $cherry = 0 if (/\)/);
         } else {
-            if (!$badrev && /^Reviewed-by:/i) {
-                $badrev = 1;
-            }
-            if (!$badsign && /^Signed-off-by:/i) {
-                $badsign = 1;
-            }
-            if (!$badtask && /^Task-number:/i && !/^Task-number:/) {
-                $badtask = 1;
-                complain("Capitalization of \"Task-number\" is wrong", "");
+            if (/^Reviewed-by:/i) {
+                $badrev = $lineno;
+            } elsif (/^Signed-off-by:/i) {
+                $badsign = $lineno;
+            } elsif (/^Task-number:/i && !/^Task-number:/) {
+                complain_ln("Capitalization of \"Task-number\" is wrong", "");
             }
             if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
-                $badid = 1;
-                complain("Gerrit change id outside Change-Id footer", "changeid");
+                complain_ln("Gerrit change id outside Change-Id footer", "changeid");
             }
             if (!$badurl && /\bhttps?:\/\/(bugreports\.qt-project\.org\/browse\/|codereview\.qt-project\.org\/(\#change,|\#\/c\/)?\d+)/) {
-                $badurl = 1;
-                complain("URL pointing to Gerrit or JIRA", "url");
+                complain_ln("URL pointing to Gerrit or JIRA", "url");
             }
             my $ftr = 0;
             if (/^\((partial(ly)? )?(cherry[- ]pick|(back)?port)(ed)? /) {
@@ -264,22 +259,25 @@ while (<MSG>) {
                 $ftr = 1;
             } elsif (/^[A-Z][a-z]+(-[A-Za-z][a-z]+)+: /) {
                 $ftr = 1;
-            } elsif (/^(\[change-?log\]|change-?log: )/i) {
+            } elsif (/^(\[change-?log\]|change-?log: )/i && !defined($cfg{changelog})) {
                 $inchangelog = 1;
+                complain_ln("Bad form of [ChangeLog] tag", "changelog") if (!/^\[ChangeLog\]/);
             }
             if ($inchangelog) {
-                if (($ftr || $footer == 1) && !defined($cfg{changelog})) {
-                    complain("No empty line between ChangeLog and footers", "changelog");
+                complain_ln("No empty line between ChangeLog and footers", "changelog") if ($ftr || $footer == -1);
+                if (!$ftr) {
+                    complain_ln("Missing space between ChangeLog tags and text", "changelog") if (/\][^\s\[]/);
+                    complain_ln("JIRA task referenced from ChangeLog", "changelog") if (/\[QT[A-Z]+-\d+\]/);
+                    complain_ln("Current repository referenced from ChangeLog", "changelog") if (/\[\Q$repo\E\]/i);
                 }
-                $changelog .= "\n".$_;
             }
             if ($ftr) {
                 if ($footer == 0) {
                     # Footer following non-footer
-                    $footer = 1;
-                } elsif ($footer == 2) {
+                    $footer = -1;
+                } elsif ($footer == -2) {
                     # Footer following empty line(s) following footer(s)
-                    $footer = 3;
+                    $footer = $lineno;
                 }
             } else {
                 # Non-footer resets the state, assuming it was a false alert.
@@ -299,22 +297,15 @@ if ($revert1 && $revert2 && !$nonrevert) {
     complain("Revert without explanation", "revert", 1);
 }
 if ($badrev && !defined($cfg{revby})) {
-    complain("Bogus Reviewed-by footer", "revby", 1);
+    do_complain($badrev, "Bogus Reviewed-by footer", "revby", 1);
 }
 if ($badsign) {
-    complain("Unnecessary Signed-off-by footer", "", -1);
+    do_complain($badsign, "Unnecessary Signed-off-by footer", "", -1);
 }
-if ($footer == 3 && !defined($cfg{footer})) {
-    complain("Empty lines between footers", "footer");
-}
-if (length($changelog) && !defined($cfg{changelog})) {
-    complain("Bad form of [ChangeLog] tag", "changelog") if ($changelog !~ /^\n\[ChangeLog\]/s);
-    complain("Missing space between ChangeLog tags and text", "changelog") if ($changelog !~ /\]\s[^\[]/s);
-    complain("JIRA task referenced from ChangeLog", "changelog") if ($changelog =~ /\[QT[A-Z]+-\d+\]/s);
-    complain("Current repository referenced from ChangeLog", "changelog") if ($changelog =~ /\[$repo\]/si);
+if ($footer > 0 && !defined($cfg{footer})) {
+    do_complain($footer - 1, "Empty lines between footers", "footer");
 }
 
-$file = "!!!!!";
 complain_spelling();
 
 my $chunk = 0;
