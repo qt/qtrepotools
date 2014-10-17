@@ -50,6 +50,7 @@ my $printed = $gerrit;
 my $complained = 0;
 our $file = "";  # 'our' for usage of 'local'
 my $fail_file = "-";
+my $lineno = 0;
 my $summary;
 my ($lpfx, $elpfx) = ($gerrit ? ("", "\n") : ("***   ", "***\n"));
 my %footnotes;
@@ -61,9 +62,9 @@ sub printerr()
   die "git exited with status ".($? >> 8) if ($?);
 }
 
-sub complain($$;$)
+sub do_complain($$$;$)
 {
-    my ($msg, $key, $level) = @_;
+    my ($line, $msg, $key, $level) = @_;
     my $pfx;
 
     if (!$printed) {
@@ -78,6 +79,7 @@ sub complain($$;$)
             $fail_file = $file;
         }
         $pfx = $lpfx."  - ";
+        $pfx .= "$line: " if ($line);
     } else {
         if ($file ne $fail_file) {
             print $elpfx;
@@ -98,7 +100,18 @@ sub complain($$;$)
     }
 }
 
-my $lineno = 0;
+sub complain($$;$)
+{
+    my ($msg, $key, $level) = @_;
+    do_complain(0, $msg, $key, $level);
+}
+
+sub complain_ln($$;$)
+{
+    my ($msg, $key, $level) = @_;
+    do_complain($lineno, $msg, $key, $level);
+}
+
 my $clike = 0;
 my $qmake = 0;
 my $iswip = defined($cfg{wip});
@@ -164,36 +177,34 @@ sub check_apple_terminology()
 {
     if ($clike) {
         if (/\bQ_OS_MAC\b.*&&.*!.*\bQ_OS_IOS\b/) {
-            complain("$lineno: Use of deprecated idiom 'defined(Q_OS_MAC) && !defined(Q_OS_IOS)';" .
-                      " use Q_OS_OSX instead", "terminology");
+            complain_ln("Use of deprecated idiom 'defined(Q_OS_MAC) && !defined(Q_OS_IOS)';" .
+                        " use Q_OS_OSX instead", "terminology");
         }
 
         # Not invalid, but remind people about how the unfortunately named Q_OS_MAC must be used
         if (/\bQ_OS_MAC\b/) {
-            complain("$lineno: Q_OS_MAC covers both OS X and iOS; if you meant only OS X, use Q_OS_OSX",
-                      "", -1);
+            complain_ln("Q_OS_MAC covers both OS X and iOS; if you meant only OS X, use Q_OS_OSX",
+                        "", -1);
         }
 
         if (/\bQ_OS_MACX\b/) {
-            complain("$lineno: Using deprecated define Q_OS_MACX; use Q_OS_OSX instead", "terminology");
+            complain_ln("Using deprecated define Q_OS_MACX; use Q_OS_OSX instead", "terminology");
         }
     } elsif ($qmake) {
         # check qmake scopes
         if (/\bmac\s*:\s*!\s*ios\b/) {
-            complain("$lineno: Use of deprecated idiom 'mac:!ios', use 'osx' instead",
-                      "terminology");
+            complain_ln("Use of deprecated idiom 'mac:!ios', use 'osx' instead", "terminology");
         }
 
         # Not invalid, but remind people about how the unfortunately named 'mac' must be used
         if (/\bmac\b/) {
-            complain("$lineno: Possible use of qmake scope 'mac': this covers both OS X and iOS;" .
-                      " if you meant only OS X, use 'osx'", "", -1);
+            complain_ln("Possible use of qmake scope 'mac': this covers both OS X and iOS;" .
+                        " if you meant only OS X, use 'osx'", "", -1);
         }
 
         # Match the word macx but avoid matching macx- and macx* since these are valid for mkspecs
         if (/\bmacx\b(?![-*])/) {
-            complain("$lineno: Using deprecated qmake scope 'macx'; use 'osx' instead",
-                      "terminology");
+            complain_ln("Using deprecated qmake scope 'macx'; use 'osx' instead", "terminology");
         }
     }
 
@@ -201,7 +212,7 @@ sub check_apple_terminology()
     # valid for use, however users are likely to use Mac(intosh)? to incorrectly refer to the OS so
     # we'll still flag it
     if (/\bmac(([\s_-]*os)([\s_-]*x)?)?\b/i or /\bmacintosh\b/i) {
-        complain("$lineno: Possible incorrect use of Apple-related terminology", "", -1);
+        complain_ln("Possible incorrect use of Apple-related terminology", "", -1);
     }
 }
 
