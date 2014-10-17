@@ -114,7 +114,6 @@ my ($inchangelog, $changelog) = (0, "");
 my ($footer, $cherry) = (0, 0);
 my ($badauthor, $badcommitter) = (0, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
-my %logspellerrors;
 
 # Load spelling errors dataset if available
 our %MISTAKES;
@@ -129,30 +128,24 @@ BEGIN {
     }
 }
 
-# complain() for each spelling error in the given set of $errors.
-sub complain_spelling($)
-{
-    my ($errors) = @_;
-    my @lines = sort { $a <=> $b } keys %{$errors || {}};
+my @spell_fails;
 
-    foreach my $line (@lines) {
-        foreach my $error (@{$errors->{$line}}) {
-            complain("$line: Possible spelling error: $error", "spell");
+sub complain_spelling()
+{
+    if (@spell_fails) {
+        complain("Possible spelling errors", "spell");
+        for my $sf (@spell_fails) {
+            print $lpfx."    ".$sf."\n";
         }
+        @spell_fails = ();
     }
 }
 
 # Given a line of text, searches for likely spelling errors.
-# The results are stored in $out (a hashref) if it is passed; otherwise,
-# the errors are directly complained about.
-sub check_spelling($;$)
+sub check_spelling()
 {
-    my ($text, $out) = @_;
-
     my %seen;
-    my $complain = !$out;
-    my @errors;
-    my (@words) = split(/\b/, $text);
+    my (@words) = split(/\b/);
     foreach my $word (@words) {
         $word = lc $word;
         next if $seen{$word};
@@ -162,12 +155,8 @@ sub check_spelling($;$)
                 $correction .= ' [*]';
                 $footnotes{'[*] Please note, Qt prefers American English.'} = 1;
             }
-            push @{$out->{$lineno}}, "$word -> $correction";
+            push @spell_fails, $lineno.": $word -> $correction";
         }
-    }
-
-    if ($complain) {
-        complain_spelling($out);
     }
 }
 
@@ -319,10 +308,7 @@ while (<MSG>) {
         }
     }
 
-    if ($spell_check) {
-        check_spelling($_, \%logspellerrors);
-    }
-
+    check_spelling() if ($spell_check);
     check_apple_terminology();
 }
 close MSG;
@@ -356,7 +342,7 @@ if (length($changelog) && !defined($cfg{changelog})) {
 
 {
     local $file = 'log message';
-    complain_spelling(\%logspellerrors);
+    complain_spelling();
 }
 
 my $chunk = 0;
@@ -466,6 +452,7 @@ sub flushFile()
     if ($no_copyright && $lineno > ($file =~ /^tests\/.*\.qml$/ ? 20 : 10)) {
         complain("Missing copyright header", "copyright");
     }
+    complain_spelling();
     if (@style_fails) {
         complain("Style issues", "style", -1);
         for my $sf (@style_fails) {
@@ -561,9 +548,7 @@ while (<DIFF>) {
                 }
             }
         }
-        if ($spell_check) {
-            check_spelling($_);
-        }
+        check_spelling() if ($spell_check);
         check_apple_terminology();
     } else {
         flushChunk() if ($chunk);
