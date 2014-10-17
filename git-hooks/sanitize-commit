@@ -491,6 +491,7 @@ my $conflict_fail;
 my $tabs_check;
 my $ws_check;
 my $tsv_check;
+my $eof_check;
 my $ctlkw_check;
 open DIFF, "git diff-tree --patience --no-commit-id --diff-filter=ACMR --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -C -l1000 --root ".$sha1." |" or die "cannot run git: $!";
 while (<DIFF>) {
@@ -575,7 +576,7 @@ while (<DIFF>) {
             $in_plus = 0;
             next;
         }
-        if (!$is_special && /^\\ No newline/) {
+        if ($eof_check && !$is_special && /^\\ No newline/) {
             if ($in_plus) {
                 &complain("No newline at end of file", "fileend") if (!defined($cfg{fileend}));
             }
@@ -615,6 +616,7 @@ while (<DIFF>) {
             $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
             $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(plist(\.[^.\/]+)?|def|spec|changes|[xn]ib|storyboardc?)$)/);
             $ctlkw_check = $tabs_check && $clike;
+            $eof_check = ($file !~ /\.plist(\.[^.\/]+)?$/); # Xcode consistently forgets the trailing newline
             # .ts files usually contain languages other than English
             $spell_check = !defined($cfg{spell}) && !$foreign && ($file !~ /\.ts$/i);
             $conflict_fail = defined($cfg{conflict});
