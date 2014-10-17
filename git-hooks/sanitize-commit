@@ -61,7 +61,7 @@ sub printerr()
   die "git exited with status ".($? >> 8) if ($?);
 }
 
-sub complain()
+sub complain($$;$)
 {
     my ($msg, $key, $level) = @_;
     my $pfx;
@@ -130,14 +130,14 @@ BEGIN {
 }
 
 # complain() for each spelling error in the given set of $errors.
-sub complain_spelling
+sub complain_spelling($)
 {
     my ($errors) = @_;
     my @lines = sort { $a <=> $b } keys %{$errors || {}};
 
     foreach my $line (@lines) {
         foreach my $error (@{$errors->{$line}}) {
-            &complain("$line: possible spelling error: $error", "spell");
+            complain("$line: possible spelling error: $error", "spell");
         }
     }
 }
@@ -145,7 +145,7 @@ sub complain_spelling
 # Given a line of text, searches for likely spelling errors.
 # The results are stored in $out (a hashref) if it is passed; otherwise,
 # the errors are directly complained about.
-sub check_spelling
+sub check_spelling($;$)
 {
     my ($text, $out) = @_;
 
@@ -175,35 +175,35 @@ sub check_apple_terminology()
 {
     if ($clike) {
         if (/\bQ_OS_MAC\b.*&&.*!.*\bQ_OS_IOS\b/) {
-            &complain("$lineno: use of deprecated idiom 'defined(Q_OS_MAC) && !defined(Q_OS_IOS)';" .
+            complain("$lineno: use of deprecated idiom 'defined(Q_OS_MAC) && !defined(Q_OS_IOS)';" .
                       "use Q_OS_OSX instead", "terminology");
         }
 
         # Not invalid, but remind people about how the unfortunately named Q_OS_MAC must be used
         if (/\bQ_OS_MAC\b/) {
-            &complain("$lineno: Q_OS_MAC covers both OS X and iOS; if you meant only OS X, use Q_OS_OSX",
+            complain("$lineno: Q_OS_MAC covers both OS X and iOS; if you meant only OS X, use Q_OS_OSX",
                       "", -1);
         }
 
         if (/\bQ_OS_MACX\b/) {
-            &complain("$lineno: using deprecated define Q_OS_MACX; use Q_OS_OSX instead", "terminology");
+            complain("$lineno: using deprecated define Q_OS_MACX; use Q_OS_OSX instead", "terminology");
         }
     } elsif ($qmake) {
         # check qmake scopes
         if (/\bmac\s*:\s*!\s*ios\b/) {
-            &complain("$lineno: use of deprecated idiom 'mac:!ios', use 'osx' instead",
+            complain("$lineno: use of deprecated idiom 'mac:!ios', use 'osx' instead",
                       "terminology");
         }
 
         # Not invalid, but remind people about how the unfortunately named 'mac' must be used
         if (/\bmac\b/) {
-            &complain("$lineno: possible use of qmake scope 'mac': this covers both OS X and iOS;" .
+            complain("$lineno: possible use of qmake scope 'mac': this covers both OS X and iOS;" .
                       " if you meant only OS X, use 'osx'", "", -1);
         }
 
         # Match the word macx but avoid matching macx- and macx* since these are valid for mkspecs
         if (/\bmacx\b(?![-*])/) {
-            &complain("$lineno: using deprecated qmake scope 'macx'; use 'osx' instead",
+            complain("$lineno: using deprecated qmake scope 'macx'; use 'osx' instead",
                       "terminology");
         }
     }
@@ -212,7 +212,7 @@ sub check_apple_terminology()
     # valid for use, however users are likely to use Mac(intosh)? to incorrectly refer to the OS so
     # we'll still flag it
     if (/\bmac(([\s_-]*os)([\s_-]*x)?)?\b/i or /\bmacintosh\b/i) {
-        &complain("$lineno: possible incorrect use of Apple-related terminology", "", -1);
+        complain("$lineno: possible incorrect use of Apple-related terminology", "", -1);
     }
 }
 
@@ -234,19 +234,19 @@ while (<MSG>) {
         $summary = $_;
         $revert1 = 1 if (/^Revert ".*"$/);
         if (/^revert(ed|ing)? (commit )?[0-9a-f]{7,40}\.?$/i) {
-            &complain("Summary of revert mentions only SHA1", "log");
+            complain("Summary of revert mentions only SHA1", "log");
         }
         if (/\bQT[A-Z]+-\d+\b/) {
-            &complain("Bug reference in summary", "log");
+            complain("Bug reference in summary", "log");
         }
         if (!$iswip && $parents < 2 && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
-            &complain("Apparently pushing a Work In Progress", "wip", 1);
+            complain("Apparently pushing a Work In Progress", "wip", 1);
         } elsif (!$iswip && !$badlog && length($_) < 7) {
-            &complain("Log message summary is too short", "log");
+            complain("Log message summary is too short", "log");
         } elsif (!$badlog && !$revert1 && length($_) > 120) {
-            &complain("Log message summary is excessively long", "log");
+            complain("Log message summary is excessively long", "log");
         } elsif ($parents < 2 && !$revert1 && length($_) > 70) {
-            &complain("Aim for shorter log message summaries", "", -1);
+            complain("Aim for shorter log message summaries", "", -1);
         }
     } else {
         if (/^This reverts commit [[:xdigit:]]{40}\.?$/) {
@@ -256,7 +256,7 @@ while (<MSG>) {
         }
         if ($lineno == 2) {
             if (!$badlog && $_ ne "") {
-                &complain("2nd line of log message is not empty", "log");
+                complain("2nd line of log message is not empty", "log");
             }
         } elsif ($_ eq "") {
             $cherry = 0;
@@ -274,15 +274,15 @@ while (<MSG>) {
             }
             if (!$badtask && /^Task-number:/i && !/^Task-number:/) {
                 $badtask = 1;
-                &complain("Capitalization of \"Task-number\" is wrong", "");
+                complain("Capitalization of \"Task-number\" is wrong", "");
             }
             if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
                 $badid = 1;
-                &complain("Gerrit change id outside Change-Id footer", "changeid");
+                complain("Gerrit change id outside Change-Id footer", "changeid");
             }
             if (!$badurl && /\bhttps?:\/\/(bugreports\.qt-project\.org\/browse\/|codereview\.qt-project\.org\/(\#change,|\#\/c\/)?\d+)/) {
                 $badurl = 1;
-                &complain("URL pointing to Gerrit or JIRA", "url");
+                complain("URL pointing to Gerrit or JIRA", "url");
             }
             my $ftr = 0;
             if (/^\((partial(ly)? )?(cherry[- ]pick|(back)?port)(ed)? /) {
@@ -299,7 +299,7 @@ while (<MSG>) {
             }
             if ($inchangelog) {
                 if (($ftr || $footer == 1) && !defined($cfg{changelog})) {
-                    &complain("No empty line between ChangeLog and footers", "changelog");
+                    complain("No empty line between ChangeLog and footers", "changelog");
                 }
                 $changelog .= "\n".$_;
             }
@@ -329,29 +329,29 @@ close MSG;
 printerr;
 
 if ($revert1 && $revert2 && !$nonrevert) {
-    &complain("Revert without explanation", "revert", 1);
+    complain("Revert without explanation", "revert", 1);
 }
 # These need to be delayed, because at the time they are found the subject is not known yet.
 if ($badauthor) {
-    &complain("Bogus author email", "email", 1);
+    complain("Bogus author email", "email", 1);
 }
 if ($badcommitter) {
-    &complain("Bogus committer email", "email", 1);
+    complain("Bogus committer email", "email", 1);
 }
 if ($badrev && !defined($cfg{revby})) {
-    &complain("Bogus Reviewed-by footer", "revby", 1);
+    complain("Bogus Reviewed-by footer", "revby", 1);
 }
 if ($badsign) {
-    &complain("Unnecessary Signed-off-by footer", "", -1);
+    complain("Unnecessary Signed-off-by footer", "", -1);
 }
 if ($footer == 3 && !defined($cfg{footer})) {
-    &complain("Empty lines between footers", "footer");
+    complain("Empty lines between footers", "footer");
 }
 if (length($changelog) && !defined($cfg{changelog})) {
-    &complain("Bad form of [ChangeLog] tag", "changelog") if ($changelog !~ /^\n\[ChangeLog\]/s);
-    &complain("Missing space between ChangeLog tags and text", "changelog") if ($changelog !~ /\]\s[^\[]/s);
-    &complain("JIRA task referenced from ChangeLog", "changelog") if ($changelog =~ /\[QT[A-Z]+-\d+\]/s);
-    &complain("Current repository referenced from ChangeLog", "changelog") if ($changelog =~ /\[$repo\]/si);
+    complain("Bad form of [ChangeLog] tag", "changelog") if ($changelog !~ /^\n\[ChangeLog\]/s);
+    complain("Missing space between ChangeLog tags and text", "changelog") if ($changelog !~ /\]\s[^\[]/s);
+    complain("JIRA task referenced from ChangeLog", "changelog") if ($changelog =~ /\[QT[A-Z]+-\d+\]/s);
+    complain("Current repository referenced from ChangeLog", "changelog") if ($changelog =~ /\[$repo\]/si);
 }
 
 {
@@ -466,10 +466,10 @@ my $no_copyright = 0;
 sub flushFile()
 {
     if ($no_copyright && $lineno > ($file =~ /^tests\/.*\.qml$/ ? 20 : 10)) {
-        &complain("Missing copyright header", "copyright");
+        complain("Missing copyright header", "copyright");
     }
     if (@style_fails) {
-        &complain("Style issues", "style", -1);
+        complain("Style issues", "style", -1);
         for my $sf (@style_fails) {
             print $lpfx."    ".$sf."\n";
         }
@@ -507,7 +507,7 @@ while (<DIFF>) {
             $no_copyright = 0;
         }
         if ($check_gen && /All changes made in this file will be lost|This file is automatically generated|DO NOT EDIT|DO NOT delete this file|[Gg]enerated by|uicgenerated|produced by gperf|made by GNU Bison/) {
-            &complain("Adding generated file", "generated") if ($new_file && !defined($cfg{generated}));
+            complain("Adding generated file", "generated") if ($new_file && !defined($cfg{generated}));
             $ws_check = 0;
             $check_gen = 0;
         }
@@ -517,10 +517,10 @@ while (<DIFF>) {
             # This indicates a text file; binary files have "Binary files ... and ... differ" instead.
             $maybe_bin = 0;
             if ($file =~ /(~|\.(old|bak))$/i) {
-                &complain("Adding backup file", "backup") if ($new_file && !defined($cfg{backup}));
+                complain("Adding backup file", "backup") if ($new_file && !defined($cfg{backup}));
                 $ws_check = 0;
             } elsif ($file =~ /\.(prl|la|pc|ilk)$/i) {
-                &complain("Adding build artifact", "generated") if ($new_file && !defined($cfg{generated}));
+                complain("Adding build artifact", "generated") if ($new_file && !defined($cfg{generated}));
                 $ws_check = 0;
             } elsif ($file !~ /\.qmltypes$/i) {
                 $check_gen = 1;
@@ -541,10 +541,10 @@ while (<DIFF>) {
         $in_plus = 1;
         if (!$crlf_fail && /\r\n$/) {
             $crlf_fail = 1;
-            &complain("CRLF line endings", "crlf");
+            complain("CRLF line endings", "crlf");
         }
         if (!$conflict_fail && /^(?:[<>=]){7}( |$)/) {
-            &complain("Unresolved merge conflict", "conflict");
+            complain("Unresolved merge conflict", "conflict");
             $conflict_fail = 1;
         }
         if ($ws_check) {
@@ -576,7 +576,7 @@ while (<DIFF>) {
         }
         if ($eof_check && !$is_special && /^\\ No newline/) {
             if ($in_plus) {
-                &complain("No newline at end of file", "fileend") if (!defined($cfg{fileend}));
+                complain("No newline at end of file", "fileend") if (!defined($cfg{fileend}));
             }
             next;
         }
@@ -600,7 +600,7 @@ while (<DIFF>) {
             $qmake = ($file =~ /\.pr[filo]$/i);
             for my $key (keys %watch_files) {
                 if ($file =~ /^$watch_files{$key}$/) {
-                    &complain("Changing this file is risky. Please add $watch_people{$key} as reviewer(s).", "", -1);
+                    complain("Changing this file is risky. Please add $watch_people{$key} as reviewer(s).", "", -1);
                 }
             }
             my $foreign = ($file =~ /\/3rdparty\//);
@@ -626,11 +626,11 @@ while (<DIFF>) {
         if ($maybe_bin && /^Binary files /) {
             if ($new_file) {
                 if (!defined($cfg{generated}) && ($file =~ /\.(obj|o|lib|a|dll|so|exe|exp|qm|pdb|idb|suo)$/i || isExe($maybe_bin))) {
-                    &complain("Adding build artifact", "generated");
+                    complain("Adding build artifact", "generated");
                 }
             } else {
                 if (!defined($cfg{giant}) && $size > (2 << 20)) {
-                    &complain("Changing huge binary file (".formatSize($size)." > 2MiB)", "giant", 1);
+                    complain("Changing huge binary file (".formatSize($size)." > 2MiB)", "giant", 1);
                 }
             }
             next;
@@ -647,18 +647,18 @@ while (<DIFF>) {
             if ($old_trees =~ /^0{40}(,0{40})*$/) {
             #print "*** adding ".$file.".\n";
                 if (!$conflict_fail && $file =~ /\.(BACKUP|BASE|LOCAL|REMOTE)\.[^\/]+$/) {
-                    &complain("Adding temporary file from merge conflict resolution", "conflict", 1);
+                    complain("Adding temporary file from merge conflict resolution", "conflict", 1);
                     $conflict_fail = 1;
                 }
                 if (!defined($cfg{alien}) && $file =~ /\.(sln|vcproj|vcxproj|user)$/i) {
-                    &complain("Warning: Adding alien build system file", "alien");
+                    complain("Warning: Adding alien build system file", "alien");
                 }
                 if ($size > (2 << 20)) {
                     if (!defined($cfg{giant})) {
-                        &complain("Adding huge file (".formatSize($size)." > 2MiB)", "giant", 1);
+                        complain("Adding huge file (".formatSize($size)." > 2MiB)", "giant", 1);
                     }
                 } elsif ($size > 51200 && !$issrc && !defined($cfg{size})) {
-                    &complain("Warning: Adding big file (".formatSize($size)." > 50KiB)", "size");
+                    complain("Warning: Adding big file (".formatSize($size)." > 50KiB)", "size");
                 }
                 $size = 0;
                 $new_file = 1;
@@ -670,7 +670,7 @@ while (<DIFF>) {
                     $old_size = $osz if ($osz > $old_size);
                 }
                 if ($size > $old_size * 3 / 2) {
-                    &complain("Warning: Increasing file size by more than 50% (".
+                    complain("Warning: Increasing file size by more than 50% (".
                                 formatSize($old_size)." => ".formatSize($size).")", "size");
                 }
             }
@@ -686,7 +686,7 @@ if ($mixws_check) {
     flushChunk() if ($chunk);
     if ($nonws and $ws) {
         $file = "";
-        &complain("Mixing whitespace-only changes with other changes", "mixws", -1);
+        complain("Mixing whitespace-only changes with other changes", "mixws", -1);
         for my $fn (@ws_files) {
             print $lpfx."  WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}})."\n";
         }
