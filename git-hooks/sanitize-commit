@@ -524,7 +524,7 @@ while (<DIFF>) {
             } elsif ($file =~ /\.(prl|la|pc|ilk)$/i) {
                 &complain("Adding build artifact", "generated") if ($new_file && !defined($cfg{generated}));
                 $ws_check = 0;
-            } else {
+            } elsif ($file !~ /\.qmltypes$/i) {
                 $check_gen = 1;
             }
             next;
