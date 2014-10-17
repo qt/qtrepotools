@@ -365,7 +365,6 @@ my @deli = ();
 my $nonws;
 my $ws;
 my $mixws_check = 0;
-my @ws_files = ();
 my %ws_lines = (); # hash of lists
 my $braces = 0;
 my $open_key = qr/\s*#\s*if|.*{/;
@@ -427,7 +426,6 @@ sub flushChunk()
         $nonws = 1;
     } elsif (!$nlonly) {
         $ws = 1;
-        push @ws_files, $file if (!defined($ws_lines{$file}));
         push @{$ws_lines{$file}}, $lineno - $#addi;
     }
     @addi = @deli = ();
@@ -687,7 +685,7 @@ if ($mixws_check) {
     if ($nonws and $ws) {
         $file = "";
         complain("Mixing whitespace-only changes with other changes", "mixws", -1);
-        for my $fn (@ws_files) {
+        for my $fn (sort keys %ws_lines) {
             print $lpfx."  WS-only in ".$fn.": ".join(", ", @{$ws_lines{$fn}})."\n";
         }
     }
