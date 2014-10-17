@@ -171,10 +171,8 @@ sub check_spelling
     }
 }
 
-sub check_apple_terminology
+sub check_apple_terminology()
 {
-    my ($text) = @_;
-
     if ($clike) {
         if (/\bQ_OS_MAC\b.*&&.*!.*\bQ_OS_IOS\b/) {
             &complain("$lineno: use of deprecated idiom 'defined(Q_OS_MAC) && !defined(Q_OS_IOS)';" .
@@ -325,7 +323,7 @@ while (<MSG>) {
         check_spelling($_, \%logspellerrors);
     }
 
-    check_apple_terminology($_);
+    check_apple_terminology();
 }
 close MSG;
 printerr;
@@ -568,7 +566,7 @@ while (<DIFF>) {
         if ($spell_check) {
             check_spelling($_);
         }
-        check_apple_terminology($_);
+        check_apple_terminology();
     } else {
         flushChunk() if ($chunk);
         if (/^ /) {
