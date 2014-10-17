@@ -46,9 +46,7 @@ Description:
     options are passed on directly to the normal 'git push' command.
     If you want to avoid specifying all options first, any options
     specified after a '--' are also passed on directly to the
-    underlying 'git push' command. This can be particularly useful
-    with the -n/--dry-run options, which make git do everything except
-    actually sending the updates.
+    underlying 'git push' command.
 
 Options:
     -d, --draft
@@ -61,6 +59,9 @@ Options:
 
     --aliases
         Report all registered aliases and quit.
+
+    -n, --dry-run
+        Do everything except actually pushing any commits.
 
     -v, --verbose
         Show the resolved aliases, SHA1s of commits, and other information.
@@ -104,6 +105,7 @@ EOM
 my $debug = 0;
 my $verbose = 0;
 my $quiet = 0;
+my $dry_run = 0;
 
 my $remote = "gerrit";
 my $remote_override = 0;
@@ -150,6 +152,8 @@ sub parse_arguments(@)
         } elsif ($arg eq "--debug") {
             $debug = 1;
             $verbose = 1;
+        } elsif ($arg eq "-n" || $arg eq "--dry-run") {
+            $dry_run = 1;
         } elsif ($arg eq "-d" || $arg eq "--draft") {
             $draft = 1;
         } elsif ($arg eq "-p" || $arg eq "--publish") {
@@ -311,6 +315,7 @@ sub push_patches()
     my @gitcmd = ("git", "push");
     push @gitcmd, '-v' if ($verbose);
     push @gitcmd, '-q' if ($quiet);
+    push @gitcmd, '-n' if ($dry_run);
     push @gitcmd, @arguments;
     push @gitcmd, $remote, "$ref_from:refs/".($draft > 0 ? 'drafts' : 'for')."/$ref_to";
 
