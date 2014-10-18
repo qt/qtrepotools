@@ -1048,9 +1048,9 @@ sub set_change_error($$$)
     ($$change{error_style}, $$change{error}) = ($style, $error);
 }
 
-sub report_local_changes($$)
+sub report_local_changes($$;$$)
 {
-    my ($reports, $changes) = @_;
+    my ($reports, $changes, $prefix, $suffix) = @_;
 
     foreach my $change (@$changes) {
         my $commit = $$change{local};
@@ -1058,7 +1058,8 @@ sub report_local_changes($$)
             type => "change",
             id => $$commit{changeid},
             subject => $$commit{subject},
-            prefix => "  ",
+            prefix => $prefix // "  ",
+            suffix => $suffix,
             annotation => $$change{annotation}
         };
         my $error = $$change{error};
@@ -1392,9 +1393,9 @@ sub assign_series($)
 
 # Deduce a series from a single commit.
 # Merges are treated in --first-parent mode.
-sub do_determine_series($)
+sub do_determine_series($;$)
 {
-    my ($change) = @_;
+    my ($change, $extend) = @_;
 
     print "Deducing series from $$change{id}\n" if ($debug);
     my (@prospects, @changes);
@@ -1417,14 +1418,16 @@ sub do_determine_series($)
                 # Hit; add the Change to the series.
                 print "Adding bound $$change{id} and ".int(@prospects)." prospect(s)\n"
                     if ($debug);
-            } elsif (!@prospects) {
-                # The specified tip Change is bound.
-                print "Adding bound $$change{id} at tip\n"
+            } elsif (!@prospects || $extend) {
+                # The specified tip Change is bound, or we are extending
+                # and the proto-series so far consists of only loose Changes.
+                print "Adding bound $$change{id} and ".int(@prospects)." prospect(s) at tip\n"
                     if ($debug);
                 # This Change determines the series.
                 $group_key = $gid;
             } else {
-                # Stop when encountering a bound Change after only loose ones.
+                # Stop when encountering a bound Change after only loose ones
+                # (unless extending).
                 print "Breaking off at bound $$change{id} after only loose\n" if ($debug);
                 last;
             }
@@ -1439,7 +1442,7 @@ sub do_determine_series($)
     # But we don't reverse-traverse if the specified Change is loose (and we're
     # not extending), based on the assumption that it was meant to be the tip
     # - otherwise, the semantics get really unintuitive.
-    return (\@prospects, undef) if (!defined($group_key));
+    return (\@prospects, undef, $change) if (!defined($group_key));
     my @rprospects;
     while (1) {
         $rchange = $$rchange{child};
@@ -1461,7 +1464,7 @@ sub do_determine_series($)
             @rprospects = ();
         }
     }
-    return (\@changes, $group_key);
+    return (\@changes, $group_key, undef);
 }
 
 ###################

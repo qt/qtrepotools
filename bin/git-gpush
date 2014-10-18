@@ -71,7 +71,8 @@ Description:
     needs to be specified. For subsequent pushes of the same series, it is
     sufficient to specify any commit which is part of the series. Loose
     Changes in the middle of the series will be automatically captured
-    by it.
+    by it; to append loose Changes to the series right in front of them,
+    use --extend.
     It is possible to regroup series any time by specifying new exact
     ranges.
 
@@ -79,6 +80,9 @@ Description:
     rebase, to push out the amended commits instantly.
 
 Options:
+    -e, --extend
+        Append new Changes to the series right in front of them.
+
     -m, --minimal
         Try to avoid creating new PatchSets for unmodified Changes even
         if they are on top of modified Changes. This avoids unnecessarily
@@ -205,6 +209,16 @@ Examples:
         Push the Change Iedb5bd8ca8 and the two Changes in front of it.
         Subsequently, re-push the Changes, specifying only the tip.
 
+    git gpush :3 +alex
+    ...
+    git commit -a -m "Another commit"
+    git gpush -e +alex
+    ...
+    git commit -a -m "An unrelated commit"
+    git gpush :1
+        First push the top three commits for review, then add another commit
+        to the series, and finally push another series.
+
 Copyright:
     Copyright (C) 2017 The Qt Company Ltd.
     Copyright (C) 2014 Intel Corporation.
@@ -221,6 +235,7 @@ my $from;
 my $commit_count = 0;
 my $addbase;  # default set by process_config()
 my $minimal;  # default set by process_config()
+my $extend = 0;
 my $ref_base;
 my $ref_base_ok = 1;
 my $ref_to;
@@ -249,6 +264,8 @@ sub parse_arguments(@)
             $verbose = 1;
         } elsif ($arg eq "-n" || $arg eq "--dry-run") {
             $dry_run = 1;
+        } elsif ($arg eq "-e" || $arg eq "--extend") {
+            $extend = 1;
         } elsif ($arg eq "-m" || $arg eq "--minimal") {
             $minimal = 1;
             $minimal_override = 1;
@@ -335,7 +352,7 @@ sub parse_arguments(@)
     }
 
     my $series_specific =
-            $commit_count || $from_base
+            $commit_count || $from_base || $extend
             || defined($ref_to) || defined($topic);
     my $push_specific =
             @reviewers || @CCs || $force || $force_branch
@@ -677,12 +694,15 @@ sub determine_series($)
     my ($pivot_id) = @_;
 
     my $pivot = $commit_by_id{$pivot_id}{change};
-    my ($changes, $gid) = do_determine_series($pivot);
+    my ($changes, $gid, $echange) = do_determine_series($pivot, $extend);
     if (!$gid && @$changes && !$list_only) {
         my @reports;
         report_fixed(\@reports, "Attempted to push ".int(@$changes)." loose Change(s):\n");
+        report_local_changes(\@reports, [ $echange ], "[ Extend: ", " ]")
+            if ($echange);
         report_local_changes(\@reports, $changes);
-        report_fixed(\@reports, "Please specify exact ranges.\n");
+        report_fixed(\@reports, "Please ".($echange ? "use --extend or " : "")
+                                ."specify exact ranges.\n");
         fail_formatted(\@reports);
     }
     # The group key is preserved even when the series gains new Changes.
