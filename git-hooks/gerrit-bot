@@ -20,6 +20,12 @@ use File::Path;
 # Valid options are:
 #   gerrithost (mandatory)
 #     Target host. The identification is done via SSH.
+#   resthost
+#     The REST base URL of the target host.
+#   restuser
+#     The user name for resthost. If omitted, credentials are expected in .netrc.
+#   restpass
+#     The password for resthost. If omitted, credentials are expected in .netrc.
 #   useremail (mandatory)
 #     Bot's email address. Used to identify invitations and own actions.
 #   inviteonly (default 0)
@@ -58,7 +64,7 @@ sub getcfg($;$)
   my $fkey = $instance.'.'.$key;
   if (defined $config{$fkey}) {
     return $config{$fkey};
-  } elsif (defined $def) {
+  } elsif (@_ > 1) {
     return $def;
   } else {
     die $fkey." not set.\n";
@@ -68,11 +74,20 @@ sub getcfg($;$)
 my $GERRIT_HOST = getcfg 'gerrithost';
 my $USER_EMAIL = getcfg 'useremail';
 my $INVITE_ONLY = getcfg 'inviteonly', 0;
+my $REST_HOST = getcfg 'resthost', undef;
+my $REST_USER = getcfg 'restuser', undef;
+my $REST_PASS = getcfg 'restpass', undef;
 my $GIT_BASEDIR = getcfg 'gitbasedir';
 my $GIT_DO_FETCH = getcfg 'gitdofetch';
 my $WORKER = getcfg 'worker';
 my %EXCLUDED_PROJECTS = map { $_ => 1 } split(/\s+/, getcfg('excluded', ""));
 my $verbose = getcfg 'verbose', 0;
+
+my $gerrit_rest;
+if ($REST_HOST) {
+  use Gerrit::REST;
+  $gerrit_rest = Gerrit::REST->new($REST_HOST, $REST_USER, $REST_PASS);
+}
 
 my @gerrit = ("ssh", $GERRIT_HOST, "gerrit");
 
@@ -98,6 +113,7 @@ sub process_commit($$$$$)
   my $orig_project = $project;
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
   my ($score, $verdict);
+  my $use_rest = 0;
   if (defined($EXCLUDED_PROJECTS{$project}) || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
     $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project."\n";
     $score = 1;
@@ -146,21 +162,43 @@ sub process_commit($$$$$)
     $score = $? >> 8;
     die "Worker returned invalid score ".$score." for commit ".$ref." in ".$project.".\n" if ($score > 20);
     $score -= 10;
-    if (length($verdict) > 20000) {
-      $verdict = substr($verdict, 0, 20000)."\n\n**** Output truncated. Fix the problems above to get more output.\n";
+    if ($REST_HOST) {
+      if (length($verdict) > 50000) {
+        $verdict = "**** Worker produced an unreasonable amount of output. You should ask the bot maintainers for advice.";
+      } else {
+        $use_rest = 1;
+        $verdict = decode_json($verdict);
+        defined($verdict) or die "cannot decode verdict as JSON\n";
+        $$verdict{labels} = { 'Sanity-Review' => $score };
+      }
+    } else {
+      if (length($verdict) > 20000) {
+        $verdict = substr($verdict, 0, 20000)."\n\n**** Output truncated. Fix the problems above to get more output.\n";
+      }
+      $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
+      $verdict =~ s/^\s+|\s+$//g;
     }
-    $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
-    $verdict =~ s/^\s+|\s+$//g;
   }
-  my @args = ();
-#  push @args, ("--project", $project);
-  push @args, ("--project", $orig_project);  # XXX Workaround QTQAINFRA-381
-  push @args, ("--sanity-review", ($score > 0) ? "+".$score : $score);
-  push @args, ("--message", '"'.$verdict.'"') if (length($verdict));
-  if (system(@gerrit, "review", @args, $rev)) {
-    print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
-    printerr("Submission of verdict for ".$rev." (".$project."/".$ref.") failed");
-    return;
+  if ($use_rest) {
+    eval {
+      $gerrit_rest->POST("/changes/$number/revisions/$rev/review", $verdict);
+    };
+    if ($@) {
+      print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
+      print STDERR "Submission of REST verdict for ".$rev." (".$project."/".$ref.") failed: $@\n";
+      return;
+    }
+  } else {
+    my @args = ();
+#    push @args, ("--project", $project);
+    push @args, ("--project", $orig_project);  # XXX Workaround QTQAINFRA-381
+    push @args, ("--sanity-review", ($score > 0) ? "+".$score : $score);
+    push @args, ("--message", '"'.$verdict.'"') if (length($verdict));
+    if (system(@gerrit, "review", @args, $rev)) {
+      print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
+      printerr("Submission of verdict for ".$rev." (".$project."/".$ref.") failed");
+      return;
+    }
   }
   $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref."): $score\n";
 }
