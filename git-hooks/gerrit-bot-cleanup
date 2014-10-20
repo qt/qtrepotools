@@ -20,6 +20,8 @@ if test -z "$root"; then
 fi
 cd "$root" || exit
 find -name '*.git' -type d -prune | while read dir; do (
+    # use "git config --global gc.packrefs notbare" to make sure this works
+    test -d $dir/refs/changes || exit
     echo "Entering $dir ..."
     cd "$dir" || exit
     find refs/changes -mindepth 1 -mtime +10 -delete
