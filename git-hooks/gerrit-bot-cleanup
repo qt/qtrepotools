@@ -19,7 +19,7 @@ if test -z "$root"; then
     exit 1
 fi
 cd "$root" || exit
-find -name '*.git' -type d | while read dir; do (
+find -name '*.git' -type d -prune | while read dir; do (
     echo "Entering $dir ..."
     cd "$dir" || exit
     find refs/changes -mindepth 1 -mtime +10 -delete
