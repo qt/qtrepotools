@@ -128,7 +128,7 @@ sub process_commit($$$$$)
         chomp(@mainlines = `git config remote.origin.fetch`);
         $skipfetch{$project} = 1;
       }
-      if (system("git", "fetch", "-f", "origin", $ref.":refs/changes/".$number, @mainlines)) {
+      if (system("git", "fetch", "-f", "--prune", "origin", $ref.":refs/changes/".$number, @mainlines)) {
         printerr "GIT fetch of ".$ref." from ".$project." failed";
         return;
       }
