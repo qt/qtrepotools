@@ -655,7 +655,8 @@ if ($mixws_check) {
     flushChunk() if ($chunk);
     if ($nonws and $ws) {
         my @extras;
-        for $file (sort keys %ws_lines) {
+        for (sort keys %ws_lines) {
+            $file = $_;
             if ($gerrit_rest) {
                 do_complain($_, "WS-only change", "mixws", -1) foreach (@{$ws_lines{$file}});
             } else {
