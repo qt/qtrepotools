@@ -851,6 +851,124 @@ sub determine_base($)
     $$group{base} = $base;
 }
 
+# Get a set of Changes which were part of the previous push of each
+# specified Change, but have been upstreamed since.
+sub get_upstreamed_changes($)
+{
+    my ($changes) = @_;
+
+    my %pushed_changes = map { $$_{id} => 1 } @$changes;
+    my %upstreamed_changes;
+    my %query_bases;
+    foreach my $change (@$changes) {
+        my ($sha1, $base) = ($$change{pushed}, $$change{base});
+        next if (!defined($sha1));
+        # This will miss Changes which were exclusively on top of the
+        # specified Changes, which is just fine for our purposes, as
+        # these Changes obviously cannot have been the parents.
+        my $any;
+        while (1) {
+            my $commit = $commit_by_id{$sha1};
+            if (!$commit) {
+                # Handle legacy data without recorded push base.
+                $base = $sha1;
+                last;
+            }
+            my $changeid = $$commit{changeid};
+            if (!defined($pushed_changes{$changeid})) {
+                $upstreamed_changes{$changeid} = 1;
+                $any = 1;
+            } else {
+                # We omit Changes which are also part of the current push -
+                # this saves time (mostly only when all are still there)
+                # and avoids anomalies with re-applied reverted Changes.
+            }
+            $sha1 = get_1st_parent($commit);
+            last if (defined($base) && ($base eq $sha1));
+        }
+        if ($any) {
+            # Record the push base of the Change - if the Change is actually
+            # in our upstream, it will be so between its push base (which
+            # cannot be younger than the branch's tip at that time) and the
+            # local branch's merge base with upstream.
+            # We collect bases separately, because one Change-Id can map to
+            # multiple bases due to partially updated series.
+            $query_bases{$base} = 1;
+        }
+    }
+    if (%upstreamed_changes) {
+        print "Enumerating upstreamed Changes ...\n" if ($debug);
+        my $upstream_cids = visit_upstream_commits([ $local_base ], [ keys %query_bases ]);
+        foreach my $changeid (keys %upstreamed_changes) {
+            if (!defined($$upstream_cids{$changeid})) {
+                # Changes which are not in our upstream were presumably
+                # dropped from the push intentionally.
+                print "Dropping omitted non-upstream $changeid.\n"
+                    if ($debug);
+                delete $upstreamed_changes{$changeid};
+            } else {
+                print "Keeping upstreamed $changeid.\n" if ($debug);
+            }
+        }
+    }
+    return \%upstreamed_changes;
+}
+
+sub do_advance_base($$$$);
+
+sub do_advance_base($$$$)
+{
+    my ($base_id, $base_cid, $sha1, $upstreamed_changes) = @_;
+
+    # If the candidate commit is already the base, there is nothing to do.
+    return 1 if ($sha1 eq $$base_id);
+
+    my $commit = $commit_by_id{$sha1};
+    # Terminate if we reached the bottom of the series, or in non-minimal
+    # mode the pushed commit was not visited due to being on top of new
+    # Changes (which is ok, because the injection chain is then interrupted
+    # anyway).
+    return 0 if (!$commit);
+
+    my $changeid = $$commit{changeid};
+    # Terminate if we encounter the Change corresponding with the base
+    # commit, but with a different SHA1. This is merely an optimization
+    # which avoids that we always traverse down to the bottom of the
+    # series, which would be O(n^2) with its length.
+    return 0 if ($changeid eq $base_cid);
+
+    # Recurse until we encounter the base, and propagate termination.
+    return 0 if (!do_advance_base($base_id, $base_cid, get_1st_parent($commit), $upstreamed_changes));
+
+    # Terminate unless the candidate Change is in our upstream. Note that
+    # we test that only after returning from the recursion, so Changes
+    # which were dropped from or moved towards the end of a series are
+    # simply left off rather than entirely disrupting the mechanism.
+    return 0 if (!defined($$upstreamed_changes{$changeid}));
+
+    print "Injecting upstreamed $changeid ($sha1).\n" if ($debug);
+    $$base_id = $sha1;
+    return 1;
+}
+
+# If Changes from the previous push were already upstreamed and the local
+# series was subsequently rebased, it would be necessary to rebase the
+# push to make the remaining commits still apply. To avoid the churn
+# resulting from this, we simply inject the upstreamed commits in front
+# of the actually applied ones.
+sub advance_base($$$)
+{
+    my ($base_id, $sha1, $upstreamed_changes) = @_;
+
+    if (defined($sha1)) {
+        my $base = $commit_by_id{$$base_id};
+        # Pre-get the base's Change-Id for quick comparison later on.
+        # The base of the 1st commit in the series was likely not visited.
+        my $base_cid = $base ? $$base{changeid} : "";
+        do_advance_base($base_id, $base_cid, $sha1, $upstreamed_changes);
+    }
+}
+
 sub prepare_rebase($$$)
 {
     my ($change, $base_id, $try_minimal) = @_;
@@ -988,13 +1106,27 @@ sub rebase_commit($$$$$)
 
 my $have_conflicts = 0;
 
-sub do_rebase_changes($)
+sub do_rebase_changes($$)
 {
-    my ($group) = @_;
+    my ($group, $upstreamed_changes) = @_;
     my ($base, $changes) = ($$group{base}, $$group{changes});
 
     printf("Rebasing %d commit(s) to %s.\n", int(@$changes), format_id($base))
         if ($verbose);
+
+    # Preparation for advance_base(). We "pull down" the parent commits from
+    # subsequent previously pushed Changes into preceding new ones, to avoid
+    # that the "gap" in the chain disrupts the mechanism.
+    my $pchg;
+    foreach my $change (@$changes) {
+        $pchg = $change if (!$pchg);
+        my $old_id = $$change{pushed};
+        next if (!defined($old_id));
+        my $old_commit = $commit_by_id{$old_id};
+        next if (!$old_commit);
+        $$pchg{old_parent_id} = get_1st_parent($old_commit);
+        $pchg = undef;
+    }
 
     # We don't attempt minimal mode when the base of the entire push
     # changed.
@@ -1026,6 +1158,7 @@ sub do_rebase_changes($)
             $holdoff--;
             print "Not trying old base.\n" if ($debug);
         } else {
+            advance_base(\$new_base, $$change{old_parent_id}, $upstreamed_changes);
             ($old_commit, $old_base, $try_old_base) =
                     prepare_rebase($change, $new_base, $try_minimal && $idx);
             $new_base = $old_base if ($try_old_base);
@@ -1118,11 +1251,11 @@ sub do_rebase_changes($)
     }
 }
 
-sub rebase_changes($)
+sub rebase_changes($$)
 {
-    my ($group) = @_;
+    my ($group, $upstreamed_changes) = @_;
 
-    with_local_git_index(\&do_rebase_changes, $group);
+    with_local_git_index(\&do_rebase_changes, $group, $upstreamed_changes);
 }
 
 sub classify_changes_offline($)
@@ -1470,7 +1603,8 @@ sub execute_pushing()
     if ($online) {
         determine_base($group);
         visit_pushed_changes($group);
-        rebase_changes($group);
+        my $upstreamed_changes = get_upstreamed_changes($pushed_changes);
+        rebase_changes($group, $upstreamed_changes);
         classify_changes_online($group);
     } elsif (!$quiet) {
         classify_changes_offline($group);

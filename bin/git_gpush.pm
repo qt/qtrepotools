@@ -1221,6 +1221,42 @@ sub analyze_local_branch($)
     return 1;
 }
 
+##### ... and also for upstream commits.
+
+# The requirements are quite different than for local commits:
+# - we need only the Change-Id as meta data
+# - we can just discard Changes without Id
+# - we don't want to pollute the %commit_by_id namespace, as doing that
+#   would violate the assumption that upstream commits are not visited
+
+use constant _GIT_UPSTREAM_LOG_ARGS => ('-z', '--pretty=%H%x00%B');
+
+sub visit_upstream_commits($$)
+{
+    my ($tips, $bases) = @_;
+
+    my $base;
+    if (@$bases == 1) {
+        $base = $$bases[0];
+    } else {
+        # If we have multiple bases, we need to find the oldest one.
+        $base = read_cmd_line(0, 'git', 'merge-base', '--octopus', @$bases);
+    }
+
+    my %changeids;
+    my $log = open_process(USE_STDIN | USE_STDOUT | FWD_STDERR,
+                           'git', 'log', _GIT_UPSTREAM_LOG_ARGS, @$tips, "^$base");
+    while (read_fields($log, my ($commit, $message))) {
+        my @ids = ($message =~ /^Change-Id: (.+)$/mg);
+        $changeids{$ids[-1]} = 1 if (@ids);
+        # We don't print debug messages here, as this would completely
+        # flood the log.
+    }
+    close_process($log);
+    print "Found ".int(keys %changeids)." Changes.\n" if ($debug);
+    return \%changeids;
+}
+
 #####################
 # change resolution #
 #####################
