@@ -522,9 +522,9 @@ while (<DIFF>) {
             if ($tsv_check) {
                 styleFail("Mixing spaces with TABs") if (/^ +\t|\t +/);
             } else {
+                styleFail("Trailing whitespace") if (s/[ \t]+\r?\n$//);
                 styleFail("Space indent followed by a TAB character") if (/^ +\t/);
                 styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
-                styleFail("Trailing whitespace") if (/[ \t]\r?\n$/);
                 if ($tabs_check) {
                     styleFail("Leading tabs") if (/^\t+/);
                     if ($ctlkw_check) {
