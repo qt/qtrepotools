@@ -572,7 +572,7 @@ while (<DIFF>) {
                     complain("Changing this file is risky. Please add $watch_people{$key} as reviewer(s).", "", -1);
                 }
             }
-            my $foreign = ($file =~ /\/3rdparty\//);
+            my $foreign = ($file =~ /(^|\/)3rdparty\//);
             $new_file = 0;
             $maybe_bin = 0;
             $is_special = 0;
