@@ -25,6 +25,7 @@ BEGIN {
 }
 use git_gpush;
 
+use List::Util qw(first);
 use JSON;
 
 # Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
@@ -70,6 +71,16 @@ Description:
     rebase, to push out the amended commits instantly.
 
 Options:
+    -m, --minimal
+        Try to avoid creating new PatchSets for unmodified Changes even
+        if they are on top of modified Changes. This avoids unnecessarily
+        invalidating reviews, at the cost of slower pushes and the Changes
+        having dependencies marked as "Not current" in the relation chain.
+        This is the default, unless configured otherwise via gpush.minimal.
+
+    -nm, --not-minimal
+        Push the entire series, including trailing unmodified Changes.
+
     -f, --force
         Push despite newer PatchSets being on Gerrit.
 
@@ -142,6 +153,10 @@ Configuration:
         to map some IRC nicks via git configuration; see below for an
         alternative.
 
+    minimal
+        Whether to use minimal push mode by default.
+        Defaults to true if not configured.
+
     remote
         The default git remote to use for pushing to Gerrit.
         When not configured, 'gerrit' is used if present, otherwise the
@@ -191,6 +206,7 @@ my $from_base;
 my $from;
 my $commit_count = 0;
 my $addbase;  # default set by process_config()
+my $minimal;  # default set by process_config()
 my $ref_base;
 my $ref_base_ok = 1;
 my $ref_to;
@@ -206,6 +222,7 @@ my @CCs;
 sub parse_arguments(@)
 {
     my $rebase = 0;
+    my $minimal_override = 0;
     while (scalar @_) {
         my $arg = shift @_;
 
@@ -218,6 +235,12 @@ sub parse_arguments(@)
             $verbose = 1;
         } elsif ($arg eq "-n" || $arg eq "--dry-run") {
             $dry_run = 1;
+        } elsif ($arg eq "-m" || $arg eq "--minimal") {
+            $minimal = 1;
+            $minimal_override = 1;
+        } elsif ($arg eq "-nm" || $arg eq "--not-minimal") {
+            $minimal = 0;
+            $minimal_override = 1;
         } elsif ($arg eq "-f" || $arg eq "--force") {
             $force = 1;
         } elsif ($arg eq "-r" || $arg eq "--remote") {
@@ -305,7 +328,7 @@ sub parse_arguments(@)
         fail("--list/--list-online is incompatible with --quiet/--verbose.\n")
             if ($quiet || ($verbose && !$debug));
         fail("--list/--list-online is incompatible with push-modifying options.\n")
-            if ($push_specific);
+            if ($push_specific || (!$list_online && $minimal_override));
         fail("--list is incompatible with base-modifying options.\n")
             if (defined($ref_base) && !$list_online);
     }
@@ -321,6 +344,14 @@ sub process_config()
 {
     load_config();
 
+    my $mi = git_config('gpush.minimal', 'true');
+    if ($mi eq 'true' || $mi eq 'yes') {
+        $minimal = 1;
+    } elsif ($mi eq 'false' || $mi eq 'no') {
+        $minimal = 0;
+    } else {
+        fail("Unrecognized value for gpush.minimal.\n");
+    }
     my $ab = git_config('gpush.addbase', 'maybe');
     if ($ab eq 'maybe') {
         $addbase = BASE_MAYBE;
@@ -539,6 +570,8 @@ sub scan_pushed_group($$)
     foreach my $change (@$changes) {
         my $pcommit = $$change{pushed};
         if (!defined($pcommit)) {
+            # In minimal mode, any previously pushed Change can be unmodified.
+            next if ($minimal);
             # We stop at the 1st not previously pushed commit, as subsequent
             # commits are obviously modified anyway.
             last;
@@ -818,9 +851,9 @@ sub determine_base($)
     $$group{base} = $base;
 }
 
-sub prepare_rebase($$)
+sub prepare_rebase($$$)
 {
-    my ($change, $base_id) = @_;
+    my ($change, $base_id, $try_minimal) = @_;
 
     my $old_id = $$change{pushed};
     if (!defined($old_id)) {
@@ -830,7 +863,7 @@ sub prepare_rebase($$)
     my $old_commit = $commit_by_id{$old_id};
     if (!$old_commit) {
         # Previously pushed Changes on top of fresh ones may be unvisited,
-        # as visit_pushed_changes() skips them.
+        # as visit_pushed_changes() skips them in non-minimal mode.
         print "Previously pushed, but not visited.\n" if ($debug);
         return;
     }
@@ -840,6 +873,20 @@ sub prepare_rebase($$)
         # We are picking the same Change to the same base.
         print "Previously pushed, same base SHA1.\n" if ($debug);
         return ($old_commit, $old_base_id);
+    }
+    if ($try_minimal) {
+        my $old_base = $commit_by_id{$old_base_id};
+        if ($old_base) {
+            if ($$old_base{changeid} eq $commit_by_id{$base_id}{changeid}) {
+                # The actual base changed, but we may still get lucky with
+                # applying the commit to the base of the previous push.
+                print "Previously pushed, trying old base.\n" if ($debug);
+                return ($old_commit, $old_base_id, 1);
+            }
+        }
+        # Even the logical base changed (Changes were re-ordered).
+        print "Previously pushed, but re-ordered.\n" if ($debug);
+        return;
     }
 
     # The Change had previously a different parent commit. It is
@@ -949,32 +996,122 @@ sub do_rebase_changes($)
     printf("Rebasing %d commit(s) to %s.\n", int(@$changes), format_id($base))
         if ($verbose);
 
+    # We don't attempt minimal mode when the base of the entire push
+    # changed.
+    # We could in principle try to base fragments on the old base,
+    # but then the saved base will be either a lie or the push would
+    # have multiple bases. Both would cause problems later on.
+    # FIXME: This reasoning is debatable.
+    my $try_minimal = $minimal
+            && ($base eq ((first { defined($_) } map { $$_{base} } @$changes) // ""));
+
+    my @gaps;  # Stack of fragmentation points.
+    my $holdoff = 0;  # Remaining size of rewound gap.
+    my $failed = 0;  # No final success possible any more.
     for (my $idx = 0; $idx < @$changes; ) {
         my $change = $$changes[$idx];
         my $commit = $$change{local};
         printf("Rebasing [%d] %s\n", $idx, format_commit($commit, -14)) if ($debug);
         # We attempt to re-create the exact same commits we pushed previously,
         # so we don't create new PatchSets for umodified Changes regardless of
-        # any local rebasing.
-        my ($old_commit, $old_base) = prepare_rebase($change, $base);
+        # any local rebasing. Optionally, we may even attempt that for Changes
+        # on top of modified Changes (thus fragmenting the push).
+        my ($old_commit, $old_base);
+        my ($new_base, $try_old_base) = ($base, 0);
+        if ($holdoff > 0) {
+            # When re-using a previous base fails, we rewind and try to apply
+            # the commits again. Obviously, this time we must not try old bases.
+            # This also implies that none of the recycling magic can possibly be
+            # successful, so it's all in the else branch.
+            $holdoff--;
+            print "Not trying old base.\n" if ($debug);
+        } else {
+            ($old_commit, $old_base, $try_old_base) =
+                    prepare_rebase($change, $new_base, $try_minimal && $idx);
+            $new_base = $old_base if ($try_old_base);
+        }
+        if ($failed && !$try_old_base && !@gaps) {
+            print "Already failed and not nested; skipping.\n" if ($debug);
+            $$change{freshness} = FAILED;
+            $base = $$commit{id};
+            $idx++;
+            next;
+        }
         my ($new_commit, $did, $errors) =
-                rebase_commit($commit, $base, $old_commit, $old_base, $$change{orig});
+                rebase_commit($commit, $new_base, $old_commit, $old_base, $$change{orig});
         if (!$new_commit) {
             if (!defined($errors)) {
                 set_change_error($change, 'oneline',
                                  "Rebasing merges is not supported.");
             } else {
+                if ($try_old_base) {
+                    # This was an attempt to fragment the push.
+                    # Just try again on top of the pending push.
+                    print "Failed to apply; retrying with new base.\n" if ($debug);
+                    $holdoff = 1;
+                    next;
+                }
+                if (@gaps) {
+                    # We tried to apply on top of a pending push, but that one was
+                    # fragmented itself. So rewind to the last fragmentation point
+                    # and retry without it. Of course, this causes creation of new
+                    # PatchSets for unmodified Changes.
+                    $holdoff = $idx;
+                    $idx = pop @gaps;
+                    $holdoff -= $idx;
+                    print "Failed to apply; rewinding by $holdoff.\n" if ($debug);
+                    $holdoff++;
+                    $change = $$changes[$idx - 1];
+                    $base = ($$change{final} // $$change{local})->{id};
+                    next;
+                }
+                # Failure to apply to the current base is fatal.
                 set_change_error($change, 'fixed',
                                  ",----- Failed to rebase commit ------\n"
                                  .($errors =~ s/^/| /mgr)
-                                 ."\`------------------------------------\n");
+                                 ."\`------------------------------------\n")
+                    if (!$failed);  # Otherwise it's too much noise.
             }
             $$change{freshness} = FAILED;
             $have_conflicts++;
+            if ($try_minimal) {
+                # In minimal mode we continue even after a real failure, to
+                # produce useful annotations for as many commits as possible.
+                print "Failed to apply.\n" if ($debug);
+                $failed = 1;
+                # Use the unrebased commit as the base. This is necessary for
+                # base comparison by Change-Id in prepare_rebase(). Comparison
+                # by SHA1 will fail anyway, so this is safe.
+                $base = $$commit{id};
+                $idx++;
+                next;
+            }
             last;
         }
         printf("Picked as %s (%s)\n", format_id($$new_commit{id}), $did) if ($debug);
-        %commit2diff = ();
+        if ($try_old_base) {
+            if ($new_commit != $old_commit) {
+                # The commit applied on top of the old base, but it was actually
+                # modified. It is counterproductive to fragment the push in this
+                # case, so just apply it on top of the pending push, after all.
+                print "Produced different commit; re-doing with new base.\n" if ($debug);
+                $holdoff = 1;
+                next;
+            }
+            # The commit applied on top of the old base and yielded the previously
+            # pushed commit. This means that there is no need to re-push this commit.
+            # However, a subsequent commit may have been modified, in which case it
+            # will need re-pushing. In case it applies on top of its old base as well,
+            # the push needs to be fragmented for the different bases; we call the
+            # unpushed commits in the middle a "gap". However, if the subsequent
+            # commit does not apply on top of its old base (because it has a dependency
+            # on a modification before the gap), we need to close the gap and retry.
+            # Therefore, we record the fragmentation point before continuing. Gaps can
+            # be nested, so this is a stack.
+            print "Started new gap.\n" if ($debug);
+            push @gaps, $idx;
+        }
+        %commit2diff = () if (!@gaps && !$holdoff);
         $$change{final} = $new_commit;
         $base = $$new_commit{id};
         $idx++;
@@ -1013,7 +1150,7 @@ sub classify_changes_online($)
 
     foreach my $change (@{$$group{changes}}) {
         my $commit = $$change{final};
-        last if (!$commit);  # Rebase failure
+        next if (!$commit);  # Rebase failure
         my $sha1 = $$commit{id};
         my $ginfo = $$change{gerrit};
         my $status = $ginfo && $$ginfo{status};
@@ -1145,6 +1282,9 @@ sub prepare_meta($)
 {
     my ($group) = @_;
 
+    # In principle, it would be possible to do this per fragment
+    # instead of per group, but that does not seem worth the effort.
+
     my @invite_list;
     my (%invite_rvrs, %invite_ccs);
     if (@reviewers || @CCs) {
@@ -1187,11 +1327,10 @@ sub prepare_meta($)
     $$group{topic_list} = \@topic_list;
 }
 
-sub push_changes($)
+sub push_fragment($$)
 {
-    my ($group) = @_;
+    my ($from, $group) = @_;
 
-    my $from = $$group{changes}[-1];
     my $tip = $$from{final}{id};
     my $to = $$group{branch};
     my $tpc = $$group{topic};
@@ -1228,6 +1367,25 @@ sub push_changes($)
     push @gitcmd, $remote, "$tip:refs/for/$to";
 
     run_process(FWD_OUTPUT, @gitcmd);
+}
+
+sub push_changes($)
+{
+    my ($group) = @_;
+
+    my @heads;
+    my $base = "";
+    foreach my $change (@{$$group{changes}}) {
+        my $commit = $$change{final};
+        push @heads, undef if (get_1st_parent($commit) ne $base);
+        my $freshness = $$change{freshness};
+        $heads[-1] = $change
+            if (($freshness ne UNMODIFIED) && ($freshness ne OUTDATED) && ($freshness ne MERGED));
+        $base = $$commit{id};
+    }
+    foreach my $change (@heads) {
+        push_fragment($change, $group) if ($change);
+    }
 }
 
 sub update_unpushed($)
