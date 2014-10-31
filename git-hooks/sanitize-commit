@@ -669,7 +669,6 @@ if ($mixws_check) {
 }
 
 if ($gerrit_rest) {
-    use JSON;
     my %gerrit_review;
     my @cover_texts;
     foreach my $fn (sort keys %complaints) {
@@ -697,7 +696,8 @@ if ($gerrit_rest) {
         push @cover_texts, "See http://qt-project.org/wiki/Early-Warning-System for explanations.";
         $gerrit_review{message} = join "\n\n", @cover_texts;
     }
-    print encode_json(\%gerrit_review)."\n";
+    require JSON;
+    print JSON::encode_json(\%gerrit_review)."\n";
 } elsif (%complaints) {
     if (!$gerrit) {
         $summary =~ s/^(.{50}).{5,}$/$1\[...]/;
