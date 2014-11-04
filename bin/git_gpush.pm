@@ -1224,6 +1224,7 @@ sub analyze_local_branch($)
         $$change{local} = $commit;
         $$change{index} = $idx++;
         $$change{parent} = $prev;
+        $$prev{child} = $change if ($prev);
         $prev = $change;
     }
 
@@ -1398,6 +1399,7 @@ sub do_determine_series($)
     print "Deducing series from $$change{id}\n" if ($debug);
     my (@prospects, @changes);
     my $group_key;
+    my $rchange = $change;
     while (1) {
         my $gid = $$change{grp};
         if (!defined($gid)) {
@@ -1432,7 +1434,33 @@ sub do_determine_series($)
         $change = $$change{parent};
         last if (!$change);
     }
+    # We also do reverse traversal, so one can re-order the series including
+    # the last Change, but continue to use the same push command from history.
+    # But we don't reverse-traverse if the specified Change is loose (and we're
+    # not extending), based on the assumption that it was meant to be the tip
+    # - otherwise, the semantics get really unintuitive.
     return (\@prospects, undef) if (!defined($group_key));
+    my @rprospects;
+    while (1) {
+        $rchange = $$rchange{child};
+        last if (!defined($rchange));
+        my $gid = $$rchange{grp};
+        if (!defined($gid)) {
+            # We don't automatically capture loose Changes on top of the series,
+            # again to keep the semantics sane.
+            print "Prospectively capturing loose $$rchange{id} (reverse)\n" if ($debug);
+            push @rprospects, $rchange;
+        } else {
+            if ($gid != $group_key) {
+                print "Breaking off at foreign bound $$rchange{id} (reverse)\n" if ($debug);
+                last;
+            }
+            print "Adding bound $$rchange{id} and ".int(@rprospects)." prospect(s) (reverse)\n"
+                if ($debug);
+            push @changes, @rprospects, $rchange;
+            @rprospects = ();
+        }
+    }
     return (\@changes, $group_key);
 }
 

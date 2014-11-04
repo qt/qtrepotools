@@ -68,9 +68,10 @@ Description:
     If 'from' is not specified, 'HEAD' is used.
 
     When pushing a series for the first time, the exact range of commits
-    needs to be specified. Subsequent pushes of the same series need only
-    the tip. Loose Changes in the middle of the series will be automatically
-    captured by it.
+    needs to be specified. For subsequent pushes of the same series, it is
+    sufficient to specify any commit which is part of the series. Loose
+    Changes in the middle of the series will be automatically captured
+    by it.
     It is possible to regroup series any time by specifying new exact
     ranges.
 
@@ -641,7 +642,9 @@ sub initialize_get_changes()
         # performance impact of that should be negligible. A corner-case
         # benefit of this is a better error message when 1) the range base
         # is specified by change-id, 2) it is invalid by being a descendant
-        # of the tip, and 3) the tip is NOT specified by change-id.
+        # of the tip, and 3) the tip is NOT specified by change-id. More
+        # importantly, reverse traversal in do_determine_series() also
+        # needs the full range.
         analyze_local_branch($local_tip // ($from =~ s/[~^].*$//r)) or
             fail("No local Changes (from $from).\n");
     }

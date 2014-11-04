@@ -59,7 +59,7 @@ Description:
     only a suffix is specified, it is understood to be relative to 'HEAD'.
 
     Every Change specification denotes a range, either explicitly when
-    written as <base>..<tip> or <tip>:<count>, or implicitly as the tip
+    written as <base>..<tip> or <tip>:<count>, or implicitly as a part
     of a series (as determined by its previous push). An empty <tip>
     means 'HEAD'. Similarly, an empty <base> means the merge base with
     the upstream branch; this also works in the parent specification.
