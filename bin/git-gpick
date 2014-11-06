@@ -156,12 +156,12 @@ Examples:
         Gerrit.
 
     git gpick +I21f8ef385d1793757149dfa5cc69e4e907cb1c04
-        Add a Change from Gerrit on top of the local branch.
+        Add a series from Gerrit on top of the local branch.
 
     git gpick +Idc2d0ac4f7d95a5f3bad24e82114e23ada79a542{yesterday}
-        The same, using the most recent PatchSet as of one day ago.
+        The same, using the most recent PatchSets as of one day ago.
 
-    git gpick /HEAD \@ ~1:2\@ +I1ad95db7c99018e92d2b2556e4789951b51b2fff
+    git gpick /HEAD \@ ~1:2\@ +I1ad95db7c99018e92d2b2556e4789951b51b2fff:1
         Drop the top commit, move the next two commits to the start of the
         local branch and replace them with the latest PatchSets, and add
         another Change right on top of them. The other commits in the local
@@ -616,7 +616,7 @@ sub map_remote_change($$$$$)
             !defined($br) && defined($upstream_branch) && ($$match{branch} ne $upstream_branch);
     $$match{pick_idx} = select_patchset($match, $$spec{stamp});
     push @$fetches, $match;
-    return (MAP_SUCCESS, { match => $match });
+    return (MAP_SUCCESS, { id => $changeid, match => $match });
 }
 
 # Print error message about failure to resolve a source specification,
@@ -678,12 +678,20 @@ sub map_insertion_spec($$$)
     # directly from Gerrit, and thus complete. Similarly,
     # rev-spec suffixes like ~2 are not supported, as we expect
     # the user to do any necessary traversal on Gerrit anyway.
-    my $tip = $$spec{tip};
+    my ($tip, $base) = ($$spec{tip}, $$spec{base});
     my $gis = $gerrit_infos_by_id{$tip};
     if (!$gis) {
         werr("Change $tip was not found on '$remote'.\n");
         $$fails = 1;
         return;
+    }
+    if (defined($base)) {
+        my $bgis = $gerrit_infos_by_id{$base};
+        if (!$bgis) {
+            werr("Change $base was not found on '$remote'.\n");
+            $$fails = 1;
+            return;
+        }
     }
     my ($ret, $rslt) = map_remote_change($tip, undef, $gis, $spec, $fetches);
     if ($ret != MAP_SUCCESS) {
@@ -691,9 +699,7 @@ sub map_insertion_spec($$$)
         $$fails = 1;
         return;
     }
-    my $change = change_for_id($tip, CREATE);
-    $$change{gerrit} = $$rslt{match};
-    $$spec{new_range} = [ $change ];
+    $$spec{tip_result} = $$rslt{match};
 }
 
 sub map_update_spec($$$)
@@ -736,6 +742,20 @@ sub map_update_spec($$$)
     }
 }
 
+# Map queried SHA1s to the corresponding remote Change objects.
+sub map_queries($$)
+{
+    my ($queries, $fetches) = @_;
+
+    foreach my $sha1 (keys %$queries) {
+        my $ginfo = $gerrit_info_by_sha1{$sha1};
+        if ($ginfo) {
+            $$ginfo{pick_idx} = select_patchset($ginfo, $$queries{$sha1});
+            $$fetches{$$ginfo{key}} = $ginfo;
+        }
+    }
+}
+
 sub add_patchset($$)
 {
     my ($ginfo, $idxes) = @_;
@@ -749,9 +769,9 @@ sub add_patchset($$)
 
 # Fetch the latest PatchSets for the specified Changes.
 # We don't re-fetch PatchSets which we already have.
-sub fetch_patchsets($$)
+sub fetch_patchsets($$;$)
 {
-    my ($ginfos, $visits) = @_;
+    my ($ginfos, $visits, $realm) = @_;
 
     my @refs;
     foreach my $ginfo (@$ginfos) {
@@ -761,7 +781,12 @@ sub fetch_patchsets($$)
         foreach my $idx (keys %idxes) {
             my $rev = $$revs[$idx];
             my ($rev_id, $rev_ps) = ($$rev{id}, $$rev{ps});
-            if (defined($$ginfo{fetched}{$rev_ps})) {
+            if ($commit_by_id{$rev_id}) {
+                # When we are fetching the dependencies of Changes we already fetched,
+                # it is quite likely that we already have the corresponding commits.
+                print "Already have PatchSet $rev_ps for $$ginfo{id} (aliasing).\n" if ($debug);
+                $$ginfo{fetched}{$rev_ps} = $rev_id;
+            } elsif (defined($$ginfo{fetched}{$rev_ps})) {
                 print "Already have PatchSet $rev_ps for $$ginfo{id}.\n" if ($debug);
                 $$visits{$rev_id} = 1;
             } else {
@@ -771,20 +796,26 @@ sub fetch_patchsets($$)
         }
     }
     if (@refs) {
-        # We need to fetch the current upstream to be able to exclude it.
-        # See visit_local_commits() for explanation for fetching all branches.
-        push @refs, "+refs/heads/*:refs/remotes/$remote/*";
-        print "Fetching PatchSets ...\n" if (!$quiet);
+        state $fetched_upstream;
+        if (!$fetched_upstream) {
+            # We need to fetch the current upstream to be able to exclude it.
+            # See visit_local_commits() for explanation for fetching all branches.
+            push @refs, "+refs/heads/*:refs/remotes/$remote/*";
+        }
+        print "Fetching ".($realm // "")."PatchSets ...\n" if (!$quiet);
         my @gitcmd = ("git", "fetch");
         # The git-fetch output is quite noisy and unhelpful here, unless debugging.
         push @gitcmd, '-q' if (!$debug);
         push @gitcmd, $remote, @refs;
         run_process(FWD_OUTPUT, @gitcmd);
-        print "Re-enumerating branches from Gerrit remote ...\n" if ($debug);
-        load_refs("refs/remotes/$remote/");
-        update_excludes();
+        if (!$fetched_upstream) {
+            $fetched_upstream = 1;
+            print "Re-enumerating upstream branches ...\n" if ($debug);
+            load_refs("refs/remotes/$remote/");
+            update_excludes();
+        }
     } else {
-        print "No PatchSets need fetching.\n" if ($debug);
+        print "No ".($realm // "")."PatchSets need fetching.\n" if ($debug);
     }
 }
 
@@ -879,7 +910,8 @@ sub analyze_patchsets($)
         next if ($$ginfo{pick_idx} != $#$revs);
 
         # Gerrit creates a new PatchSet when cherry-picking into the target
-        # branch. Obviously, this commit is excluded by ^@{upstream}.
+        # branch. Obviously, this commit is excluded by ^@{upstream}. It also
+        # has the wrong parent, making it unsuitable for series traversal.
         my $rev_id = $$revs[-1]{id};
 
         die("Change $$ginfo{key} is already merged, but not excluded by upstream?!\n")
@@ -902,6 +934,126 @@ sub analyze_patchsets($)
     }
 }
 
+sub assemble_series($$$$@)
+{
+    my ($changeid, $sha1, $seen, $callback, @args) = @_;
+
+    my $commit = $commit_by_id{$sha1};
+    if (!$commit) {
+        print "$changeid ($sha1) got upstreamed.\n" if ($debug);
+        return [];
+    }
+    my @series;
+    while (1) {
+        if ($seen) {
+            if (defined($$seen{$sha1})) {
+                print "Already seen $changeid ($sha1).\n"
+                    if ($debug);
+                last;
+            }
+            $$seen{$sha1} = 1;
+        }
+
+        print "Adding $changeid ($sha1).\n" if ($debug);
+        unshift @series, $commit;
+
+        $sha1 = get_1st_parent($commit);
+        if (!($commit = $commit_by_id{$sha1})) {
+            print "Hit upstream.\n" if ($debug);
+            last;
+        }
+        my ($nsha1, $stop) = $callback->($commit, @args);
+        if ($stop) {
+            $commit = undef;
+            last;
+        }
+        $changeid = $$commit{changeid};
+        if (defined($nsha1) && ($nsha1 ne $sha1)) {
+            # The commit corresponds with an outdated PatchSet. Use the
+            # latest one instead, so we get the current dependencies.
+            print "Upgrading $changeid ($sha1 => $nsha1).\n" if ($debug);
+            $sha1 = $nsha1;
+            $commit = $commit_by_id{$sha1};
+        }
+    }
+    return (\@series, $commit);
+}
+
+sub advance_remote_series($@)
+{
+    my ($commit, $stamp, $missing, $fails) = @_;
+
+    my ($sha1, $changeid) = ($$commit{id}, $$commit{changeid});
+    my $ginfo = $gerrit_info_by_sha1{$sha1};
+    if (!$ginfo || !$$ginfo{pick_commit}) {
+        if (!$ginfo && $$commit{did_query}) {
+            werr("Deduced Change $changeid ($sha1) disappeared from '$remote';"
+                    ." breaking off series.\n");
+            return (undef, 1);
+        }
+        # We did not query/fetch the corresponding Change yet.
+        print "Missing $changeid ($sha1).\n" if ($debug);
+        $$missing{$sha1} = $stamp;
+        # We'll retry this later. Continue speculatively, to save roundtrips.
+        $$fails = 1;
+        return undef;
+    }
+    my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
+    return $$rev{id};
+}
+
+# Assemble a remote series from its tip commit. On the way record required
+# Changes that we didn't query yet, and fail the operation if there are any.
+sub assemble_remote_series($$$$$)
+{
+    my ($ginfo, $stamp, $seen, $missing, $fails) = @_;
+
+    my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
+    my $sha1 = $$rev{id};
+    my ($series, $anchor) = assemble_series(
+            $$ginfo{id}, $sha1, $seen, \&advance_remote_series,
+            $stamp, $missing, $fails);
+    return ($series, $anchor);
+}
+
+# Resolve a remote spec into a series.
+sub resolve_insertion_spec($$)
+{
+    my ($spec, $missing) = @_;
+
+    return if ($$spec{new_range});
+
+    my ($tip, $count, $base, $stamp) =
+            ($$spec{tip_result}, $$spec{count}, $$spec{base}, $$spec{stamp});
+
+    # First assemble the entire series.
+    my $fails = 0;
+    my ($series, undef) = assemble_remote_series(
+            $tip, $stamp, undef, $missing, \$fails);
+    wfail("Range $$spec{orig} is empty.\n") if (!@$series);
+    return if ($fails);
+
+    # Then take the part we actually need.
+    if (defined($count)) {
+        wfail("Range $$spec{orig} extends beyond remote branch.\n")
+            if ($count > @$series);
+        splice @$series, 0, -$count;
+    } elsif (defined($base)) {
+        my $idx = first { $$series[$_]{changeid} eq $base } 0..$#$series;
+        wfail("$base is no ancestor of $$tip{id}.\n")
+            if (!defined($idx));
+        splice @$series, 0, $idx + 1;
+    }
+
+    my @result;
+    foreach my $commit (@$series) {
+        my $change = change_for_id($$commit{changeid}, CREATE);
+        $$change{gerrit} = $gerrit_info_by_sha1{$$commit{id}};
+        push @result, $change;
+    }
+    $$spec{new_range} = \@result;
+}
+
 # Download the metadata and PatchSets referenced by the specs.
 sub complete_spec_heads($)
 {
@@ -913,10 +1065,9 @@ sub complete_spec_heads($)
     foreach my $spec (@$specs) {
         my $action = $$spec{action};
         if ($action == INSERT) {
-            my ($tip, $count, $base) = ($$spec{tip}, $$spec{count}, $$spec{base});
-            fail("Ranges are not supported in remote specifications yet.\n")
-                if (defined($count) || defined($base));
+            my ($tip, $base) = ($$spec{tip}, $$spec{base});
             $picks{$tip} = undef;
+            $picks{$base} = undef if (defined($base));
         } else {
             foreach my $change (@{$$spec{range}}) {
                 my $changeid = $$change{id};
@@ -952,6 +1103,56 @@ sub complete_spec_heads($)
     analyze_patchsets(\@fetches) if (@fetches);
 }
 
+sub complete_spec_tails($)
+{
+    my ($specs) = @_;
+
+    # Now that we have the commits for the tips of all remote specifications,
+    # we can resolve them into series as well.
+    # This is iterative, because we need to use the latest PatchSet for each
+    # Change in the series, which is not guaranteed by ancestor traversal:
+    # Suppose series 1,2,3,4. Re-order to 2,1,3,4. Re-push 2,1,3 - 4 can be
+    # omitted, as it has the same diff and the same parent Change. Traversing
+    # the ancestor commit chain of 4 would now a) get outdated PatchSets and
+    # b) produce a different order than the current PatchSets of the series.
+    while (1) {
+        print "Resolving remote commit specs ...\n" if ($debug);
+
+        # This loop tries to resolve spec objects, and records which
+        # additional Changes need to be fetched from Gerrit.
+        my %picks;
+        foreach my $spec (@$specs) {
+            my $action = $$spec{action};
+            if ($action == INSERT) {
+                resolve_insertion_spec($spec, \%picks);
+            }
+        }
+
+        # Termination always happens at some point, as cycles are
+        # impossible between the latest PatchSets.
+        last if (!%picks);
+
+        # Deduced Changes are queried by SHA1, as that is unambiguous.
+        # Don't re-query Changes which were previously queried (but not fetched).
+        my @sha1s = grep { !defined($gerrit_info_by_sha1{$_}) } keys %picks;
+        query_gerrit([ map { "commit:".$_ } @sha1s ]) if (@sha1s);
+
+        my %good_picks;
+        map_queries(\%picks, \%good_picks);
+        my @fetches = values %good_picks;
+
+        my %visits;
+        fetch_patchsets(\@fetches, \%visits, "deduced ") if (@fetches);
+
+        print "Visiting deduced fetched and pushed PatchSets ...\n" if ($debug);
+        visit_local_commits([ keys %visits ]);
+
+        $$_{did_query} = 1 foreach (grep { $_ } map { $commit_by_id{$_} } @sha1s);
+
+        analyze_patchsets(\@fetches) if (@fetches);
+    }
+}
+
 sub check_specs($)
 {
     my ($specs) = @_;
@@ -971,7 +1172,7 @@ sub check_specs($)
                 }
                 my $ospec = $$change{rspec};
                 # Intersecting another remote spec is an error.
-                wfail("Specs $$spec{orig} and $$ospec{orig} intersect.\n")
+                wfail("Specs $$spec{orig} and $$ospec{orig} intersect (change $$change{id}).\n")
                     if ($ospec);
                 $$change{rspec} = $spec;
             }
@@ -994,6 +1195,7 @@ sub prepare_specs()
     my $specs = parse_specs(\@commit_specs);
     resolve_specs($specs);
     complete_spec_heads($specs);
+    complete_spec_tails($specs);
     check_specs($specs);
     return $specs;
 }

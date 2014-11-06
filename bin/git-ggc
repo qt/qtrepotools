@@ -100,6 +100,7 @@ sub get_gerrit_config()
 }
 
 my %gerrit2change;
+my %change2gerrits;
 my %change2active;
 
 sub query_gerrit_pull($)
@@ -121,6 +122,7 @@ sub query_gerrit_pull($)
         print "$changeid is ".($active ? "" : "NOT ")."active on $branch.\n" if ($debug);
         $change2active{$changeid} ||= $active;
         $gerrit2change{$key} = $changeid;
+        push @{$change2gerrits{$changeid}}, $key;
     }
     close_process($status);
 }
@@ -157,6 +159,7 @@ sub perform_gc()
     print "Loading refs ...\n" if ($debug);
     my %zaps;  # { sequence-number => [ state-ref, ... ] }
     my %fzaps;  # { gerrit-number => [ fetched-ref, ... ] }
+    my %fsha1s;  # { gerrit-number => [ fetched-sha1, ... ] }
     my @local_refs;  # These define which Changes are still active.
     my %remote_refs;  # Used for quickly validating upstreams.
     my $branches = open_cmd_pipe(0, "git", "for-each-ref", "--format=%(objectname) %(refname)",
@@ -166,11 +169,13 @@ sub perform_gc()
             $remote_refs{$_} = 1;
         } elsif (s,^.{40} refs/heads/,,) {
             push @local_refs, $_;
-        } elsif (s,^.{40} refs/gpush/,,) {
+        } elsif (s,^(.{40}) refs/gpush/,,) {
+            my $sha1 = $1;
             if (m,^i(\d+)_.*$,) {
                 push @{$zaps{$1}}, $_;
             } elsif (m,^g(\d+)_.*$,) {
                 push @{$fzaps{$1}}, $_;
+                push @{$fsha1s{$1}}, $sha1;
             } elsif (!m,^state(-new)?$,) {
                 print "Keeping unrecognized '$_'.\n" if ($debug);
             }
@@ -241,7 +246,11 @@ sub perform_gc()
         }
     }
 
+    print "Visiting fetched PatchSets ...\n" if ($debug);
+    visit_local_commits([ map { @$_ } values %fsha1s ]);
+
     # Keep all fetched PatchSets that correspond with kept Changes.
+    my %visit_gs;
     foreach my $key (sort keys %fzaps) {
         my $changeid = $gerrit2change{$key};
         if (!defined($changeid)) {
@@ -251,7 +260,35 @@ sub perform_gc()
                 print "Keeping fetched $key ($changeid): corresponds with kept Change.\n"
                     if ($verbose);
                 delete $fzaps{$key};
+                $visit_gs{$key} = 1;
                 next;
+            }
+        }
+    }
+    # Keep all fetched PatchSets that are ancestors of other kept
+    # PatchSets, recursively.
+    my (%seen_gs, %seen_sha1s);
+    while (%visit_gs) {
+        foreach my $key (sort keys %visit_gs) {
+            delete $visit_gs{$key};
+            $seen_gs{$key} = 1;
+            foreach my $sha1 (@{$fsha1s{$key}}) {
+                while (!defined($seen_sha1s{$sha1})) {
+                    $seen_sha1s{$sha1} = 1;
+                    my $commit = $commit_by_id{$sha1};
+                    last if (!$commit);  # Hit bottom of series.
+                    my $changeid = $$commit{changeid};
+                    my $ngs = $change2gerrits{$changeid};
+                    last if (!$ngs);  # Not queried, probably hit base.
+                    foreach my $nkey (@$ngs) {
+                        next if (defined($seen_gs{$nkey}));
+                        print "Keeping fetched $nkey ($changeid): referenced transitively.\n"
+                            if ($verbose);
+                        delete $fzaps{$nkey};
+                        $visit_gs{$nkey} = 1;
+                    }
+                    $sha1 = get_1st_parent($commit);
+                }
             }
         }
     }

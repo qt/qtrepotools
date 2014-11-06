@@ -719,6 +719,22 @@ sub save_state(;$$)
         }
         push @lines, "";
     }
+    foreach my $ginfo (values %gerrit_info_by_key) {
+        my $fetched = $$ginfo{fetched};
+        next if (!defined($fetched));
+        my $_fetched = \%{$$ginfo{_fetched}};
+        for my $ky (keys %$fetched) {
+            my ($val, $oval) = ($$fetched{$ky}, $$_fetched{$ky});
+            if (!defined($val)) {
+                push @updates, "delete refs/gpush/g$$ginfo{key}_$ky\n"
+                    if (defined($oval));
+            } else {
+                push @updates, "update refs/gpush/g$$ginfo{key}_$ky $val\n"
+                    if (!defined($oval) || ($oval ne $val));
+            }
+            $$_fetched{$ky} = $val;
+        }
+    }
     update_refs($dry ? DRY_RUN : 0, \@updates);
 
     # We save the state file in a git ref as well, so the entire state
@@ -857,7 +873,9 @@ sub load_refs(@)
             $$change{'_'.$3} = $1;
         } elsif (m,^(.{40}) refs/gpush/g(\d+)_(\d+)$,) {
             my $ginfo = \%{$gerrit_info_by_key{$2}};
+            $$ginfo{key} = $2;
             $$ginfo{fetched}{$3} = $1;
+            $$ginfo{_fetched}{$3} = $1;
         }
     }
     close_process($info);
