@@ -42,6 +42,10 @@ Description:
     from Gerrit, and updates the local commits with them. Conflicting
     local modifications are reported and require an override.
 
+    Remote modifications to series structure are followed by adding,
+    dropping, and re-ordering local commits as necessary; conflicts are
+    also handled.
+
     Commits are updated in place, unless a parent to rebase them onto
     is specified. Changes with no corresponding local commit need to be
     prefixed with a plus sign, and are picked on top of HEAD by default.
@@ -56,8 +60,7 @@ Description:
     It is also possible to specify ranges, either as <base>..<tip> or as
     <tip>:<count>. An empty <tip> means 'HEAD'. Similarly, an empty <base>
     means the merge base with the upstream branch; this also works in the
-    parent specification. Note that within a range, the local order of the
-    commits will be preserved even if the series was re-ordered remotely.
+    parent specification.
 
     This program uses the most recent PatchSets which are not newer than
     the reference date, which defaults to 'now'. See the git-rev-parse
@@ -92,12 +95,20 @@ Options:
         modifications.
         Drop local commits even in case of local modifications.
 
+    -fs, --force-struct
+        Follow remote structural changes even when conflicting local changes
+        are found. Note that --force is still necessary if this would result
+        in dropping locally modified Changes.
+
     -i, --ignore
         Ignore the new PatchSets that appeared on Gerrit since the previous
         push from this clone. The local Changes will subsequently appear
         modified, and the following push will go through without overwrite
         warning. For Changes that were locally modified since the previous
         push, this option can be considered complementary to --force.
+
+    -is, --ignore-struct
+        Ignore structural changes to series on Gerrit.
 
     --author, --auth
     --message, --msg
@@ -107,7 +118,8 @@ Options:
         Note that remote modifications to the omitted parts are forgotten
         about, as if the --ignore option was supplied.
         Note also that use of --author and/or --message without --diff
-        disables all actions that modify the structure of a series.
+        disables all actions that modify the structure of a series and
+        implies --ignore-struct.
 
     -r, --remote
         Specify the remote used to determine the Gerrit server to fetch
@@ -200,7 +212,9 @@ my $upstream_branch;
 my $check = 0;
 my $merge = 0;
 my $force = 0;
+my $force_struct = 0;
 my $ignore = 0;
+my $ignore_struct = 0;
 my @commit_specs;
 
 sub parse_arguments(@)
@@ -229,8 +243,12 @@ sub parse_arguments(@)
             $merge = 1;
         } elsif ($arg eq "-f" || $arg eq "--force") {
             $force = 1;
+        } elsif ($arg eq "-fs" || $arg eq "--force-struct") {
+            $force_struct = 1;
         } elsif ($arg eq "-i" || $arg eq "--ignore") {
             $ignore = 1;
+        } elsif ($arg eq "-is" || $arg eq "--ignore-struct") {
+            $ignore_struct = 1;
         } elsif ($arg eq "--author" || $arg eq "--auth") {
             $pick_parts |= AUTHOR_PART;
         } elsif ($arg eq "--message" || $arg eq "--msg") {
@@ -251,6 +269,9 @@ sub parse_arguments(@)
         if ($quiet && $verbose);
 
     if ($check) {
+        # Note that --{force,ignore}-struct are intentionally omitted,
+        # because one may want to preview the effects of (not) following
+        # structural changes.
         fail("--check and --merge/--force/--ignore are mutually exclusive.\n")
             if ($merge || $force || $ignore);
     }
@@ -258,7 +279,18 @@ sub parse_arguments(@)
     fail("--merge/--force and --ignore are mutually exclusive.\n")
         if (($merge || $force) && $ignore);
 
+    fail("--force-struct and --ignore-struct are mutually exclusive.\n")
+        if ($force_struct && $ignore_struct);
+
     $pick_parts = ALL_PARTS if (!$pick_parts);
+
+    # We don't follow structural changes to series when omitting
+    # diffs, as that is likely to cause inconsistencies.
+    if (!($pick_parts & DIFF_PART)) {
+        fail("--force-struct is mutually exclusive with omitting diffs.\n")
+            if ($force_struct);
+        $ignore_struct = 1
+    }
 }
 
 sub determine_local_branch()
@@ -503,6 +535,11 @@ sub resolve_specs($)
             $$change{lspec} = $spec;
         }
         $$spec{range} = $range;
+        if ($action == DELETE) {
+            $$spec{new_range} = [];
+        } elsif ($ignore_struct) {
+            $$spec{new_range} = $range;
+        }
     }
 }
 
@@ -743,24 +780,25 @@ sub map_update_spec($$$)
 }
 
 # Map queried SHA1s to the corresponding remote Change objects.
-sub map_queries($$)
+sub map_queries($$$)
 {
-    my ($queries, $fetches) = @_;
+    my ($queries, $field, $fetches) = @_;
 
     foreach my $sha1 (keys %$queries) {
         my $ginfo = $gerrit_info_by_sha1{$sha1};
         if ($ginfo) {
-            $$ginfo{pick_idx} = select_patchset($ginfo, $$queries{$sha1});
+            $$ginfo{$field} = select_patchset($ginfo, $$queries{$sha1});
             $$fetches{$$ginfo{key}} = $ginfo;
         }
     }
 }
 
-sub add_patchset($$)
+sub add_patchset($$$)
 {
-    my ($ginfo, $idxes) = @_;
+    my ($ginfo, $cat, $idxes) = @_;
 
-    my $idx = $$ginfo{pick_idx};
+    my $idx = $$ginfo{"${cat}_idx"};
+    return if (!defined($idx) || defined($$ginfo{"${cat}_commit"}));
     $$idxes{$idx} = 1;
     my $revs = $$ginfo{revs};
     $$idxes{$idx - 1} = 1
@@ -776,7 +814,8 @@ sub fetch_patchsets($$;$)
     my @refs;
     foreach my $ginfo (@$ginfos) {
         my %idxes;
-        add_patchset($ginfo, \%idxes);
+        add_patchset($ginfo, 'pick', \%idxes);
+        add_patchset($ginfo, 'push', \%idxes);
         my $revs = $$ginfo{revs};
         foreach my $idx (keys %idxes) {
             my $rev = $$revs[$idx];
@@ -880,20 +919,21 @@ sub drop_merged_patchsets($$)
     }
 }
 
-sub analyze_patchset($)
+sub analyze_patchset($$)
 {
-    my ($ginfo) = @_;
+    my ($ginfo, $cat) = @_;
 
-    my $idx = $$ginfo{pick_idx};
+    my $idx = $$ginfo{"${cat}_idx"};
+    return if (!defined($idx) || defined($$ginfo{"${cat}_commit"}));
     my $revs = $$ginfo{revs};
-    $$ginfo{pick_idx} = --$idx
+    $$ginfo{"${cat}_idx"} = --$idx
         if ($idx == @$revs);
     my $rev = $$revs[$idx];
     my $rev_id = $$rev{id};
     my $commit = $commit_by_id{$rev_id};
     wfail("PatchSet $$rev{ps} of Change $$ginfo{key} is apparently upstream?!\n")
         if (!$commit);
-    $$ginfo{pick_commit} = $commit;
+    $$ginfo{"${cat}_commit"} = $commit;
 }
 
 # Extract additional information from the fetched PatchSets.
@@ -907,7 +947,7 @@ sub analyze_patchsets($)
         next if ($$ginfo{status} ne 'MERGED');
 
         my $revs = $$ginfo{revs};
-        next if ($$ginfo{pick_idx} != $#$revs);
+        next if (($$ginfo{pick_idx} // -1) != $#$revs && ($$ginfo{push_idx} // -1) != $#$revs);
 
         # Gerrit creates a new PatchSet when cherry-picking into the target
         # branch. Obviously, this commit is excluded by ^@{upstream}. It also
@@ -930,7 +970,21 @@ sub analyze_patchsets($)
         with_local_git_index(\&drop_merged_patchsets, $ginfos, \%cmt_by_id);
     }
     foreach my $ginfo (@$ginfos) {
-        analyze_patchset($ginfo);
+        analyze_patchset($ginfo, 'pick');
+        analyze_patchset($ginfo, 'push');
+    }
+}
+
+# Attach a linear series (segment) to an anchor object within
+# an object map. This potentially builds a tree.
+sub attach_series($$$)
+{
+    my ($series, $anchor, $result) = @_;
+
+    my $prev = $anchor ? $$anchor{id} : "base";
+    foreach my $commit (@$series) {
+        push @{$$result{$prev}}, $commit;
+        $prev = $$commit{id};
     }
 }
 
@@ -979,6 +1033,99 @@ sub assemble_series($$$$@)
     return (\@series, $commit);
 }
 
+sub advance_pushed_series($@)
+{
+    my ($commit, $stamp, $pmap, $missing, $fails) = @_;
+
+    my ($sha1, $changeid) = ($$commit{id}, $$commit{changeid});
+    my $ginfo = $gerrit_info_by_sha1{$sha1};
+
+    # If the Change is in the initial set, the commit is given.
+    my $nsha1 = $$pmap{$changeid};
+    if (defined($nsha1)) {
+        #print "Deduced $changeid ($sha1) is also initial.\n" if ($debug);
+        if (!$ginfo) {
+            # The outer loop will print a proper error message.
+            print "Deduced+initial Change $changeid ($sha1) disappeared.\n" if ($debug);
+            return (undef, 1);
+        }
+        my $rev = $$ginfo{rev_by_id}{$nsha1};
+        if (!$rev) {
+            # The outer loop will print a proper error message.
+            print "PatchSet $nsha1 disappeared from deduced+initial $changeid.\n" if ($debug);
+            return (undef, 1);
+        }
+        # The ancestors must be younger. See below.
+        $$stamp = $$rev{ts};
+        return $nsha1;
+    }
+    #print "$changeid ($sha1) is only deduced.\n" if ($debug);
+
+    # Otherwise we have to guess the commit by timestamp.
+    # We assume that the newest PatchSet which is not newer than
+    # the child is the correct one. An actual push might have been
+    # done on top of older PatchSets, but we assume that this would
+    # have been done only if the grandparent was still correct, and
+    # that is all we care about here.
+    if (!$ginfo || !$$ginfo{push_commit}) {
+        if (!$ginfo && $$commit{did_query}) {
+            werr("Deduced Change $changeid ($sha1) disappeared from '$remote';"
+                    ." breaking off pushed series.\n");
+            return (undef, 1);
+        }
+        # We did not query/fetch the corresponding Change yet.
+        print "Missing $changeid ($sha1).\n" if ($debug);
+        $$missing{$sha1} = $stamp;
+        # We'll retry this later. Continue speculatively, to save roundtrips.
+        $$fails = 1;
+        return undef;
+    }
+    my $rev = $$ginfo{revs}[$$ginfo{push_idx}];
+    return $$rev{id};
+}
+
+# To a given set of Changes, add any missing Changes which were part of
+# the previous push from this repository of the Changes in the set.
+# This essentially builds a remote series, but constrained by the commits
+# (and their timestamps) that were pushed (or picked).
+sub complete_pushed_series($$)
+{
+    my ($spec, $missing) = @_;
+
+    return if ($$spec{pushed_changes});
+
+    print "Completing $$spec{orig}/pushed ...\n" if ($debug);
+    my (%result, %seen, $fails);
+    foreach my $change (reverse @{$$spec{range}}) {
+        my ($sha1, $changeid) = ($$change{pushed}, $$change{id});
+        if (!defined($sha1)) {
+            # This would happen when completing a local series containing
+            # Changes which were never pushed from this repo.
+            print "Initial $changeid not pushed.\n" if ($debug);
+            next;
+        }
+        my $ginfo = $gerrit_info_by_sha1{$sha1};
+        if (!$ginfo) {
+            werr("Initial Change $changeid ($sha1) disappeared from '$remote';"
+                    ." breaking off pushed series.\n");
+            next;
+        }
+        my $rev = $$ginfo{rev_by_id}{$sha1};
+        if (!$rev) {
+            # This can happen if the ginfo was queried by another SHA1 from traversal.
+            werr("PatchSet $sha1 disappeared from Change $changeid on '$remote';"
+                    ." breaking off pushed series.\n");
+            next;
+        }
+        my $stamp = $$rev{ts};
+        my ($series, $anchor) = assemble_series(
+                $changeid, $sha1, \%seen, \&advance_pushed_series,
+                \$stamp, $$spec{pmap}, $missing, \$fails);
+        attach_series($series, $anchor, \%result) if (!$fails);
+    }
+    $$spec{pushed_changes} = \%result if (!$fails);
+}
+
 sub advance_remote_series($@)
 {
     my ($commit, $stamp, $missing, $fails) = @_;
@@ -1016,12 +1163,37 @@ sub assemble_remote_series($$$$$)
     return ($series, $anchor);
 }
 
+# To a given set of Changes, add any missing Changes which were part of
+# the latest push of the Changes in the set.
+sub complete_remote_series($$)
+{
+    my ($spec, $missing) = @_;
+
+    return if ($$spec{changes});
+
+    print "Completing $$spec{orig}/remote ...\n" if ($debug);
+    my (%result, %seen, $fails);
+    foreach my $change (reverse @{$$spec{range}}) {
+        my $ginfo = $$change{gerrit};
+        if (!$ginfo) {
+            # This would happen when completing a local series containing
+            # Changes which were never pushed from anywhere.
+            print "Initial $$change{id} not on Gerrit.\n" if ($debug);
+            next;
+        }
+        my ($series, $anchor) = assemble_remote_series(
+                $ginfo, $$spec{stamp}, \%seen, $missing, \$fails);
+        attach_series($series, $anchor, \%result) if (!$fails);
+    }
+    $$spec{changes} = \%result if (!$fails);
+}
+
 # Resolve a remote spec into a series.
 sub resolve_insertion_spec($$)
 {
     my ($spec, $missing) = @_;
 
-    return if ($$spec{new_range});
+    return if ($$spec{changes});
 
     my ($tip, $count, $base, $stamp) =
             ($$spec{tip_result}, $$spec{count}, $$spec{base}, $$spec{stamp});
@@ -1045,13 +1217,140 @@ sub resolve_insertion_spec($$)
         splice @$series, 0, $idx + 1;
     }
 
+    my %result;
+    attach_series($series, undef, \%result);
+    $$spec{changes} = \%result;
+}
+
+sub changify_remote_series($)
+{
+    my ($series) = @_;
+
     my @result;
     foreach my $commit (@$series) {
         my $change = change_for_id($$commit{changeid}, CREATE);
         $$change{gerrit} = $gerrit_info_by_sha1{$$commit{id}};
         push @result, $change;
     }
-    $$spec{new_range} = \@result;
+    return \@result;
+}
+
+sub do_sort_series($$$$$);
+
+sub do_sort_series($$$$$)
+{
+    my ($name, $commits, $parentid, $exclude, $order) = @_;
+
+    my @ranges;
+    foreach my $commit (@{$$commits{$parentid} // []}) {
+        my $rng = do_sort_series($name, $commits, $$commit{id}, $exclude, $order);
+        my $changeid = $$commit{changeid};
+        if (!defined($$exclude{$changeid})) {
+            unshift @$rng, $commit;
+        } else {
+            print "Dropping $changeid ($$exclude{$changeid})\n" if ($debug);
+        }
+        push @ranges, $rng if (@$rng);
+    }
+    return [] if (!@ranges);
+    return $ranges[0] if (@ranges == 1);
+
+    # Whoops - we got a tree instead of a single branch. Starting with a
+    # supposed series 1,2,3,4, this could happen for example like this:
+    # - Re-order it to 2,1,3,4. If just 2,1 is re-pushed, 2 would now have
+    #   both 1 and 3 as children.
+    # - Split it by rebasing 3 to base, re-push it. Now base has both 1 and
+    #   3 as children.
+    # - Drop 3 and re-push. Now 2 has both 3 and 4 as children.
+    # We could linearize these arbitrarily, as the order of these sub-series
+    # is obviously irrelevant. However, re-ordering local Changes for no good
+    # reason would be confusing. The solution is hinting linearization with
+    # the local order.
+    my @fails = map { $$_[0] } @ranges;
+    printf("Got multiple children at $parentid: %s\n", join(" ", map { $$_{changeid} } @fails))
+        if ($debug);
+    my @result;
+    while (1) {
+        # First we sort the ranges according to the local order of their first
+        # elements. Changes which are locally absent get the index -1, which
+        # sorts before others.
+        my $best = (sort {
+            ($$order{$$a[0]{changeid}} // -1) <=> ($$order{$$b[0]{changeid}} // -1)
+        } @ranges)[0];
+        if (!defined($$order{$$best[0]{changeid}})) {
+            print "$$best[0]{changeid} is not locally present; giving up sorting.\n"
+                if ($debug);
+            last;
+        }
+        # Then move the chosen Change to our result series.
+        push @result, shift @$best;
+        if (!@$best) {
+            # The range ended up empty, so drop it.
+            @ranges = grep { $_ != $best } @ranges;
+            if (@ranges == 1) {
+                # We're left with just one range, so take it in as-is.
+                push @result, @{$ranges[0]};
+                return \@result;
+            }
+        }
+    }
+    fail(sprintf("Series %s is inconsistent - %s has multiple children:\n%s",
+                 $name, substr($parentid, 0, 10), format_commits(\@fails)));
+}
+
+# Turn a set of Changes into a series via topological sorting.
+# The series may be also filtered during sorting. Doing this
+# earlier would distort the parent-child relationships.
+sub sort_series($$$)
+{
+    my ($name, $range, $commits) = @_;
+
+    # For the given set of commits, collect the IDs of Changes which
+    # should not be included into the final series after all.
+    my %exclude;
+    my %selected = map { $$_{id} => 1 } @$range;
+    foreach my $commit (map { @$_ } values %$commits) {
+        my $changeid = $$commit{changeid};
+
+        if (%selected && !defined($selected{$changeid})) {
+            my $change = $$commit{change};
+            if ($change && $$change{local}) {
+                # Drop locally present Changes which are not part of the
+                # (possibly artificially limited) series. This causes partial
+                # updates being matched with only the corresponding fragments
+                # of the remote series.
+                $exclude{$changeid} = 'excluded';
+            }
+        }
+    }
+
+    my %order = map { $$_{id} => $$_{index} } @$range;
+
+    print "Ordering $name ...\n" if ($debug);
+    my $result = do_sort_series($name, $commits, "base", \%exclude, \%order);
+    printf("Result:\n  %s\n", join("\n  ", map { $$_{changeid} } @$result))
+        if ($debug);
+    return $result;
+}
+
+sub finalize_pushed_series($$$)
+{
+    my ($name, $range, $commits) = @_;
+
+    # Note that unlike for remote series, it is just fine if the series
+    # turns out to be empty. The most likely reason for that is that
+    # %$commits was empty to start with (i.e., the series was never
+    # gpush'd from this repo).
+    return sort_series($name, $range, $commits);
+}
+
+sub finalize_remote_series($$$)
+{
+    my ($name, $range, $commits) = @_;
+
+    my $sorted = sort_series($name, $range, $commits);
+    fail("Series $name is empty after filtering.\n") if (!@$sorted && !$check);
+    return changify_remote_series($sorted);
 }
 
 # Download the metadata and PatchSets referenced by the specs.
@@ -1061,7 +1360,7 @@ sub complete_spec_heads($)
 
     print "Completing commit specs ...\n" if ($debug);
 
-    my (%picks, %visits);
+    my (%picks, @queried, %visits);
     foreach my $spec (@$specs) {
         my $action = $$spec{action};
         if ($action == INSERT) {
@@ -1077,6 +1376,8 @@ sub complete_spec_heads($)
                 my $pushed = $$change{pushed};
                 if (defined($pushed)) {
                     $visits{$pushed} = undef;
+                    # To be able to set {did_query} once we have the commits.
+                    push @queried, $pushed;
                 }
             }
         }
@@ -1100,12 +1401,32 @@ sub complete_spec_heads($)
     print "Visiting fetched and pushed PatchSets ...\n" if ($debug);
     visit_local_commits([ keys %visits ]);
 
+    # We queried the pushed commits implicitly (by Change-Id),
+    # so mark them as such.
+    $$_{did_query} = 1 foreach (grep { $_ } map { $commit_by_id{$_} } @queried);
+
     analyze_patchsets(\@fetches) if (@fetches);
 }
 
 sub complete_spec_tails($)
 {
     my ($specs) = @_;
+
+    foreach my $spec (@$specs) {
+        next if ($$spec{action} != UPDATE);
+
+        my %pmap;
+        foreach my $change (@{$$spec{range}}) {
+            my $changeid = $$change{id};
+            next if ($ignore_struct);
+            next if ($force_struct);
+            my $pushed = $$change{pushed};
+            $pmap{$changeid} = $pushed if (defined($pushed));
+        }
+        next if ($ignore_struct);
+        next if ($force_struct);
+        $$spec{pmap} = \%pmap;
+    }
 
     # Now that we have the commits for the tips of all remote specifications,
     # we can resolve them into series as well.
@@ -1120,25 +1441,47 @@ sub complete_spec_tails($)
 
         # This loop tries to resolve spec objects, and records which
         # additional Changes need to be fetched from Gerrit.
-        my %picks;
+        # It also collects remote series corresponding with local ones.
+        my (%picks, %pushes);
         foreach my $spec (@$specs) {
             my $action = $$spec{action};
             if ($action == INSERT) {
                 resolve_insertion_spec($spec, \%picks);
+            } elsif ($action == UPDATE) {
+                next if ($ignore_struct);
+
+                # This is a local spec. We need to obtain the corresponding remote
+                # series. It might have a different structure including a different
+                # tip, so just try to collect all Changes belonging to it and sort
+                # them later. We will still miss Changes which were added at the
+                # end - the only fix for that would be making use of Gerrit's reverse
+                # dependencies. The workaround is specifying these Changes manually.
+                complete_remote_series($spec, \%picks);
+
+                next if ($force_struct);
+
+                # Prepare reconstruction of the series' last push from this repo.
+                complete_pushed_series($spec, \%pushes);
             }
         }
 
         # Termination always happens at some point, as cycles are
         # impossible between the latest PatchSets.
-        last if (!%picks);
+        last if (!%picks && !%pushes);
 
         # Deduced Changes are queried by SHA1, as that is unambiguous.
         # Don't re-query Changes which were previously queried (but not fetched).
-        my @sha1s = grep { !defined($gerrit_info_by_sha1{$_}) } keys %picks;
+        my %queries =
+                map { $_ => 1 }
+                grep { !defined($gerrit_info_by_sha1{$_}) }
+                (keys %picks, keys %pushes);
+
+        my @sha1s = keys %queries;
         query_gerrit([ map { "commit:".$_ } @sha1s ]) if (@sha1s);
 
         my %good_picks;
-        map_queries(\%picks, \%good_picks);
+        map_queries(\%picks, 'pick_idx', \%good_picks);
+        map_queries(\%pushes, 'push_idx', \%good_picks);
         my @fetches = values %good_picks;
 
         my %visits;
@@ -1156,6 +1499,14 @@ sub complete_spec_tails($)
 sub check_specs($)
 {
     my ($specs) = @_;
+
+    # We collected the remote Changes belonging to a series. Now sort
+    # them according to the dependencies of their current PatchSets.
+    foreach my $spec (@$specs) {
+        next if ($$spec{action} != INSERT);
+
+        $$spec{new_range} = finalize_remote_series($$spec{orig}, [], $$spec{changes});
+    }
 
     print "Checking remote commit specs for collisions ...\n" if ($debug);
     foreach my $spec (@$specs) {
@@ -1190,6 +1541,90 @@ sub check_specs($)
     }
 }
 
+sub finalize_specs($)
+{
+    my ($specs) = @_;
+
+    print "Finalizing commit update specs ...\n" if ($debug);
+
+    return if ($ignore_struct);
+
+    foreach my $spec (@$specs) {
+        next if ($$spec{action} != UPDATE);
+
+        $$spec{new_range} =
+                finalize_remote_series("$$spec{orig}/remote", $$spec{range}, $$spec{changes});
+    }
+
+    return if ($force_struct);
+
+    my $errors;
+    foreach my $spec (@$specs) {
+        # This is applicable only to updates.
+        next if ($$spec{action} != UPDATE);
+
+        my $range = $$spec{range};
+        my $new_range = $$spec{new_range};
+        # Note that these are commits, unlike the other two, which are Changes.
+        my $pushed = finalize_pushed_series("$$spec{orig}/pushed", $range, $$spec{pushed_changes});
+
+        # Find the first divergences between the structures of the previous push
+        # and the current local and remote series.
+        my ($ldiff, $rdiff) = (-1, -1);
+        for (my $i = 0; ; $i++) {
+            my $lc = $i < @$range ? $$range[$i]{id} : "";
+            my $rc = $i < @$new_range ? $$new_range[$i]{id} : "";
+            last if (!length($lc) && !length($rc));
+            if ($lc eq $rc) {
+                # If both sides are equal, it does not matter if they changed.
+            } else {
+                my $pc = $i < @$pushed ? $$pushed[$i]{changeid} : "";
+                $ldiff = $i if ($ldiff < 0 && ($lc ne $pc));
+                $rdiff = $i if ($rdiff < 0 && ($rc ne $pc));
+                last if ($ldiff >= 0 && $rdiff >= 0);
+            }
+        }
+        if ($ldiff < 0) {
+            if ($rdiff < 0) {
+                print "Keeping series structure (is identical).\n" if ($debug);
+            } else {
+                # Local structure didn't change, so just use whatever we get from the remote.
+                print "Using remote series structure.\n" if ($debug);
+            }
+        } elsif ($rdiff < 0) {
+            # Remote structure didn't change, but local did. This is a weird situation,
+            # as we are pulling Changes from the remote by definition. Use the local
+            # structure and hope for the best.
+            print "Using local series structure.\n" if ($debug);
+            $$spec{new_range} = $range;
+        } else {
+            # If the local and remote series diverge from the pushed series
+            # at the same point, we need to print it only once.
+            my $locpush = ($ldiff == $rdiff) ? "" : sprintf(
+                "  Pushed [%d]: %s\n",
+                $ldiff, $ldiff < @$pushed
+                        ? format_commit($$pushed[$ldiff], -15) : "none");
+            $errors .= sprintf(
+                "Structure of series %s diverged:\n"
+                ."  Local  [%d]: %s\n%s  Remote [%d]: %s\n  Pushed [%d]: %s\n",
+                $$spec{orig},
+                $ldiff, $ldiff < @$range
+                        ? format_commit($$range[$ldiff]{local}, -15) : "none",
+                $locpush,
+                $rdiff, $rdiff < @$new_range
+                        ? format_commit($$new_range[$rdiff]{gerrit}{pick_commit}, -15) : "none",
+                $rdiff, $rdiff < @$pushed
+                        ? format_commit($$pushed[$rdiff], -15) : "none");
+        }
+    }
+    if ($errors) {
+        $errors .=
+            "Use --force-struct/--ignore-struct, or try picking only parts of the series.\n";
+        fail($errors) if (!$check);
+        print STDERR $errors."\n";
+    }
+}
+
 sub prepare_specs()
 {
     my $specs = parse_specs(\@commit_specs);
@@ -1197,7 +1632,88 @@ sub prepare_specs()
     complete_spec_heads($specs);
     complete_spec_tails($specs);
     check_specs($specs);
+    finalize_specs($specs);
     return $specs;
+}
+
+# Return a list of actions that construct the second range of Changes
+# with elements from the first one as naturally as possible.
+sub transmogrify_series($$$)
+{
+    my ($range, $new_range, $pairs) = @_;
+
+    # The layout of the new range is given, so placing UPDATEs and
+    # INSERTs is trivial. The challenge is putting each DELETE in a
+    # place that makes sense, rather than dumping them all at the end.
+    # This only becomes "interesting" when the range is permutated in
+    # addition to gaining and losing Changes.
+
+    $$_{not_new} = 1 foreach (@$range);
+    $$new_range[$_]{new_idx} = $_ for (0 .. $#$new_range);
+
+    # First score common sequences - the longer, the higher the score.
+    my @seq;
+    foreach my $chg (@$range) {
+        my $ni = $$chg{new_idx};
+        next if (!defined($ni));  # Skip over deleted.
+        if (@seq) {
+            my $pi = $seq[-1]{new_idx};
+            # Skip over added.
+            while (++$pi < $ni && !defined($$new_range[$pi]{not_new})) {}
+            if ($pi != $ni) {
+                $$_{score} = int(@seq) foreach (@seq);
+                @seq = ();
+            }
+        }
+        push @seq, $chg;
+    }
+    $$_{score} = int(@seq) foreach (@seq);
+
+    my $prev;
+    my $del = [];
+    foreach my $chg (@$range) {
+        my $ni = $$chg{new_idx};
+        if (!defined($ni)) {
+            push @$del, [ DELETE, $chg ];
+        } else {
+            if (@$del) {
+                # "Attach" the sequence of deletions to the Change in front of or
+                # after it, depending on which one has the higher score. In the
+                # trivial case both are part of the same sequence (no permutation),
+                # so the scores are equal and the choice is irrelevant.
+                if ($prev && $$prev{score} < $$chg{score}) {
+                    # Instead of actually prepending to the next Change, append to the
+                    # first non-addition in front of it in the new range. This ensures
+                    # that deletions always come before additions.
+                    while (1) {
+                        $prev = undef;
+                        last if (--$ni < 0);
+                        $prev = $$new_range[$ni];
+                        last if (defined($$prev{not_new}));
+                    }
+                }
+                if (!$prev) {
+                    push @$pairs, @$del;
+                } else {
+                    $$prev{del_tail} = $del;
+                }
+                $del = [];
+            }
+            $prev = $chg;
+        }
+    }
+    if (@$del) {
+        if (!$prev) {
+            push @$pairs, @$del;
+        } else {
+            $$prev{del_tail} = $del;
+        }
+    }
+
+    push @$pairs, map {
+        [ defined($$_{not_new}) ? UPDATE : INSERT, $_ ],
+        @{$$_{del_tail} // []}
+    } @$new_range;
 }
 
 # Modify the list of local Changes as requested, and mark the Changes
@@ -1235,9 +1751,9 @@ sub apply_specs($$)
         } else {
             $idx = undef;
         }
+        my $new_range = $$spec{new_range};
         my @new_pairs;
         if ($action == INSERT) {
-            my $new_range = $$spec{new_range};
             $idx = @pairs if (!defined($idx));
             printf("Adding +%s:%d at %d.\n", $$new_range[-1]{id}, int(@$new_range), $idx)
                 if ($debug);
@@ -1272,7 +1788,7 @@ sub apply_specs($$)
                     $idx = $rmidx;
                 }
                 splice @pairs, $rmidx, @$range;
-                @new_pairs = map { [ UPDATE, $_ ] } @$range;
+                transmogrify_series($range, $new_range, \@new_pairs);
             }
         }
         splice @pairs, $idx, 0, @new_pairs;
@@ -1433,6 +1949,11 @@ sub verify_delete($$$$$$$)
         return (UPD_INFO, $pfx, $annot);
     }
     $pfx = $forcing ? "DROP      " : "Drop      " if (!$quiet);
+    if ($check) {
+        # Can happen only as a result of a structural change.
+        # Cannot be a forced drop in --check mode, so update state.
+        return (UPD_PUSHED | UPD_INFO, $pfx, $annot);
+    }
     return (UPD_DROP, $pfx, $annot);
 }
 
@@ -1623,7 +2144,12 @@ sub do_adjust_changes($)
             report_local(\@reports, "Hold      ", "", $lcl_commit) if ($debug);
         } elsif ($action == INSERT) {
             report_remote(\@reports, "Add       ", "", $ginfo) if (!$quiet);
-            ($upd, $parts) = (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS);
+            if ($check) {
+                # Can happen only as a result of a structural change.
+                $upd = UPD_DROP | UPD_INFO;
+            } else {
+                ($upd, $parts) = (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS);
+            }
         } elsif (!$ginfo) {
             my $sts = "NEW";
             if (defined($pushed_id)) {

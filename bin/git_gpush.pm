@@ -1198,10 +1198,12 @@ sub analyze_local_branch($)
     $changeid2local{$$_{changeid}} = $$_{id} foreach (@$commits);
 
     # ... and then add them to the set of local Changes.
+    my $idx = 0;
     foreach my $commit (@$commits) {
         my $change = change_for_id($$commit{changeid}, CREATE);
         $$commit{change} = $change;
         $$change{local} = $commit;
+        $$change{index} = $idx++;
     }
 
     return 1;
