@@ -955,6 +955,11 @@ sub map_update_spec($$$)
     my @results;
     my ($found, $ambiguous) = (0, 0);
     foreach my $change (@{$$spec{range}}) {
+        if ($$change{gerrit}) {
+            # Matched up series will have at least one Change already mapped.
+            $found = 1;
+            next;
+        }
         my $gis = $gerrit_infos_by_id{$$change{id}};
         if (!$gis) {
             print "No results for $$change{id}.\n" if ($debug);
@@ -1761,7 +1766,12 @@ sub complete_spec_heads($)
         }
     }
 
-    query_gerrit([ map { "change:".$_ } keys %picks ]);
+    # When an unspecified local series is matched up, at least one
+    # of its Changes was already queried. Skip these.
+    # Note that this will skip possible alternatives if a Change
+    # was already queried by SHA1, which is fine ... kinda.
+    my @queries = grep { !$gerrit_infos_by_id{$_} } keys %picks;
+    query_gerrit([ map { "change:".$_ } @queries ]) if (@queries);
 
     my (@fetches, $any_errors);
     foreach my $spec (@$specs) {
@@ -1882,41 +1892,154 @@ sub check_specs($)
     # We collected the remote Changes belonging to a series. Now sort
     # them according to the dependencies of their current PatchSets.
     foreach my $spec (@$specs) {
+        # We don't finalize remote series from local specs yet, because
+        # the step may be obsoleted by the spec being matched up.
         next if ($$spec{action} != INSERT);
 
         $$spec{new_range} = finalize_remote_series($$spec{orig}, [], $$spec{changes});
     }
 
     print "Checking remote commit specs for collisions ...\n" if ($debug);
+    my @new_specs;
     foreach my $spec (@$specs) {
         my $action = $$spec{action};
         if ($action == INSERT) {
             my $new_range = $$spec{new_range};
 
+            # Try to match up the remote spec with an explicitly specified local one.
+            my $lspec;  # The matched up local spec, if any.
+            my %lchanges;  # The Changes in the matched up local series, if any.
             foreach my $change (@$new_range) {
-                if (defined($$change{local})) {
-                    my $lspec = $$change{lspec};
-                    # Note: re-adding a Change which is being deleted is just fine.
-                    wfail("Cannot add $$change{id}, because it already exists locally.\n")
-                        if (!$lspec || ($$lspec{action} != DELETE));
-                }
                 my $ospec = $$change{rspec};
                 # Intersecting another remote spec is an error.
                 wfail("Specs $$spec{orig} and $$ospec{orig} intersect (change $$change{id}).\n")
                     if ($ospec);
                 $$change{rspec} = $spec;
+
+                # Check that the Change already has a local spec assigned.
+                $ospec = $$change{lspec};
+                next if (!$ospec);
+
+                # We don't match up deletions - re-adding Changes which are being deleted
+                # allows bypassing various checks, which can be useful when the situation
+                # is too complex for the script.
+                next if ($$ospec{action} == DELETE);
+
+                if ($lspec) {
+                    # We are already matched up with a local spec.
+                    # Verify that the Change belongs to it. If it doesn't,
+                    # the remote spec matches multiple local ones.
+                    wfail("Spec $$spec{orig} matches both $$lspec{orig} and $$ospec{orig}.\n"
+                            ."Try picking only parts of the series.\n")
+                        if ($ospec != $lspec);
+                } else {
+                    my $mspec = $$ospec{match};
+                    # Complain if the matched up local spec matches multiple remote ones.
+                    wfail("Spec $$ospec{orig} matches both $$mspec{orig} and $$spec{orig}.\n"
+                            ."Try picking only parts of the series.\n")
+                        if ($mspec);
+                    printf("Spec %s matched up with %s (change %s).\n",
+                           $$spec{orig}, $$ospec{orig}, $$change{id})
+                        if ($debug);
+
+                    # Merge the relevant parts of the local spec into this one.
+                    my $parent = $$ospec{parent};
+                    if (defined($parent)) {
+                        wfail("Spec $$spec{orig} and $$ospec{orig} match,"
+                                ." but have different parents.\n")
+                            if (defined($$spec{parent}) && ($parent ne $$spec{parent}));
+                        $$spec{parent} = $parent;
+                    }
+                    my $range = $$ospec{range};
+                    $$spec{range} = $range;
+                    $$ospec{match} = $spec;
+                    # This remote spec is now an update.
+                    $$spec{action} = UPDATE;
+                    # Mark the local spec as dead.
+                    $$ospec{action} = HOLD;
+
+                    # Remember that we were successful.
+                    $lspec = $ospec;
+                    %lchanges = map { $$_{id} => 1 } @$range;
+                }
+                # The Change doesn't belong to a local spec any more.
+                delete $$change{lspec};
             }
-        } else {
+
+            # Try to match up the remote spec with an unspecified local series.
+            my $llabel;  # The label of the matched up unspecified local series, if any.
+            # Walk backwards, to make tip matches more likely, for less noisy output.
+            foreach my $change (reverse @$new_range) {
+                # Check that the Change has no local spec assigned - updates would
+                # have been matched above, and deletions are not matched here, either.
+                next if ($$change{lspec});
+
+                # Check that the Change actually exists locally to start with.
+                next if (!defined($$change{local}));
+
+                # Check that we don't own it yet.
+                my $changeid = $$change{id};
+                next if (defined($lchanges{$changeid}));
+
+                # Determine the local series it belongs to.
+                # FIXME: Even a partial remote series will match the entire local
+                # series, so local Changes will be incorrectly (attempted to be)
+                # dropped. We could fix this for ancestor Changes, but not for
+                # descendants, as long as we don't extract reverse dependencies
+                # from Gerrit.
+                # For the time being, explicitly specify also the partial local
+                # series when specifying a partial remote series, so the previous
+                # loop catches the case.
+                my ($nrange, $gid, undef, undef) = do_determine_series($change);
+                # We deduced the series for all local Changes that have remote
+                # counterparts, so this Cannot Fail (TM).
+                die("inconsistent operation") if ($debug && !defined($gid));
+
+                # Calculate a descriptive label: <tip>:<count>, and the matched
+                # Change if it is not the tip.
+                my $nchangeid = $$nrange[-1]{id};
+                my $nlabel = $nchangeid.":".int(@$nrange);
+                $nlabel .= " (change $changeid)" if ($changeid ne $nchangeid);
+
+                if (%lchanges) {
+                    # We already matched up a local series (specified or not).
+                    # This is an error, as this Change does not belong to it.
+                    wfail("Spec $$spec{orig} matches both $$lspec{orig} and $nlabel.\n"
+                            ."Try picking only parts of the series.\n")
+                        if ($lspec);
+                    wfail("Spec $$spec{orig} matches both $llabel and $nlabel.\n"
+                            ."Try picking only parts of the series.\n");
+                }
+                print "Spec $$spec{orig} matched up with $nlabel.\n" if ($debug);
+
+                # Assign the local series to the remote spec.
+                $$spec{range} = $nrange;
+                # This remote spec is now an update ...
+                $$spec{action} = UPDATE;
+                # ... and needs re-visiting.
+                push @new_specs, $spec;
+
+                # Remember that we were successful.
+                $llabel = $nlabel;
+                %lchanges = map { $$_{id} => 1 } @$nrange;
+            }
+        } elsif ($action == DELETE) {
             foreach my $change (@{$$spec{range}}) {
-                # Local specs may not intersect preceding remote specs,
-                # as that would make quite a mess in the case of deletions
-                # (and just makes no sense for updates).
+                # Deletions may not intersect preceding remote specs,
+                # as that would make quite a mess.
                 my $ospec = $$change{rspec};
                 wfail("Spec $$spec{orig} intersects preceding $$ospec{orig}"
                         ." (change $$change{id}).\n")
                     if ($ospec);
             }
         }
+    }
+
+    # Matched up unspecified local series need to have their remaining
+    # Changes mapped and their previous push reconstructed.
+    if (@new_specs) {
+        complete_spec_heads(\@new_specs);
+        complete_spec_tails(\@new_specs);
     }
 }
 
@@ -1928,9 +2051,11 @@ sub finalize_specs($)
 
     return if ($ignore_struct);
 
+    # Remote series from unmatched local specs were not finalized yet, so do it now.
     foreach my $spec (@$specs) {
         next if ($$spec{action} != UPDATE);
 
+        next if ($$spec{new_range});
         $$spec{new_range} =
                 finalize_remote_series("$$spec{orig}/remote", $$spec{range}, $$spec{changes});
     }
@@ -2013,10 +2138,16 @@ sub prepare_specs($)
     complete_spec_heads($specs);
     complete_spec_tails($specs);
 
-    # In --check mode we skip the post-adjust series deduction,
-    # as the adjusted Change list is not committed. Instead, do
-    # it before any adjustments are made.
-    deduce_series($raw_changes) if ($check);
+    # Before we can match up remote specs with unspecified local
+    # series, we need to make sure that the series are actually
+    # assigned - we cannot simply sweep up all loose Changes around
+    # the matching ones, because we may catch unrelated ones, which
+    # structural change tracking would make a mess of.
+    # This does not apply to --check mode, as it does not handle remote
+    # specs to start with. However, as it skips the post-adjust series
+    # deduction, the adjusted Change list is not committed. So instead,
+    # do it here before any adjustments are made.
+    deduce_series($raw_changes);
 
     check_specs($specs);
     finalize_specs($specs);
@@ -2118,6 +2249,7 @@ sub apply_specs($$)
     my $idx;
     foreach my $spec (@$specs) {
         my $action = $$spec{action};
+        next if ($action == HOLD);  # Was absorbed by remote spec
         my $parent = $$spec{parent};
         if (defined($parent)) {
             if ($parent eq '*') {
