@@ -23,6 +23,8 @@ BEGIN {
 }
 use git_gpush;
 
+use JSON;
+
 # Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
 # may not (msysgit for example) support this module, even if it's considered a Core module.
 sub usage
@@ -685,29 +687,46 @@ sub print_errors($)
         if ($need_force && !$force);
 }
 
+sub add_if_unmodified($$)
+{
+    my ($change, $list) = @_;
+
+    my $freshness = $$change{freshness};
+    if (($freshness eq UNMODIFIED) || ($freshness eq OUTDATED)) {
+        push @$list, $$change{local}{id};
+    }
+}
+
 sub prepare_meta($)
 {
     my ($group) = @_;
 
+    my @invite_list;
     my (%invite_rvrs, %invite_ccs);
     if (@reviewers || @CCs) {
         foreach my $change (@{$$group{changes}}) {
             my $ginfo = $$change{gerrit};
             my $rvrs = $ginfo ? $$ginfo{reviewers} : {};
+            my $any;
             foreach my $rvr (@reviewers) {
                 if (($$rvrs{$rvr} // RVRTYPE_NONE) != RVRTYPE_REV) {
                     $invite_rvrs{$rvr} = 1;
+                    $any = 1;
                 }
             }
             foreach my $cc (@CCs) {
                 if (($$rvrs{$cc} // RVRTYPE_NONE) != RVRTYPE_CC) {
                     $invite_ccs{$cc} = 1;
+                    $any = 1;
                 }
             }
+            # Can't add reviewers to unmodified Changes with a push.
+            add_if_unmodified($change, \@invite_list) if ($any);
         }
     }
     $$group{add_rvrs} = [ keys %invite_rvrs ];
     $$group{add_ccs} = [ keys %invite_ccs ];
+    $$group{invite_list} = \@invite_list;
 }
 
 sub push_changes($)
@@ -731,6 +750,30 @@ sub push_changes($)
     push @gitcmd, $remote, "$tip:refs/for/$to";
 
     run_process(FWD_OUTPUT, @gitcmd);
+}
+
+sub update_unpushed($)
+{
+    my ($group) = @_;
+
+    my $invite_list = $$group{invite_list};
+    if (@$invite_list) {
+        print "Inviting reviewers/CCs to unmodified commit(s) ...\n";
+        my ($rvrs, $ccs) = ($$group{add_rvrs} // [], $$group{add_ccs} // []);
+        my @rlist;
+        foreach my $rvr (@$rvrs) {
+            push @rlist, { "reviewer" => $rvr, "state" => "REVIEWER" };
+        }
+        foreach my $cc (@$ccs) {
+            push @rlist, { "reviewer" => $cc, "state" => "CC" };
+        }
+        my $json = { "reviewers" => \@rlist };
+        my $pipe = open_process(USE_STDIN | FWD_OUTPUT | DRY_RUN,
+                                'ssh', @gerrit_ssh, 'gerrit', 'review', '--json',
+                                @$invite_list);
+        write_process($pipe, encode_json($json)."\n");
+        close_process($pipe);
+    }
 }
 
 sub update_state($)
@@ -783,6 +826,7 @@ sub execute_pushing()
         } else {
             print "No modified commits - nothing to push.\n" if (!$quiet);
         }
+        update_unpushed($group);
 
         # This makes sense even if no modified commits are pushed
         # (e.g., syncing state after a dumb push).
