@@ -57,6 +57,11 @@ my $summary;
 # Hash (by file) of hashes (by line) of lists (reports) of lists (msg, extra)
 my %complaints;
 my %footnotes;
+my $stable = defined($cfg{stable_hash});
+
+if ($stable) {
+    require Tie::IxHash;
+}
 
 sub printerr()
 {
@@ -75,6 +80,9 @@ sub do_complain($$$;$@)
         $msg .= " (key \"".$key."\")" if (!$gerrit);
     } else {
         $msg = "Hint: ".$msg;
+    }
+    if ($stable && !defined($complaints{$file})) {
+        tie %{$complaints{$file}}, 'Tie::IxHash';
     }
     push @{$complaints{$file}{$line}}, [ $msg, @extra ];
 }
