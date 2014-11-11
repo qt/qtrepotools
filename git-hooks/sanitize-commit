@@ -102,7 +102,8 @@ my $iswip = defined($cfg{wip});
 my $badrev = 0;
 my $badsign = 0;
 my $badid = defined($cfg{changeid});
-my $badurl = defined($cfg{url});
+my $badurl_rx = $config{badurl};
+my $badurl = !defined($badurl_rx) || defined($cfg{url});
 my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
 my $parents = 0;
@@ -286,7 +287,7 @@ while (<MSG>) {
             if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
                 complain_ln("Gerrit change id outside Change-Id footer", "changeid");
             }
-            if (!$badurl && /\bhttps?:\/\/(bugreports\.qt-project\.org\/browse\/|codereview\.qt-project\.org\/(\#change,|\#\/c\/)?\d+)/) {
+            if (!$badurl && /$badurl_rx/o) {
                 complain_ln("URL pointing to Gerrit or JIRA", "url");
             }
             my $ftr = 0;
