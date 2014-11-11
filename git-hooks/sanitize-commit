@@ -156,6 +156,26 @@ sub check_spelling()
     }
 }
 
+my @style_fails = ();
+
+sub styleFail($)
+{
+    my $why = shift;
+    if ($gerrit_rest) {
+        complain_ln("$why", "style", -1);
+    } else {
+        push @style_fails, "  $lineno: ".$why;
+    }
+}
+
+sub complain_style()
+{
+    if (@style_fails) {
+        do_complain(1e9, "Style issues", "style", -1, @style_fails);
+        @style_fails = ();
+    }
+}
+
 sub check_apple_terminology()
 {
     if ($clike) {
@@ -306,6 +326,9 @@ while (<MSG>) {
 
     check_spelling() if ($spell_check);
     check_apple_terminology();
+    styleFail("Trailing whitespace") if (s/[ \t]+\r?\n$//);
+    styleFail("Space indent followed by a TAB character") if (/^ +\t/);
+    styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
 }
 close MSG;
 printerr;
@@ -324,6 +347,7 @@ if ($footer > 0 && !defined($cfg{footer})) {
 }
 
 complain_spelling();
+complain_style();
 
 my $chunk = 0;
 my @addi = ();
@@ -417,18 +441,6 @@ sub isExe($)
     return $type =~ /^(ELF|PE32) /;
 }
 
-my @style_fails = ();
-
-sub styleFail($)
-{
-    my $why = shift;
-    if ($gerrit_rest) {
-        complain_ln("$why", "style", -1);
-    } else {
-        push @style_fails, "  $lineno: ".$why;
-    }
-}
-
 my $no_copyright = 0;
 
 sub flushFile()
@@ -437,10 +449,7 @@ sub flushFile()
         complain("Missing copyright header", "copyright");
     }
     complain_spelling();
-    if (@style_fails) {
-        do_complain(1e9, "Style issues", "style", -1, @style_fails);
-        @style_fails = ();
-    }
+    complain_style();
 }
 
 my $merge;
