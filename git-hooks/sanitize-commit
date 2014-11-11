@@ -11,14 +11,15 @@ use strict;
 use warnings;
 use Cwd;
 
-if ($#ARGV < 0 or $#ARGV > 1 || ($#ARGV == 1 && $ARGV[1] !~ /^(strict|gerrit(-rest)?)$/)) {
-    print STDERR "Usage: $0 <sha1> [strict]\n";
+if ($#ARGV < 0 or $#ARGV > 2 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit(-rest)?)$/)) {
+    print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit|gerrit-rest} [instance]]\n";
     exit 2;
 }
 my $sha1 = $ARGV[0];
-my $gerrit_rest = ($#ARGV == 1 && $ARGV[1] eq "gerrit-rest");
-my $gerrit = $gerrit_rest || ($#ARGV == 1 && $ARGV[1] eq "gerrit");
-my $strict = $gerrit || ($#ARGV == 1 && $ARGV[1] eq "strict");
+my $gerrit_rest = ($#ARGV >= 1 && $ARGV[1] eq "gerrit-rest");
+my $gerrit = $gerrit_rest || ($#ARGV >= 1 && $ARGV[1] eq "gerrit");
+my $strict = $gerrit || ($#ARGV >= 1 && $ARGV[1] eq "strict");
+my $instance = ($#ARGV == 2) ? $ARGV[2] : "default";
 
 my $repo = getcwd();
 $repo =~ s,/?\.git$,,;
@@ -26,6 +27,8 @@ $repo =~ s,^.*/,,;
 my %config = ();
 for (`git config --list`) {
     if (/^sanity\.\Q$repo\E\.([^=]+)=(.*$)/) {
+        $config{$1} = $2;
+    } elsif (/^sanity\.\Q$instance\E\.([^=]+)=(.*$)/) {
         $config{$1} = $2;
     }
 }
