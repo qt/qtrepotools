@@ -458,6 +458,7 @@ sub flushFile()
 
 my $merge;
 my $new_file;
+my $is_bin;
 my $maybe_bin;
 my $is_special;
 my $size;
@@ -508,6 +509,7 @@ while (<DIFF>) {
             }
             next;
         }
+        next if ($is_bin);
         $lineno++;
         if ($merge) {
             # Consider only lines which are new relative to both parents, i.e., were added during the merge.
@@ -588,22 +590,23 @@ while (<DIFF>) {
                     complain($watch_messages{$key}, "", -1);
                 }
             }
-            my $foreign = ($file =~ /(^|\/)3rdparty\//);
+            $is_bin = ($file =~ /\.(ps|pdf)$/);
+            my $foreign = $is_bin || ($file =~ /(^|\/)3rdparty\//);
             $new_file = 0;
             $maybe_bin = 0;
             $is_special = 0;
-            $crlf_fail = defined($cfg{crlf});
+            $crlf_fail = $is_bin || defined($cfg{crlf});
             $in_plus = 0;
             $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
             $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
             $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
             $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(plist(\.[^.\/]+)?|def|spec|changes|[xn]ib|storyboardc?)$)/);
             $ctlkw_check = $tabs_check && $clike;
-            $eof_check = ($file !~ /\.plist(\.[^.\/]+)?$/); # Xcode consistently forgets the trailing newline
+            $eof_check = !$is_bin && ($file !~ /\.plist(\.[^.\/]+)?$/); # Xcode consistently forgets the trailing newline
             # .ts files usually contain languages other than English
             $spell_check = !defined($cfg{spell}) && !$foreign && ($file !~ /\.ts$/i);
             $apple_check = !$foreign && ($file !~ /\.ts$/i);
-            $conflict_fail = defined($cfg{conflict});
+            $conflict_fail = $is_bin || defined($cfg{conflict});
             $braces = 0;
             $check_gen = 0;
             $no_copyright = 0;
