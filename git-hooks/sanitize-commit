@@ -133,6 +133,8 @@ sub complain_spelling()
 # Given a line of text, searches for likely spelling errors.
 sub check_spelling()
 {
+    return if (!%MISTAKES_BASE);
+
     my %seen;
     my (@words) = split(/\b/);
     foreach my $word (@words) {
