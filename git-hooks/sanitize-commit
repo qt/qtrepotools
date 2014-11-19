@@ -41,10 +41,10 @@ if (defined $config{flags}) {
         $cfg{$c} = 1;
     }
 }
-my (%watch_files, %watch_people);
+my (%watch_files, %watch_messages);
 for my $key (keys %config) {
     $watch_files{$1} = $config{$key} if ($key =~ /^watches\.([^.]+)\.files/);
-    $watch_people{$1} = $config{$key} if ($key =~ /^watches\.([^.]+)\.people/);
+    $watch_messages{$1} = $config{$key} if ($key =~ /^watches\.([^.]+)\.message/);
 }
 my $fail = 0;
 my $file = "";
@@ -569,7 +569,7 @@ while (<DIFF>) {
             $qmake = ($file =~ /\.pr[filo]$/i);
             for my $key (keys %watch_files) {
                 if ($file =~ /^$watch_files{$key}$/) {
-                    complain("Changing this file is risky. Please add $watch_people{$key} as reviewer(s).", "", -1);
+                    complain($watch_messages{$key}, "", -1);
                 }
             }
             my $foreign = ($file =~ /(^|\/)3rdparty\//);
