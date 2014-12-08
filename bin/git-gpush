@@ -110,12 +110,12 @@ my $ref_to = "";
 my $ref_override = 0;
 my $draft = 0;
 
-my %aliases = ();
+my %aliases;
 
-my @reviewers = ();
-my @CCs = ();
+my @reviewers;
+my @CCs;
 
-my @arguments = ();
+my @arguments;
 
 sub format_cmd(@)
 {
@@ -248,7 +248,7 @@ sub lookup_alias($)
 sub add_reviewers()
 {
     if (@reviewers || @CCs) {
-        my @dudes = ();
+        my @dudes;
         push @dudes, "--receive-pack=git receive-pack";
         push @dudes, map { " --reviewer=$_" } @reviewers;
         push @dudes, map { " --cc=$_" } @CCs;
