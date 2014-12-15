@@ -21,6 +21,7 @@ use List::Util qw(min max);
 use File::Spec;
 use File::Temp qw(mktemp);
 use IPC::Open3 qw(open3);
+use Symbol qw(gensym);
 use Term::ReadKey;
 use Text::Wrap;
 use JSON;
@@ -114,7 +115,7 @@ use constant {
     USE_STDOUT => 4,
     FWD_STDOUT => 8,
     NUL_STDERR => 0,
-    # USE_STDERR is not needed
+    USE_STDERR => 16,
     FWD_STDERR => 32,
     FWD_OUTPUT => 40,
     SILENT_STDIN => 64,  # Suppress debug output for stdin
@@ -159,7 +160,10 @@ sub open_process($@)
     } else {
         $out = \'>&NUL';
     }
-    if ($flags & FWD_STDERR) {
+    if ($flags & USE_STDERR) {
+        $err = \$process{stderr};
+        $$err = gensym();
+    } elsif ($flags & FWD_STDERR) {
         $err = \'>&STDERR';
     } else {
         $err = \'>&NUL';
@@ -183,6 +187,9 @@ sub close_process($)
     my $cmd = $$process{cmd};
     if ($$process{stdout}) {
         close($$process{stdout}) or wfail("Failed to close read pipe of '$cmd': $!\n");
+    }
+    if ($$process{stderr}) {
+        close($$process{stderr}) or wfail("Failed to close error read pipe of '$cmd': $!\n");
     }
     waitpid($$process{pid}, 0) or wfail("Failed to wait for '$cmd': $!\n");
     if ($? & 128) {
@@ -249,6 +256,16 @@ sub read_fields($@)
     local $/ = "\0";
     for (@_) { chop($_ = <$fh>); }
     return 1;
+}
+
+# Read all of a process' output channel as a single string.
+sub get_process_output($$)
+{
+    my ($process, $which) = @_;
+
+    local $/;
+    my $fh = $$process{$which};
+    return <$fh>;
 }
 
 # The equivalent of system().
@@ -424,6 +441,10 @@ sub update_excludes()
     my $urefs = $remote_refs{$upstream_remote};
     if ($urefs) {
         $heads{$_} = 1 foreach (values %$urefs);
+    }
+    my $grefs = $remote_refs{$remote};
+    if ($grefs) {
+        $heads{$_} = 1 foreach (values %$grefs);
     }
     @upstream_excludes = map { "^$_" } keys %heads;
 }
@@ -1046,13 +1067,36 @@ sub visit_commits_raw($$;$)
     return \@commits;
 }
 
+# Note: The return value is reliable only for the first call.
 sub visit_commits($$;$)
 {
     my ($tips, $args, $cid_opt) = @_;
 
-    my $commits = visit_commits_raw($tips, $args, $cid_opt);
+    my @revs = grep {
+        if ($commit_by_id{$_}) {
+            print "Already visited $_.\n" if ($debug);
+            0;
+        } else {
+            1;
+        }
+    } @$tips;
+    return if (!@revs);
+
+    # The grep above excludes tips which match previous tips or their
+    # ancestors. A tip that is a descendant of a previous tip still
+    # needs to be visited, but the traversal needs to be cut off, so
+    # pass all previous tips as exclusions to git.
+    state %visited;
+    my @excl = map { "^$_" } keys %visited;
+    $visited{$_} = 1 foreach (@revs);
+    push @revs, @excl;
+
+    my $commits = visit_commits_raw(\@revs, $args, $cid_opt);
     foreach my $commit (@$commits) {
         init_commit($commit);
+        # This excludes tips that were in fact ancestors of other tips,
+        # thereby cutting down the noise in the exclusion list.
+        delete $visited{$_} foreach (@{$$commit{parents}});
     }
     return $commits;
 }
@@ -1065,6 +1109,9 @@ sub visit_local_commits($;$)
     # because Gerrit will ignore all known commits (reviewed or not).
     # This matters for cross-branch pushes and re-targeted Changes, where a commit
     # can have known ancestors which aren't on its upstream branch.
+    # When traversing PatchSets from Gerrit, we need to exclude the heads from the
+    # gerrit remote as well, as they may be actually ahead of our merge-base with
+    # upstream.
     return visit_commits($tips, \@upstream_excludes, $cid_opt);
 }
 
@@ -1233,6 +1280,49 @@ sub parse_local_rev($$)
 }
 
 ###################
+# commit creation #
+###################
+
+# Cache of diffs. Global, so it can be flushed from the outside.
+our %commit2diff;
+
+# Apply one commit's diff on top of another commit; return the new tree.
+sub apply_diff($$$)
+{
+    my ($commit, $base_id, $flags) = @_;
+
+    my $sha1 = $$commit{id};
+    my $diff = $commit2diff{$sha1};
+    if (!defined($diff)) {
+        my $show = open_cmd_pipe(0, 'git', 'diff-tree', '--binary', '--root', "$sha1^!");
+        $diff = get_process_output($show, 'stdout');
+        close_process($show);
+        $commit2diff{$sha1} = $diff;
+    }
+
+    # We don't know the tree when the base is an upstream commit.
+    # This is just fine, as this will be the first commit in the
+    # series by definition, so we need to load it anyway. The
+    # subsequent apply will change it in every case, so there
+    # is no chance to recycle it, either.
+    state $curr_tree = "";
+    my $base = $commit_by_id{$base_id};
+    run_process(FWD_STDERR, 'git', 'read-tree', ($base_id eq 'ROOT') ? '--empty' : $base_id)
+        if (!$base || ($curr_tree ne $$base{tree}));
+    $curr_tree = "";
+
+    my $proc = open_process(SOFT_FAIL | USE_STDIN | SILENT_STDIN | NUL_STDOUT | $flags,
+                            'git', 'apply', '--cached', '-C1', '--whitespace=nowarn');
+    write_process($proc, $diff);
+    my $errors = get_process_output($proc, 'stderr')
+        if ($flags & USE_STDERR);
+    close_process($proc);
+    return (undef, $errors) if ($?);
+    $curr_tree = read_cmd_line(0, 'git', 'write-tree');
+    return ($curr_tree, undef);
+}
+
+###################
 # branch tracking #
 ###################
 
@@ -1349,7 +1439,6 @@ sub query_gerrit($;$)
             defined($ref) or fail("Huh?! PatchSet $number in $changeid has no ref?\n");
             my %rev = (
                 id => $revision,
-                parents => $$cps{'parents'} // [],
                 ps => $number,
                 ts => int($ts),
                 ref => $ref
