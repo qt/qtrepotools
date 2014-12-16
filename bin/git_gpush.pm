@@ -523,6 +523,7 @@ our %gerrit_infos_by_id;
 # - id: Gerrit Change-Id.
 # - src: Local branch name, or "-" if Change is on a detached HEAD.
 # - tgt: Target branch name.
+# - topic: Gerrit topic. Persisted only as a cache.
 # - pushed: SHA1 of the commit this Change was pushed as last time
 #   from this repository.
 
@@ -566,7 +567,7 @@ sub save_state(;$)
 
     print "Saving state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
-    my @fkeys = ('key', 'id', 'src', 'tgt');
+    my @fkeys = ('key', 'id', 'src', 'tgt', 'topic');
     my @rkeys = ('pushed');
     push @lines,
         "next_key $next_key",
@@ -1109,7 +1110,7 @@ sub query_gerrit($;$)
         push @{$gerrit_infos_by_id{$changeid}}, $ginfo;
         my $status = $$review{'status'};
         defined($status) or fail("Huh?! $changeid has no status?\n");
-        my $branch = $$review{'branch'};
+        my ($branch, $topic) = ($$review{'branch'}, $$review{'topic'});
         defined($branch) or fail("Huh?! $changeid has no branch?\n");
         my $pss = $$review{'patchSets'};
         defined($pss) or fail("Huh?! $changeid has no PatchSets?\n");
@@ -1129,6 +1130,7 @@ sub query_gerrit($;$)
         $$ginfo{id} = $changeid;
         $$ginfo{status} = $status;
         $$ginfo{branch} = $branch;
+        $$ginfo{topic} = $topic;
         $$ginfo{revs} = [ grep { $_ } @revs ];  # Drop deleted ones.
         $$ginfo{rev_by_id} = \%rev_map;
         my $rvrs = $$review{'allReviewers'};
