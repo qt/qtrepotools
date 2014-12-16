@@ -100,6 +100,10 @@ Options:
         are found. Note that --force is still necessary if this would result
         in dropping locally modified Changes.
 
+    -fm, --force-merged
+        Pick Changes even if they are MERGED and were already pulled.
+        This makes sense when re-applying reverted commits.
+
     -i, --ignore
         Ignore the new PatchSets that appeared on Gerrit since the previous
         push from this clone. The local Changes will subsequently appear
@@ -213,6 +217,7 @@ my $check = 0;
 my $merge = 0;
 my $force = 0;
 my $force_struct = 0;
+my $force_merged = 0;
 my $ignore = 0;
 my $ignore_struct = 0;
 my @commit_specs;
@@ -245,6 +250,8 @@ sub parse_arguments(@)
             $force = 1;
         } elsif ($arg eq "-fs" || $arg eq "--force-struct") {
             $force_struct = 1;
+        } elsif ($arg eq "-fm" || $arg eq "--force-merged") {
+            $force_merged = 1;
         } elsif ($arg eq "-i" || $arg eq "--ignore") {
             $ignore = 1;
         } elsif ($arg eq "-is" || $arg eq "--ignore-struct") {
@@ -272,8 +279,9 @@ sub parse_arguments(@)
         # Note that --{force,ignore}-struct are intentionally omitted,
         # because one may want to preview the effects of (not) following
         # structural changes.
-        fail("--check and --merge/--force/--ignore are mutually exclusive.\n")
-            if ($merge || $force || $ignore);
+        wfail("--check and --merge/--force/--force-merged/--ignore"
+                ." are mutually exclusive.\n")
+            if ($merge || $force || $force_merged || $ignore);
     }
 
     fail("--merge/--force and --ignore are mutually exclusive.\n")
@@ -858,6 +866,41 @@ sub fetch_patchsets($$;$)
     }
 }
 
+sub check_upstreamed($)
+{
+    my ($ginfos) = @_;
+
+    # For merged Changes check whether the local branch excludes the final
+    # commit, i.e., whether it was already pulled.
+    # This specifically ignores the choice of older PatchSets - when the Change
+    # is already in our upstream, it will typically not matter that it is a newer
+    # version - we're still likely to get a conflict, at least a logical one.
+    my %upstream;
+    foreach my $ginfo (@$ginfos) {
+        next if (defined($$ginfo{pending}));
+        if ($$ginfo{status} eq 'MERGED') {
+            $upstream{$$ginfo{revs}[-1]{id}} = $ginfo;
+            $$ginfo{pending} = 0;
+        } else {
+            $$ginfo{pending} = 2;
+        }
+    }
+    if (%upstream) {
+        print "Visiting our upstream ...\n" if ($debug);
+        my $revs = open_process(USE_STDIN | USE_STDOUT | FWD_STDERR,
+                                'git', 'rev-list', '--stdin', '--not', $local_base);
+        write_process($revs, map { "$_\n" } keys %upstream);
+        while (read_process($revs)) {
+            my $ginfo = $upstream{$_};
+            # The listing includes commits we did not request, because we
+            # cannot use --no-walk due to ^$local_base implying a range.
+            next if (!$ginfo);
+            $$ginfo{pending} = 1;
+        }
+        close_process($revs);
+    }
+}
+
 # Verify that the 2nd commit is a cherry-pick of the 1st one.
 sub verify_cherrypick($$)
 {
@@ -940,6 +983,9 @@ sub analyze_patchset($$)
 sub analyze_patchsets($)
 {
     my ($ginfos) = @_;
+
+    # Note: this must be done before dropping the merged PatchSets!
+    check_upstreamed($ginfos) if (!$force_merged);
 
     print "Analyzing fetched PatchSets ...\n" if ($debug);
     my @upstream;
@@ -1301,14 +1347,16 @@ sub do_sort_series($$$$$)
 # Turn a set of Changes into a series via topological sorting.
 # The series may be also filtered during sorting. Doing this
 # earlier would distort the parent-child relationships.
-sub sort_series($$$)
+sub sort_series($$$$)
 {
-    my ($name, $range, $commits) = @_;
+    my ($name, $range, $commits, $current) = @_;
 
     # For the given set of commits, collect the IDs of Changes which
     # should not be included into the final series after all.
     my %exclude;
+    my $report = $current && !$quiet;
     my %selected = map { $$_{id} => 1 } @$range;
+    my @merged;
     foreach my $commit (map { @$_ } values %$commits) {
         my $changeid = $$commit{changeid};
 
@@ -1320,9 +1368,28 @@ sub sort_series($$$)
                 # updates being matched with only the corresponding fragments
                 # of the remote series.
                 $exclude{$changeid} = 'excluded';
+                next;
+            }
+        }
+
+        my $sha1 = $$commit{id};
+        my $ginfo = $gerrit_info_by_sha1{$sha1};
+
+        # Drop Changes that are already in our upstream, unless forced.
+        if (!$force_merged && !$$ginfo{pending}) {
+            # If such a Change is already in the local branch, don't
+            # drop it - it must have been forced previously.
+            if (!defined($selected{$changeid})) {
+                $exclude{$changeid} = 'MERGED';
+                push @merged, $commit if ($report);
             }
         }
     }
+
+    print "NOT adding already pulled MERGED Change(s) from series $name:\n"
+          .format_commits(\@merged)
+          ."Use --force-merged to add them nonetheless.\n"
+        if (@merged);
 
     my %order = map { $$_{id} => $$_{index} } @$range;
 
@@ -1341,14 +1408,14 @@ sub finalize_pushed_series($$$)
     # turns out to be empty. The most likely reason for that is that
     # %$commits was empty to start with (i.e., the series was never
     # gpush'd from this repo).
-    return sort_series($name, $range, $commits);
+    return sort_series($name, $range, $commits, 0);
 }
 
 sub finalize_remote_series($$$)
 {
     my ($name, $range, $commits) = @_;
 
-    my $sorted = sort_series($name, $range, $commits);
+    my $sorted = sort_series($name, $range, $commits, 1);
     fail("Series $name is empty after filtering.\n") if (!@$sorted && !$check);
     return changify_remote_series($sorted);
 }
