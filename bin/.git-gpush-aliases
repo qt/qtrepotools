@@ -1,6 +1,8 @@
-# This file contains a mapping of #qt-labs et al. IRC nicks to Gerrit username, allowing for easy
-# assigning of reviewers through the 'git gpush' script.
+# Global configuration file for the 'git gpush' script.
 
+# This section contains a mapping of #qt-labs et al. IRC nicks to Gerrit
+# usernames, allowing for easy listing of reviewers.
+[aliases]
 aalpert=416365416c
 andre=apoenitz
 anshaw=andysh
@@ -41,3 +43,7 @@ steveire=stephen.kelly
 thiago=thiago-intel
 torarne=vestbo
 tronical=shausman
+
+# Keys from this section will be mapped to gpush.<key> git config keys,
+# allowing for easy configuration of site-wide defaults.
+[config]
