@@ -93,7 +93,7 @@ def run_qdoc(module_name):
         environment["QMAKEFLAGS"] = "CONFIG+=force_bootstrap"
         for cmd in ["/bin/sh ./configure --opensource --confirm-license --release".split()
                    , "make sub-src-qmake_all".split()
-                   , ["/bin/bash", "-c", "if [ -f src/tools/Makefile ] ; then make -Csrc/tools sub-qdoc; else make -Csrc sub-qdoc ; fi"] # build qdoc
+                   , ["/bin/sh", "-c", "if [ -f src/tools/Makefile ] ; then make -Csrc/tools sub-qdoc; else make -Csrc sub-qdoc ; fi"] # build qdoc
                    ]:
             logging.debug("Executing command: %s", cmd)
             try:
