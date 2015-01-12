@@ -441,8 +441,9 @@ sub formatSize($)
 sub isExe($)
 {
     my $sha = shift;
-    my $type = `git cat-file -p $sha | file -b -`;
-    return $type =~ /^(ELF|PE32) /;
+    open(my $hndl, "git cat-file -p $sha |") or return 0;
+    read($hndl, my $hdr, 4) or return 0;
+    return $hdr =~ /^(\x7FELF|MZ)/;
 }
 
 my $no_copyright = 0;
