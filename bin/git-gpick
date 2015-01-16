@@ -989,6 +989,22 @@ sub set_base_deduced($)
     return $base;
 }
 
+# Traverse a series until we hit the upstream. On the way,
+# set each visited commit's push base to the named base.
+sub set_base_imposed($$)
+{
+    my ($sha1, $base) = @_;
+
+    while (1) {
+        my $commit = $commit_by_id{$sha1};
+        last if (!$commit);
+        last if (defined($$commit{base}));
+        $$commit{base} = $base;
+        $sha1 = get_1st_parent($commit);
+        last if ($base eq $sha1);
+    }
+}
+
 sub analyze_patchset($$)
 {
     my ($ginfo, $cat) = @_;
@@ -999,12 +1015,21 @@ sub analyze_patchset($$)
     $$ginfo{"${cat}_idx"} = --$idx
         if ($idx == @$revs);
     my $rev = $$revs[$idx];
-    my $rev_id = $$rev{id};
+    my ($rev_id, $base) = ($$rev{id}, $$rev{base});
     my $commit = $commit_by_id{$rev_id};
     wfail("PatchSet $$rev{ps} of Change $$ginfo{key} is apparently upstream?!\n")
         if (!$commit);
     $$ginfo{"${cat}_commit"} = $commit;
-    set_base_deduced($rev_id);
+    if (defined($base)) {
+        # Series which are pushed on top of other pending Changes have their base
+        # stored in an extra field on Gerrit, as otherwise it's indeterminable.
+        set_base_imposed($rev_id, $base);
+        print "Have push-base $base for $rev_id.\n" if ($debug);
+    } else {
+        # For the remaining PatchSets, the merge-base with upstream is the base.
+        $base = set_base_deduced($rev_id);
+        print "Inferred push-base $base for $rev_id.\n" if ($debug);
+    }
 }
 
 # Extract additional information from the fetched PatchSets.
@@ -1136,7 +1161,7 @@ sub advance_pushed_series($$@)
         }
         # The ancestors must be younger. See below.
         $$stamp = $$rev{ts};
-        my $nbase = $$bmap{$changeid};
+        my $nbase = $$rev{base} // $$bmap{$changeid};
         $$base = $nbase if (defined($nbase));
         return $nsha1;
     }
@@ -1162,6 +1187,8 @@ sub advance_pushed_series($$@)
         return undef;
     }
     my $rev = $$ginfo{revs}[$$ginfo{push_idx}];
+    my $nbase = $$rev{base};
+    $$base = $nbase if (defined($nbase));
     return $$rev{id};
 }
 
@@ -1228,7 +1255,7 @@ sub advance_remote_series($$@)
         return undef;
     }
     my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
-    my $nbase = $$bmap{$changeid};
+    my $nbase = $$rev{base} // $$bmap{$changeid};
     $$base = $nbase if (defined($nbase));
     return $$rev{id};
 }
@@ -1241,8 +1268,9 @@ sub assemble_remote_series($$$$$$$)
 
     my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
     my $sha1 = $$rev{id};
+    my $rbase = $$rev{base} // $base;
     my ($series, $anchor) = assemble_series(
-            $$ginfo{id}, $sha1, $base, $seen, \&advance_remote_series,
+            $$ginfo{id}, $sha1, $rbase, $seen, \&advance_remote_series,
             $stamp, $bmap, $missing, $fails);
     return ($series, $anchor);
 }

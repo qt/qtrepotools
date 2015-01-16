@@ -1506,8 +1506,9 @@ sub query_gerrit($;$)
         defined($pss) or fail("Huh?! $changeid has no PatchSets?\n");
         my (@revs, %rev_map);
         foreach my $cps (@{$pss}) {
-            my ($number, $ts, $revision, $ref) =
-                    ($$cps{'number'}, $$cps{'createdOn'}, $$cps{'revision'}, $$cps{'ref'});
+            my ($number, $ts, $revision, $base, $ref) =
+                    ($$cps{'number'}, $$cps{'createdOn'}, $$cps{'revision'},
+                     $$cps{'gpush-base'}, $$cps{'ref'});
             defined($number) or fail("Huh?! PatchSet in $changeid has no number?\n");
             defined($ts) or fail("Huh?! PatchSet $number in $changeid has no timestamp?\n");
             defined($revision) or fail("Huh?! PatchSet $number in $changeid has no commit?\n");
@@ -1516,6 +1517,7 @@ sub query_gerrit($;$)
                 id => $revision,
                 ps => $number,
                 ts => int($ts),
+                base => $base,
                 ref => $ref
             );
             $revs[$number] = \%rev;

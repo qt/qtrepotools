@@ -190,6 +190,7 @@ EOM
 my $from_base;
 my $from;
 my $commit_count = 0;
+my $addbase;  # default set by process_config()
 my $ref_base;
 my $ref_base_ok = 1;
 my $ref_to;
@@ -310,9 +311,26 @@ sub parse_arguments(@)
     }
 }
 
+use constant {
+    BASE_NO => 0,
+    BASE_MAYBE => 1,
+    BASE_YES => 2
+};
+
 sub process_config()
 {
     load_config();
+
+    my $ab = git_config('gpush.addbase', 'maybe');
+    if ($ab eq 'maybe') {
+        $addbase = BASE_MAYBE;
+    } elsif ($ab eq 'true' || $ab eq 'yes') {
+        $addbase = BASE_YES;
+    } elsif ($ab eq 'false' || $ab eq 'no') {
+        $addbase = BASE_NO;
+    } else {
+        fail("Unrecognized value for gpush.addbase.\n");
+    }
 }
 
 sub lookup_alias($)
@@ -1150,7 +1168,25 @@ sub push_changes($)
     my $tpc = $$group{topic};
     my ($rvrs, $ccs) = ($$group{add_rvrs} // [], $$group{add_ccs} // []);
 
+    my $base = $$group{base};
+    if ($addbase == BASE_YES) {
+        print "Configuration mandates sending base.\n" if ($debug);
+    } elsif ($addbase == BASE_MAYBE) {
+        if ($commit_by_id{$base}) {
+            # Series which are pushed on top of other pending Changes have their
+            # base stored in an extra field on Gerrit, as otherwise gpick could
+            # not reliably determine it.
+            print "Sending base, as it is not in the upstream branch.\n" if ($debug);
+        } else {
+            $base = undef;
+        }
+    } else {
+        print "Configuration forbids sending base.\n" if ($debug);
+        $base = undef;
+    }
+
     my @push_options;
+    push @push_options, "gpush-base=$base" if (defined($base));
     push @push_options, "topic=$tpc" if (defined($tpc));
     push @push_options, map { "r=$_" } @$rvrs;
     push @push_options, map { "cc=$_" } @$ccs;
