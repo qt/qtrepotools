@@ -22,12 +22,11 @@ sub usage
 Usage:
     git gpush [opts] [[sha1/ref-from]:[ref-to]] [+<reviewer>] [=<CC user>] [-- <push opts>]
 
-    Pushes changes to Gerrit and adds reviewers and CC to the patch
-    sets
+    Pushes Changes to Gerrit and adds reviewers and CC to the PatchSets.
 
 Description:
-    This script is used to push patch sets to Gerrit, and at the same
-    time add reviewers and CCs to the patch sets pushed.
+    This script is used to push PatchSets to Gerrit, and at the same
+    time add reviewers and CCs to the PatchSets pushed.
 
     You can use email addresses, Gerrit usernames or aliases for the
     name of the reviewers/CCs.
@@ -50,11 +49,11 @@ Description:
 
 Options:
     -d, --draft
-        Mark the pushed changes as drafts. This switch is usually
-        unnecessary, as gpush will recognize WIP changes by subject.
+        Mark the pushed Changes as drafts. This switch is usually
+        unnecessary, as gpush will recognize WIP Changes by subject.
 
     -p, --publish
-        Do not mark the pushed changes as drafts even if they have
+        Do not mark the pushed Changes as drafts even if they have
         WIP markers.
 
     -r, --remote
