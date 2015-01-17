@@ -97,9 +97,9 @@ my $from;
 my $to;
 my $force;
 if (!GetOptions(
-    "from=s" => \$from,
-    "to=s"   => \$to,
-    "force"  => \$force,
+    "from=s"        => \$from,
+    "to=s"          => \$to,
+    "f|force"       => \$force,
 )) {
     usage;
     exit 2;
