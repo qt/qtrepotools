@@ -10,6 +10,7 @@
 use strict;
 use warnings;
 use Cwd;
+use Encode;
 
 if ($#ARGV < 0 or $#ARGV > 2 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit(-rest)?)$/)) {
     print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit|gerrit-rest} [instance]]\n";
@@ -49,6 +50,11 @@ for my $key (keys %config) {
     $watch_files{$1} = $config{$key} if ($key =~ /^watches\.([^.]+)\.files/);
     $watch_messages{$1} = $config{$key} if ($key =~ /^watches\.([^.]+)\.message/);
 }
+# The whitelist is space-separated, supporting double-quoted strings with spaces.
+# Remember to backslash-escape the quotes if you edit .gitconfig manually.
+my %good_names;
+$_ = decode_utf8($config{goodnames} || "");
+$good_names{$1 || $2} = 1 while (/(\w+)|\"([^\"]+)\"/g);
 my $fail = 0;
 my $file = "";
 my $lineno = 0;
@@ -180,6 +186,34 @@ sub complain_style()
     }
 }
 
+sub check_email($$$$)
+{
+    my ($real, $addr, $line, $label) = @_;
+
+    if ($addr =~ /\.\(none\)$/) {
+        if ($gerrit_rest) {
+            do_complain($line, "Bogus address", "email", 1);
+        } else {
+            do_complain(0, "Bogus $label address", "email", 1);
+        }
+    }
+    # UTF-8 is a pretty safe bet - all modern Unix systems use it, and
+    # when not printing to a Windows console, msysgit also uses it.
+    eval { $real = decode_utf8($real, Encode::FB_CROAK); };
+    return if ($@);
+    # We complain about names which
+    # - contain no spaces
+    # - have words starting with lowercase (except for common Nobiliary particles)
+    # - have single letters not followed by a dot or apostrophe
+    if (!defined($good_names{$real}) && ($real !~ / / || $real =~ /\b(?!de|d'|van|von)\p{Ll}|\b\pL([^.'\pL]|$)/u)) {
+        if ($gerrit_rest) {
+            do_complain($line, "Suspicious real name", "email");
+        } else {
+            do_complain(0, "Suspicious $label real name", "email");
+        }
+    }
+}
+
 sub check_apple_terminology()
 {
     if ($clike) {
@@ -230,10 +264,10 @@ while (<MSG>) {
     if (!s/^    //) {
         if (/^parent /) {
             $parents++ ;
-        } elsif (/^author .*\.\(none\)/) {
-            do_complain($gerrit_rest ? $parents + 1 : 0, "Bogus author email", "email", 1);
-        } elsif (/^commiter .*\.\(none\)/) {
-            do_complain($gerrit_rest ? $parents + 3 : 0, "Bogus committer email", "email", 1);
+        } elsif (/^author ([^<]*?) *<([^>]+)/) {
+            check_email($1, $2, $parents + 1, "author");
+        } elsif (/^commiter ([^<]*?) *<([^>]+)/) {
+            check_email($1, $2, $parents + 3, "committer");
         }
         next
     }
