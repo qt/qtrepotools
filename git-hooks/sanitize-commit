@@ -233,12 +233,12 @@ sub check_apple_terminology()
         }
     } elsif ($qmake) {
         # check qmake scopes
-        if (/\bmac\s*:\s*!\s*ios\b/) {
+        if (s/\bmac\s*:\s*!\s*ios\b/X/) {
             complain_ln("Use of deprecated idiom 'mac:!ios', use 'osx' instead", "terminology");
         }
 
         # Not invalid, but remind people about how the unfortunately named 'mac' must be used
-        if (/\bmac\b/) {
+        if (s/^([^#]*)\bmac\b( *[|:{])/$1X$2/) {
             complain_ln("Possible use of qmake scope 'mac': this covers both OS X and iOS;" .
                         " if you meant only OS X, use 'osx'", "", -1);
         }
