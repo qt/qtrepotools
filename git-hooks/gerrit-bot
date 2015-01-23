@@ -40,6 +40,9 @@ use File::Path;
 #     The magic string @SHA@ is replaced by the commit to be checked.
 #     Everything it dumps to stdout & stderr will be attached as a comment.
 #     It is supposed to return a score (offset by +10).
+#   excluded (optional)
+#     Space-separated list of exclusions of the form <project> or
+#     <project>:<branch>.
 #   verbose (default 0)
 #     Print progress/result messages.
 
