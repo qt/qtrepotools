@@ -45,11 +45,6 @@ if (defined $config{flags}) {
         $cfg{$c} = 1;
     }
 }
-my (%watch_files, %watch_messages);
-for my $key (keys %config) {
-    $watch_files{$1} = $config{$key} if ($key =~ /^watches\.([^.]+)\.files/);
-    $watch_messages{$1} = $config{$key} if ($key =~ /^watches\.([^.]+)\.message/);
-}
 # The whitelist is space-separated, supporting double-quoted strings with spaces.
 # Remember to backslash-escape the quotes if you edit .gitconfig manually.
 my %good_names;
@@ -623,11 +618,6 @@ while (<DIFF>) {
             #print "*** got file ".$file.".\n";
             $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|qdoc|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
             $qmake = ($file =~ /\.pr[filo]$/i);
-            for my $key (keys %watch_files) {
-                if ($file =~ /^$watch_files{$key}$/) {
-                    complain($watch_messages{$key}, "", -1);
-                }
-            }
             $is_bin = ($file =~ /\.(ps|pdf)$/);
             my $foreign = $is_bin || ($file =~ /(^|\/)3rdparty\//);
             $new_file = 0;

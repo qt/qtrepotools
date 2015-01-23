@@ -45,6 +45,17 @@ use File::Path;
 #     <project>:<branch>.
 #   maintainers (optional)
 #     Space-separated list of reviewers to add on "special occasions".
+#   watches (optional)
+#     Space-separated list of path watches. Each watch requires an own
+#     section named watches.<name> with the following keys:
+#       projects (default ".*")
+#         Regular expression specifying the projects to watch.
+#       files
+#         Regular expression specifying the filepaths to watch.
+#       message (optional)
+#         The message to post when this watch triggers.
+#       invite (optional)
+#         Space-separated list of reviewers to add when this watch triggers.
 #   verbose (default 0)
 #     Print progress/result messages.
 
@@ -87,7 +98,21 @@ my $GIT_DO_FETCH = getcfg 'gitdofetch';
 my $WORKER = getcfg 'worker';
 my %EXCLUDED_PROJECTS = map { $_ => 1 } split(/\s+/, getcfg('excluded', ""));
 my @MAINTAINERS = split(/\s+/, getcfg('maintainers', ""));
+my @WATCHES = split(/\s+/, getcfg('watches', ""));
 my $verbose = getcfg 'verbose', 0;
+
+my (%watch_projects, %watch_files, %watch_messages, %watch_invites);
+for my $w (@WATCHES) {
+  my $p = $config{'watches.'.$w.'.projects'};
+  $watch_projects{$w} = defined($p) ? qr/^$p$/ : undef;
+  my $f = $config{'watches.'.$w.'.files'};
+  die "watches.$w.files not set.\n" if (!defined($f));
+  $watch_files{$w} = qr/^$f$/;
+  my $m = $config{'watches.'.$w.'.message'};
+  $watch_messages{$w} = defined($m) ? $m."\n\n" : "";
+  my $i = $config{'watches.'.$w.'.invite'};
+  $watch_invites{$w} = defined($i) ? [ split(/\s+/, $i) ] : [];
+}
 
 my $gerrit_rest;
 if ($REST_HOST) {
@@ -119,6 +144,7 @@ sub process_commit($$$$$)
   my $orig_project = $project;
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
   my ($score, $verdict);
+  my $message = "";
   my @invite;
   my $use_rest = 0;
   if (defined($EXCLUDED_PROJECTS{$project}) || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
@@ -157,6 +183,26 @@ sub process_commit($$$$$)
       }
       $verbose and print "===== ".strftime("%c", localtime(time()))." ===== fetched change\n";
     }
+
+    my @watches;
+    for my $w (@WATCHES) {
+      my $wp = $watch_projects{$w};
+      push @watches, $w if (!defined($wp) || $project =~ $wp);
+    }
+    if (@watches) {
+      my @touched = `git diff-tree --name-only --no-commit-id --ignore-submodules -r -C --root $rev`;
+      chop(@touched);
+      for my $w (@watches) {
+        for my $file (@touched) {
+          if ($file =~ $watch_files{$w}) {
+            $message .= $watch_messages{$w};
+            push @invite, @{$watch_invites{$w}};
+            last;
+          }
+        }
+      }
+    }
+
     my $worker = $WORKER;
     $worker =~ s/\@SHA1\@/$rev/g;
     open VERDICT, $worker." 2>&1 |" or die "cannot run worker: ".$!;
@@ -186,6 +232,9 @@ sub process_commit($$$$$)
     }
   }
   if ($use_rest) {
+    if (defined($$verdict{message}) || length($message)) {
+      $$verdict{message} = $message.($$verdict{message} || "");
+    }
     eval {
       $gerrit_rest->POST("/changes/$number/revisions/$rev/review", $verdict);
     };
@@ -195,6 +244,7 @@ sub process_commit($$$$$)
       return;
     }
   } else {
+    $verdict = $message.$verdict;
     my @args = ();
 #    push @args, ("--project", $project);
     push @args, ("--project", $orig_project);  # XXX Workaround QTQAINFRA-381
