@@ -43,6 +43,8 @@ use File::Path;
 #   excluded (optional)
 #     Space-separated list of exclusions of the form <project> or
 #     <project>:<branch>.
+#   maintainers (optional)
+#     Space-separated list of reviewers to add on "special occasions".
 #   verbose (default 0)
 #     Print progress/result messages.
 
@@ -84,6 +86,7 @@ my $GIT_BASEDIR = getcfg 'gitbasedir';
 my $GIT_DO_FETCH = getcfg 'gitdofetch';
 my $WORKER = getcfg 'worker';
 my %EXCLUDED_PROJECTS = map { $_ => 1 } split(/\s+/, getcfg('excluded', ""));
+my @MAINTAINERS = split(/\s+/, getcfg('maintainers', ""));
 my $verbose = getcfg 'verbose', 0;
 
 my $gerrit_rest;
@@ -116,6 +119,7 @@ sub process_commit($$$$$)
   my $orig_project = $project;
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
   my ($score, $verdict);
+  my @invite;
   my $use_rest = 0;
   if (defined($EXCLUDED_PROJECTS{$project}) || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
     $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project."\n";
@@ -168,6 +172,7 @@ sub process_commit($$$$$)
     if ($REST_HOST) {
       if (length($verdict) > 50000) {
         $verdict = "**** Worker produced an unreasonable amount of output. You should ask the bot maintainers for advice.";
+        push @invite, @MAINTAINERS;
       } else {
         $use_rest = 1;
         $verdict = decode_json($verdict);
@@ -206,6 +211,14 @@ sub process_commit($$$$$)
     }
   }
   $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref."): $score\n";
+  if (@invite) {
+    if (system(@gerrit, "set-reviewers", (map { ('-a', $_) } @invite), '--', $rev)) {
+      print "===== ".strftime("%c", localtime(time()))." ===== invitation FAILED\n";
+      printerr("Inviting reviewers to ".$rev." (".$project."/".$ref.") failed");
+      return;
+    }
+    $verbose and print "Invited @invite to ".$rev." (".$project."/".$ref.")\n";
+  }
 }
 
 $| = 1; # make STDOUT autoflush
