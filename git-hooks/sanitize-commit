@@ -281,8 +281,9 @@ while (<MSG>) {
                 $badrev = $lineno;
             } elsif (/^Signed-off-by:/i) {
                 $badsign = $lineno;
-            } elsif (/^Task-number:/i && !/^Task-number:/) {
-                complain_ln("Capitalization of \"Task-number\" is wrong", "");
+            } elsif (/^Task-number: *(.*)/i) {
+                complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
+                complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
             }
             if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
                 complain_ln("Gerrit change id outside Change-Id footer", "changeid");
