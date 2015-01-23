@@ -178,8 +178,6 @@ sub process_commit($$$$$)
       if (length($verdict) > 20000) {
         $verdict = substr($verdict, 0, 20000)."\n\n**** Output truncated. Fix the problems above to get more output.\n";
       }
-      $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
-      $verdict =~ s/^\s+|\s+$//g;
     }
   }
   if ($use_rest) {
@@ -196,7 +194,11 @@ sub process_commit($$$$$)
 #    push @args, ("--project", $project);
     push @args, ("--project", $orig_project);  # XXX Workaround QTQAINFRA-381
     push @args, ("--sanity-review", ($score > 0) ? "+".$score : $score);
-    push @args, ("--message", '"'.$verdict.'"') if (length($verdict));
+    if (length($verdict)) {
+      $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
+      $verdict =~ s/^\s+|\s+$//g;
+      push @args, ("--message", '"'.$verdict.'"');
+    }
     if (system(@gerrit, "review", @args, $rev)) {
       print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
       printerr("Submission of verdict for ".$rev." (".$project."/".$ref.") failed");
