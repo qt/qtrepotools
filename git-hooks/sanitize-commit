@@ -319,12 +319,6 @@ while (<MSG>) {
                 complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
                 complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
             }
-            if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
-                complain_ln("Gerrit change id outside Change-Id footer", "changeid");
-            }
-            if (!$badurl && /$badurl_rx/o) {
-                complain_ln("URL pointing to Gerrit or JIRA", "url");
-            }
             my $ftr = 0;
             if (/^\((partial(ly)? )?(cherry[- ]pick|(back)?port)(ed)? /) {
                 $cherry = 1 if (!/\)/);
@@ -360,6 +354,12 @@ while (<MSG>) {
         }
     }
 
+    if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
+        complain_ln("Gerrit change id outside Change-Id footer", "changeid");
+    }
+    if (!$badurl && /$badurl_rx/o) {
+        complain_ln("URL pointing to Gerrit or JIRA", "url");
+    }
     check_spelling() if ($spell_check);
     check_apple_terminology();
     styleFail("Trailing whitespace") if (s/[ \t]+\r?\n$//);
