@@ -250,7 +250,7 @@ while (<MSG>) {
         if (/\bQT[A-Z]+-\d+\b/) {
             complain_cln("Bug reference in summary", "log");
         }
-        if (!$iswip && $parents < 2 && /\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/i) {
+        if (!$iswip && $parents < 2 && /\b(?:WIP|Wip|wip(?!\/))\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/) {
             complain_cln("Apparently pushing a Work In Progress", "wip", 1);
         } elsif (!$iswip && !$badlog && length($_) < 7) {
             complain_cln("Summary is too short", "log");
