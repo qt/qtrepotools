@@ -102,6 +102,13 @@ sub complain_cln($$;$)
     do_complain($gerrit_rest ? $lineno : 0, $msg, $key, $level);
 }
 
+use constant {
+    STS_BLANK => 0,     # Empty lines except after footer
+    STS_TEXT => 1,      # Non-footer text
+    STS_FOOTER => 2,    # Footer
+    STS_FTR_BLNK => 3   # Empty lines after footer
+};
+
 my $clike = 0;
 my $qmake = 0;
 my $iswip = defined($cfg{wip});
@@ -114,7 +121,8 @@ my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
 my $parents = 0;
 my $inchangelog = 0;
-my ($footer, $cherry) = (0, 0);
+my $doftr = !defined($cfg{footer});
+my ($footer, $cherry) = (STS_BLANK, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 
 # Load spelling errors dataset if available
@@ -307,7 +315,7 @@ while (<MSG>) {
             $cherry = 0;
             $inchangelog = 0;
             # Empty line following footer(s).
-            $footer = -2 if ($footer == -1);
+            $footer = ($footer == STS_FOOTER) ? STS_FTR_BLNK : STS_BLANK;
         } elsif ($cherry) {
             $cherry = 0 if (/\)/);
         } else {
@@ -339,26 +347,23 @@ while (<MSG>) {
                 $inchangelog = 1;
                 complain_ln("Bad form of [ChangeLog] tag", "changelog") if (!/^\[ChangeLog\]/);
             }
-            if ($inchangelog) {
-                complain_ln("No empty line between ChangeLog and footers", "changelog") if ($ftr || $footer == -1);
-                if (!$ftr) {
-                    complain_ln("Missing space between ChangeLog tags and text", "changelog") if (/\][^\s\[]/);
-                    complain_ln("JIRA task referenced from ChangeLog", "changelog") if (/\[QT[A-Z]+-\d+\]/);
-                    complain_ln("Redundant repository reference in ChangeLog", "", -1) if (/\[\Q$repo\E\]/i);
-                }
+            if ($inchangelog && !$ftr) {
+                complain_ln("Missing space between ChangeLog tags and text", "changelog") if (/\][^\s\[]/);
+                complain_ln("JIRA task referenced from ChangeLog", "changelog") if (/\[QT[A-Z]+-\d+\]/);
+                complain_ln("Redundant repository reference in ChangeLog", "", -1) if (/\[\Q$repo\E\]/i);
             }
-            if ($ftr) {
-                if ($footer == 0) {
-                    # Footer following non-footer
-                    $footer = -1;
-                } elsif ($footer == -2) {
-                    # Footer following empty line(s) following footer(s)
-                    $footer = $lineno;
+            if ($ftr && $doftr) {
+                if ($footer == STS_TEXT) {
+                    complain_ln("Missing empty line between text and footers", "footer");
+                } elsif ($footer == STS_FTR_BLNK) {
+                    do_complain($lineno - 1, "Empty lines between footers", "footer");
                 }
+                $footer = STS_FOOTER;
             } else {
-                # Non-footer resets the state, assuming it was a false alert.
-                # Possibly we should make a different complaint instead.
-                $footer = 0;
+                if ($footer == STS_FOOTER || $footer == STS_FTR_BLNK) {
+                    complain_ln("Text following footers", "footer");
+                }
+                $footer = STS_TEXT;
             }
         }
     }
@@ -380,9 +385,6 @@ if ($badrev && !defined($cfg{revby})) {
 }
 if ($badsign) {
     do_complain($badsign, "Unnecessary Signed-off-by footer", "", -1);
-}
-if ($footer > 0 && !defined($cfg{footer})) {
-    do_complain($footer - 1, "Empty lines between footers", "footer");
 }
 
 complain_spelling();
