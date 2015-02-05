@@ -628,7 +628,7 @@ while (<DIFF>) {
             $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
             $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
             $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
-            $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(plist(\.[^.\/]+)?|def|spec|changes|[xn]ib|storyboardc?)$)/);
+            $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(plist(\.[^.\/]+)?|def|spec|changes|[xn]ib|storyboardc?|go)$)/);
             $ctlkw_check = $tabs_check && $clike;
             $eof_check = !$is_bin && ($file !~ /\.plist(\.[^.\/]+)?$/); # Xcode consistently forgets the trailing newline
             # .ts files usually contain languages other than English
