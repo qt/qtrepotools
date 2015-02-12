@@ -145,6 +145,7 @@ sub process_commit($$$$$)
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
   my ($score, $verdict);
   my $message = "";
+  my $iswip = 0;
   my @invite;
   my $use_rest = 0;
   if (defined($EXCLUDED_PROJECTS{$project}) || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
@@ -184,14 +185,18 @@ sub process_commit($$$$$)
       $verbose and print "===== ".strftime("%c", localtime(time()))." ===== fetched change\n";
     }
 
+    my $subject;
+
     my @watches;
     for my $w (@WATCHES) {
       my $wp = $watch_projects{$w};
       push @watches, $w if (!defined($wp) || $project =~ $wp);
     }
     if (@watches) {
-      my @touched = `git diff-tree --name-only --no-commit-id --ignore-submodules -r -C --root $rev`;
+      my @touched = `git show --pretty=\%s --name-only --ignore-submodules -C $rev`;
       chop(@touched);
+      $subject = shift @touched;
+      shift @touched;  # empty line
       for my $w (@watches) {
         for my $file (@touched) {
           if ($file =~ $watch_files{$w}) {
@@ -201,6 +206,15 @@ sub process_commit($$$$$)
           }
         }
       }
+    }
+
+    if (!defined($subject)) {
+        $subject = `git show --pretty=\%s -s $rev`;
+        chop($subject);
+    }
+    if ($subject =~ /\b(?:WIP|Wip|wip(?!\/))\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/) {
+        $iswip = 1;
+        $message = "Apparently pushing a Work In Progress\n\n".$message;
     }
 
     my $worker = $WORKER;
@@ -223,7 +237,7 @@ sub process_commit($$$$$)
         $use_rest = 1;
         $verdict = decode_json($verdict);
         defined($verdict) or die "cannot decode verdict as JSON\n";
-        $$verdict{labels} = { 'Sanity-Review' => $score };
+        $$verdict{labels} = { 'Sanity-Review' => $score, 'Code-Review' => ($iswip ? -2 : 0) };
       }
     } else {
       if (length($verdict) > 20000) {
@@ -249,6 +263,7 @@ sub process_commit($$$$$)
 #    push @args, ("--project", $project);
     push @args, ("--project", $orig_project);  # XXX Workaround QTQAINFRA-381
     push @args, ("--sanity-review", ($score > 0) ? "+".$score : $score);
+    push @args, ("--code-review", $iswip ? -2 : 0);
     if (length($verdict)) {
       $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
       $verdict =~ s/^\s+|\s+$//g;

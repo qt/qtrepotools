@@ -106,7 +106,6 @@ use constant {
 
 my $clike = 0;
 my $qmake = 0;
-my $iswip = defined($cfg{wip});
 my $badrev = 0;
 my $badsign = 0;
 my $badid = defined($cfg{changeid});
@@ -287,9 +286,7 @@ while (<MSG>) {
         if (/\bQT[A-Z]+-\d+\b/) {
             complain_cln("Bug reference in summary", "log");
         }
-        if (!$iswip && $parents < 2 && /\b(?:WIP|Wip|wip(?!\/))\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/) {
-            complain_cln("Apparently pushing a Work In Progress", "wip", 1);
-        } elsif (!$iswip && !$badlog && length($_) < 7) {
+        if (!$badlog && length($_) < 7) {
             complain_cln("Summary is too short", "log");
         } elsif (!$badlog && !$revert1 && length($_) > 120) {
             complain_cln("Summary is excessively long", "log");

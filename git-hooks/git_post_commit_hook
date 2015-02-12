@@ -39,6 +39,4 @@ if test -L "$me"; then
 fi
 
 sha1=${1-HEAD} # just for debugging
-GIT_PUSH=${GIT_PUSH+$GIT_PUSH,}wip # this check makes totally no sense locally
-export GIT_PUSH
 exec `dirname "$me"`/sanitize-commit $sha1 strict >&2
