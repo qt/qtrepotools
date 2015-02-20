@@ -101,15 +101,6 @@ done in '/home/user/qt-5-build'. It is overridden by a value for the checkout
 '/home/user/qt-5special', which would result in '/home/user/qt-5-special-build'
 EOF
 
-# Empty entry means: Do not touch.
-my %preferredBranches = (
-    'qtrepotools' => 'master',
-#   -- Unmaintained modules as of 4.12.2012. Qt3D currently only has 'dev'
-    'qtfeedback' => 'master',
-    'qtpim' => 'master',
-    'qtqa' => 'master',
-);
-
 # --------------- Detect OS
 
 my ($OS_LINUX, $OS_WINDOWS, $OS_MAC)  = (0, 1, 2);
@@ -473,6 +464,31 @@ sub determineModules
     return (@nonWebKit, @webKit)
 }
 
+# ---- Return the preferred branch for a module/Qt branch.
+#      Empty result means: Do not touch the module.
+sub preferredBranch
+{
+    my ($module, $desiredQtBranch) = @_;
+    my %preferredBranches = ( # Fixed branches
+        'qtrepotools' => 'master',
+#       -- Unmaintained modules as of 4.12.2012. Qt3D currently only has 'dev'
+        'qtfeedback' => 'master',
+        'qtpim' => 'master',
+        'qtqa' => 'master',
+    );
+    my $result = $preferredBranches{$module};
+    return $result if defined $result;
+    if ($module eq 'qtenginio') {
+        my %enginioMapping = (
+            '5.4' => '1.1',
+            '5.5' => '1.2'
+        );
+        my $mapped = $enginioMapping{$desiredQtBranch};
+        return defined $mapped ? $mapped : 'dev';
+    }
+    return $desiredQtBranch;
+}
+
 # ---- Helper to be called before pull. Checks if
 #      the module is in a 'no branch' state after init-repository or in the wrong
 #      branch as from the configuration file.
@@ -481,9 +497,7 @@ sub determineModules
 sub checkoutBranch
 {
     my ($mod, $desiredBranchIn) = @_;
-    # -- Special treatment for webkit: Do not touch.
-    my $desiredBranch = $preferredBranches{$mod};
-    $desiredBranch = $desiredBranchIn unless defined $desiredBranch;
+    my $desiredBranch = preferredBranch($mod, $desiredBranchIn);
     if ($desiredBranch eq '') {
        print 'Skipping ', $mod, ".\n";
        return 0;
