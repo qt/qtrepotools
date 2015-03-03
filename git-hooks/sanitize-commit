@@ -746,7 +746,7 @@ if ($gerrit_rest) {
     }
     if (%complaints) {
         push @cover_texts, $_ for (sort keys %footnotes);
-        push @cover_texts, "See http://wiki.qt.io/?title=Early_Warning_System for explanations.";
+        push @cover_texts, "See http://wiki.qt.io/Early_Warning_System for explanations.";
         $gerrit_review{message} = join "\n\n", @cover_texts;
     }
     require JSON;
@@ -781,7 +781,7 @@ if ($gerrit_rest) {
         print $elpfx;
         print $lpfx.$_."\n" for (sort keys %footnotes);
     }
-    print $elpfx.$lpfx."See http://wiki.qt.io/?title=Early_Warning_System for explanations.\n";
+    print $elpfx.$lpfx."See http://wiki.qt.io/Early_Warning_System for explanations.\n";
 }
 
 exit ($gerrit ? (!$fail ? 11 : (10 - $fail)) : $fail)
