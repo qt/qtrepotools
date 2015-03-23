@@ -567,7 +567,7 @@ if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) 
     print "\n### This appears to be the first use of qt5_tool on this machine.\n\nCreating configuration file '",$configFile, "'...\n";
     my $newDeveloperBuild = prompt('Developer build (y/n)', 'y') =~ /y/i;
     my $newCodeReviewUser = '';
-    my $newInitArgumentsDefault = '--no-webkit';
+    my $newInitArgumentsDefault = '--module-subset=default,-qtwebkit,-qtwebkit-examples,-qtwebengine';
     $newCodeReviewUser = prompt('Enter CodeReview user name', $user) if ($newDeveloperBuild);
     my $newInitArguments = prompt('Enter arguments to init-repository', $newInitArgumentsDefault);
     my $newConfigureArguments = prompt('Enter arguments to configure', defaultConfigureArguments($newDeveloperBuild));
