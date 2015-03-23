@@ -39,9 +39,7 @@ my $BOOTSTRAP=0;
 my $STATUS=0;
 my $UPDATE=0;
 my $TEST=0;
-my $REBUILD_CONFIGURE=0;
 my $BUILD_WEBKIT = 0;
-my $optModuleBranchArgument;
 my $optGerritModule;
 my $optGitHooks;
 my $optDesiredBranch;
@@ -539,12 +537,11 @@ $Getopt::ignoreCase = 0;
 if (!GetOptions('clean' => \$CLEAN,
      'pull' => \$PULL, 'Branch=s' => \$optDesiredBranch, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
      'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
-     'acking=s' => \$optModuleBranchArgument, 'gerrit=s' => \$optGerritModule, 'hooks' => \$optGitHooks,
-     'quick-bootstrap'  => \$BOOTSTRAP,
-     'webkit'  => \$BUILD_WEBKIT, 'x' => \$REBUILD_CONFIGURE)
+     'gerrit=s' => \$optGerritModule, 'hooks' => \$optGitHooks,
+     'quick-bootstrap'  => \$BOOTSTRAP, 'webkit'  => \$BUILD_WEBKIT)
     || ($CLEAN + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS
-        + $REBUILD_CONFIGURE + $TEST + $BUILD_WEBKIT== 0
-        && ! defined $optModuleBranchArgument && !defined $optGerritModule && !defined $optGitHooks)) {
+        + $TEST + $BUILD_WEBKIT== 0
+        && !defined $optGerritModule && !defined $optGitHooks)) {
     print $USAGE;
     exit (1);
 }
@@ -821,11 +818,6 @@ if ( $PULL !=  0 ) {
         chdir($rootDir);
    } # foreach
 } # pull
-
-# --------------- Rebuild configure.exe
-if ( $REBUILD_CONFIGURE !=  0 ) {
-    rebuildConfigure($rootDir);
-}
 
 # ---- Update
 
