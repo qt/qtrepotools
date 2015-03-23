@@ -45,7 +45,7 @@ my $optModuleBranchArgument;
 my $optGerritModule;
 my $optGitHooks;
 my $optDesiredBranch;
-my $gitoriousURL = 'git://gitorious.org/qt/qt5.git';
+my $superRepositoryUrl = 'git://code.qt.io/qt/qt5.git';
 my $codeReviewHost = 'codereview.qt-project.org';
 my $codeReviewPort = 29418;
 my $configFile;
@@ -597,8 +597,8 @@ if ( $BOOTSTRAP != 0 ) {
     }
     my $toolsFolder = 'qtrepotools';
     # -- Clone
-    my $cloneRc = execute($git, ('clone',  $gitoriousURL, $targetFolder));
-    die 'clone '.  $gitoriousURL . ' failed.' if $cloneRc;
+    my $cloneRc = execute($git, ('clone',  $superRepositoryUrl, $targetFolder));
+    die 'clone '.  $superRepositoryUrl . ' failed.' if $cloneRc;
     chdir($targetFolder) or die ('Failed to chdir to "' . $targetFolder . '":' . $!);
     # -- Run init
     my $initRc = 0;
@@ -607,7 +607,7 @@ if ( $BOOTSTRAP != 0 ) {
     } else {
         $initRc = execute('./init-repository', @initOptions);
     }
-    die 'init '. $gitoriousURL . ' failed.' if $initRc;
+    die 'init '. $superRepositoryUrl . ' failed.' if $initRc;
     exit 0;
 }
 
