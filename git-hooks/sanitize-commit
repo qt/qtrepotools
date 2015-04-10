@@ -51,7 +51,7 @@ my %good_names;
 $_ = decode_utf8($config{goodnames} || "");
 $good_names{$1 || $2} = 1 while (/(\w+)|\"([^\"]+)\"/g);
 my $fail = 0;
-my $file = "";
+my $file = "!!!!!";
 my $lineno = 0;
 my $summary;
 # Hash (by file) of hashes (by line) of lists (reports) of lists (msg, extra)
@@ -81,10 +81,11 @@ sub do_complain($$$;$@)
     } else {
         $msg = "Hint: ".$msg;
     }
-    if ($stable && !defined($complaints{$file})) {
-        tie %{$complaints{$file}}, 'Tie::IxHash';
+    my $fn = $line < 0 ? "" : $file;
+    if ($stable && !defined($complaints{$fn})) {
+        tie %{$complaints{$fn}}, 'Tie::IxHash';
     }
-    push @{$complaints{$file}{$line}}, [ $msg, @extra ];
+    push @{$complaints{$fn}{$line}}, [ $msg, @extra ];
 }
 
 sub complain($$;$)
@@ -204,7 +205,7 @@ sub check_email($$$$)
         if ($gerrit_rest) {
             do_complain($line, "Bogus address", "email", 1);
         } else {
-            do_complain(0, "Bogus $label address", "email", 1);
+            do_complain(-1, "Bogus $label address", "email", 1);
         }
     }
     # UTF-8 is a pretty safe bet - all modern Unix systems use it, and
@@ -219,7 +220,7 @@ sub check_email($$$$)
         if ($gerrit_rest) {
             do_complain($line, "Suspicious real name", "email");
         } else {
-            do_complain(0, "Suspicious $label real name", "email");
+            do_complain(-1, "Suspicious $label real name", "email");
         }
     }
 }
@@ -286,7 +287,6 @@ while (<MSG>) {
     if ($msgline == 1) {
         $summary = $_;
         $lineno = $parents + 6 if ($gerrit_rest);
-        $file = "!!!!!";
         $revert1 = 1 if (/^Revert ".*"$/);
         if (/^revert(ed|ing)? (commit )?[0-9a-f]{7,40}\.?$/i) {
             complain_cln("Summary of revert mentions only SHA1", "log");
@@ -769,7 +769,7 @@ if ($gerrit_rest) {
         }
         foreach my $ln (sort { $a <=> $b } keys %{$complaints{$fn}}) {
             my $pfx = $fpfx;
-            $pfx .= "$ln: " if ($ln && $ln < 1e9);
+            $pfx .= "$ln: " if ($ln > 0 && $ln < 1e9);
             foreach my $ent (@{$complaints{$fn}{$ln}}) {
                 my @ry = @$ent;
                 print $pfx.(shift @ry)."\n";
