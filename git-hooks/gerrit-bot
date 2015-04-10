@@ -212,7 +212,7 @@ sub process_commit($$$$$)
         $subject = `git show --pretty=\%s -s $rev`;
         chop($subject);
     }
-    if ($subject =~ /\b(?:WIP|Wip|wip(?!\/))\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/) {
+    if ($subject =~ /^[<[]?[Ww]ip\b|\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/) {
         $iswip = 1;
         $message = "Apparently pushing a Work In Progress\n\n".$message;
     }
