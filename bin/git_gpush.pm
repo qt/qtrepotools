@@ -649,6 +649,8 @@ our %gerrit_infos_by_id;
 # - base: SHA1 of commit on top of which the entire series which this
 #   Change is part of was pushed.
 # - orig: SHA1 of the _local_ commit 'pushed' was derived from.
+# - nbase/ntgt/ntopic: Non-committed values of the respective
+#   attributes, used by --group mode.
 
 my $next_key = 10000;
 # All known Gerrit Changes for the current repository.
@@ -698,7 +700,8 @@ sub save_state(;$$)
 
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
-    my @fkeys = ('key', 'grp', 'id', 'src', 'tgt', 'topic', 'base');
+    my @fkeys = ('key', 'grp', 'id', 'src', 'tgt', 'topic', 'base',
+                 'ntgt', 'ntopic', 'nbase');
     my @rkeys = ('pushed', 'orig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";
@@ -728,6 +731,9 @@ sub save_state(;$$)
         foreach my $ky (@fkeys) {
             my $val = $$change{$ky};
             if (defined($val)) {
+                # Support empty values without making the file look funny.
+                # We assume that no property ever contains a literal "".
+                $val = '""' if (!length($val));
                 push @lines, "$ky $val";
             }
         }
@@ -847,7 +853,7 @@ sub load_state_file(;$)
                 $$change{line} = $line;
                 push @changes, $change;
             }
-            $$change{$1} = $2;
+            $$change{$1} = ($2 eq '""') ? "" : $2;
         }
     }
 
@@ -1580,6 +1586,8 @@ sub _update_target_branches($)
                 push @changed, $change;
             }
             $$change{tgt} = $abr;
+            $$change{ntgt} = undef
+                if (($$change{ntgt} // "") eq $abr);
             $need_save = 1;
         }
     }

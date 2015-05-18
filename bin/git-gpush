@@ -75,7 +75,8 @@ Description:
     use --extend; to capture loose Changes right in front of the series,
     use --capture.
     It is possible to regroup series any time by specifying new exact
-    ranges.
+    ranges. The --group option can be used to (re-)group series without
+    actually pushing them at that time.
 
     Note that this program can be used in the middle of an interactive
     rebase, to push out the amended commits instantly.
@@ -86,6 +87,11 @@ Options:
 
     -c, --capture
         Make the series capture loose Changes right in front of it.
+
+    -g, --group
+        Group Changes into series without pushing them yet.
+        Note that this resets the pending properties (branch, topic,
+        and base) from a previous grouping that was not pushed out yet.
 
     -m, --minimal
         Try to avoid creating new PatchSets for unmodified Changes even
@@ -216,12 +222,15 @@ Examples:
     git gpush :3 +alex
     ...
     git commit -a -m "Another commit"
-    git gpush -e +alex
+    git gpush -e -g
     ...
     git commit -a -m "An unrelated commit"
     git gpush :1
+    ...
+    git gpush ~1 +alex
         First push the top three commits for review, then add another commit
-        to the series, and finally push another series.
+        to the series without re-pushing instantly, then push another commit,
+        and finally re-push the first series.
 
 Copyright:
     Copyright (C) 2017 The Qt Company Ltd.
@@ -247,6 +256,7 @@ my $ref_to;
 my $force_branch = 0;
 my $topic;
 my $force = 0;
+my $group_only = 0;
 my $list_only = 0;
 my $list_online = 0;
 
@@ -273,6 +283,8 @@ sub parse_arguments(@)
             $extend = 1;
         } elsif ($arg eq "-c" || $arg eq "--capture") {
             $capture = 1;
+        } elsif ($arg eq "-g" || $arg eq "--group") {
+            $group_only = 1;
         } elsif ($arg eq "-m" || $arg eq "--minimal") {
             $minimal = 1;
             $minimal_override = 1;
@@ -365,7 +377,12 @@ sub parse_arguments(@)
             @reviewers || @CCs || $force || $force_branch
             || defined($remote);
 
-    if ($list_only) {
+    if ($group_only) {
+        fail("--group and --list are mutually exclusive.\n")
+            if ($list_only);
+        fail("--group is incompatible with push-modifying options.\n")
+            if ($push_specific || $minimal_override);
+    } elsif ($list_only) {
         fail("--list/--list-online is incompatible with --quiet/--verbose.\n")
             if ($quiet || ($verbose && !$debug));
         fail("--list/--list-online is incompatible with series-specific options.\n")
@@ -443,7 +460,9 @@ sub caption_group($)
     my ($pfx, $rmt) = $list_only
                           ? ("Series of",
                              ($list_online && length($tos)) ? " on '$remote'" : "")
-                          : ("Pushing", " to '$remote'");
+                          : $group_only
+                                ? ("Grouping", "")
+                                : ("Pushing", " to '$remote'");
     return (sprintf("%s %d Change(s)%s%s%s:",
                     $pfx, int(@$changes), $tos, $rmt, $tpcs),
             $changes);
@@ -471,6 +490,10 @@ sub report_pushed_changes($)
 
 # Determine a singular value for a particular attribute from the Changes
 # in a series. Conflicting values are an error.
+# The way this function is used, values set via --group take precedence
+# over the "live" values for each Change individually, not for the whole
+# series. This avoids silently overriding the attributes of Changes which
+# are moved into the series after establishing it.
 sub aggregate_property($$$$)
 {
     my ($group, $prop_name, $get_prop, $get_ann) = @_;
@@ -581,7 +604,7 @@ sub determine_remote_branch($)
     my $br = $ref_to;
     if (!defined($br)) {
         $br = aggregate_property($group, 'target',
-                                 sub { $_[0]->{tgt} },
+                                 sub { $_[0]->{ntgt} // $_[0]->{tgt} },
                                  sub { '  => '.$_[0] });
     }
     if (!defined($br)) {
@@ -603,7 +626,7 @@ sub determine_topic($)
     if (!defined($tpc)) {
         # No topic was specified, so deduce it from the previous push(es).
         $tpc = aggregate_property($group, 'topic',
-                                  sub { $_[0]->{topic} },
+                                  sub { $_[0]->{ntopic} // $_[0]->{topic} },
                                   sub { '  /'.$_[0] });
     }
     $$group{topic} = $tpc;
@@ -702,9 +725,10 @@ sub determine_series($)
 
     my $pivot = $commit_by_id{$pivot_id}{change};
     my ($changes, $gid, $echange, $prospects) = do_determine_series($pivot, $extend, $capture);
+    my $action = $group_only ? "group" : "push";
     if (!$gid && @$changes && !$list_only) {
         my @reports;
-        report_fixed(\@reports, "Attempted to push ".int(@$changes)." loose Change(s):\n");
+        report_fixed(\@reports, "Attempted to $action ".int(@$changes)." loose Change(s):\n");
         report_local_changes(\@reports, [ $echange ], "[ Extend: ", " ]")
             if ($echange);
         report_local_changes(\@reports, $changes);
@@ -716,7 +740,7 @@ sub determine_series($)
         my @reports;
         report_fixed(\@reports, "Encountered ".int(@$prospects)." leading loose Change(s):\n");
         report_local_changes(\@reports, $prospects);
-        report_fixed(\@reports, "While attempting to push ".int(@$changes)." Change(s):\n");
+        report_fixed(\@reports, "While attempting to $action ".int(@$changes)." Change(s):\n");
         report_local_changes(\@reports, $changes);
         report_fixed(\@reports, "Please use --capture or specify exact ranges.\n");
         fail_formatted(\@reports);
@@ -836,6 +860,9 @@ sub map_remote_changes($)
             $$change{gerrit} = $good;
             # This overrides the current value, which is just a cache.
             $$change{topic} = $$good{topic};
+            # If the pending topic was set to match the server, drop the update.
+            $$change{ntopic} = undef
+                if (($$change{ntopic} // "") eq ($$good{topic} // ""));
         } elsif (@bad && !$force_branch) {
             my @bbr = map { $$_{branch} } @bad;
             $$change{annotation} = '  ['.join(" ", sort @bbr).']';
@@ -924,8 +951,8 @@ sub determine_base($)
         # is functionally equivalent to gpick-ing the entire series and
         # subsequently dropping some Changes locally.
         $base = aggregate_property($group, 'base',
-                                   sub { $_[0]->{base} },
-                                   sub { '  @'.substr($_[0], 0, 8) });
+                                   sub { $_[0]->{nbase} // $_[0]->{base} },
+                                   sub { '  @'.($_[0] ? substr($_[0], 0, 8) : "<reset>") });
         # Technically, we should re-validate the base before each push,
         # because pending PatchSets (or entire Changes) can be deleted,
         # and upstream commits can disappear due to forced pushes.
@@ -1652,6 +1679,24 @@ sub update_unpushed($)
     }
 }
 
+# We save the "prospective" state separately, so it remains authoritative
+# over gpick'd updates from Gerrit. However, we don't do that for the
+# series grouping, as that would lead to some unintuitive corner cases.
+sub update_state_grouping($)
+{
+    my ($group) = @_;
+
+    my $gid = $$group{gid};
+    foreach my $change (@{$$group{changes}}) {
+        $$change{grp} = $gid;
+        # We persist only explicitly specified values. Fallbacks
+        # are applied when the series is actually pushed.
+        $$change{ntopic} = $topic;
+        $$change{ntgt} = $ref_to;
+        $$change{nbase} = $ref_base;
+    }
+}
+
 sub update_state($)
 {
     my ($group) = @_;
@@ -1666,8 +1711,10 @@ sub update_state($)
         if (($$change{pushed} // "") ne $sha1) {
             $$change{pushed} = $sha1;
             $$change{topic} = $tpc;
+            $$change{ntopic} = undef;
         }
         $$change{tgt} = $branch;
+        $$change{ntgt} = undef;
         my $commit = $$change{local};
         $$change{orig} = $$commit{id};
         # --rebase would be required after redoing a merge with a different
@@ -1675,7 +1722,33 @@ sub update_state($)
         # Regular commits on top of merges are auto-rebased as well.
         $base = undef if (@{$$commit{parents}} > 1);
         $$change{base} = $base;
+        $$change{nbase} = undef;
     }
+}
+
+sub execute_grouping()
+{
+    my $group = get_changes();
+    # We validate a possibly specified push base early on, mostly
+    # because delaying it would be a lot more complicated or costly.
+    my @queries;
+    resolve_ref_base(\@queries);
+    if (@queries) {
+        query_gerrit(\@queries);
+        confirm_ref_base();
+    }
+    # We could rebase here, as that would tell us whether the desired
+    # grouping is feasible (re dependencies) early on. However, it would
+    # significantly slow down the operation for this little benefit.
+    # We also don't query Gerrit, as online-classifying unrebased Changes
+    # yields mostly irrelevant and potentially even confusing annotations;
+    # branch tracking is not necessary here, either.
+    if (!$quiet) {
+        classify_changes_offline($group);
+        show_changes($group);
+    }
+    print "Not pushing - group mode.\n" if ($debug);
+    update_state_grouping($group);
 }
 
 sub execute_pushing()
@@ -1736,5 +1809,9 @@ process_config();
 parse_arguments(@ARGV);
 goto_gitdir();
 load_state(0);
-execute_pushing();
+if ($group_only) {
+    execute_grouping();
+} else {
+    execute_pushing();
+}
 save_state($dry_run);

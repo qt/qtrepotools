@@ -2654,6 +2654,8 @@ sub do_adjust_changes($)
             # If {pushed} was already set, branch tracking already made this a no-op.
             $$change{tgt} = $$ginfo{branch}
                 if (($upd & UPD_META) || ($ginfo && !defined($$change{tgt})));
+            # Note: We don't clear the n* properties; they are meant to
+            # be applied regardless of what happens on Gerrit meanwhile.
         }
         if ($upd & UPD_INFO) {
             $any_crossed = 1 if ($$ginfo{cross_branch});
