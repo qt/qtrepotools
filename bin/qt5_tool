@@ -127,18 +127,16 @@ sub which
     return undef;
 }
 
-# -- Locate an utility (grep, scp, etc) in MSYS git. This is specifically
-#    for the setup case in which only git from the cmd folder and not the utilities
-#    are in the path. We then look at the git and return ..\bin\<utility>.exe.
+# -- Locate an utility (grep, scp, etc) in MSYS git by
+#    cd'ing up from the path of git passed in (either 'cmd/git.exe' or
+#    'bin/git.exe') and then trying 'bin' (pre 2.5) or '/usr/bin' (2.5).
 sub msysGitUtility
 {
-#   -- Look for 'cmd/git(.exe,.cmd)' and cd ..\bin. Note that as of msygit 1.8, git.exe
-#      is in cmd.
     my ($git, $utility) = @_;
-    my $gitBinDir = dirname($git);
-    if ($gitBinDir =~ /cmd$/i) {
-        my $msysGitBinFolder = File::Spec->catfile(dirname($gitBinDir), 'bin');
-        return File::Spec->catfile($msysGitBinFolder, $utility . '.exe');
+    my $msysGitRoot = dirname(dirname($git));
+    foreach my $binFolder ('bin', 'usr/bin') {
+        my $file = File::Spec->catfile($msysGitRoot, $binFolder, $utility . '.exe');
+        return $file if -f $file;
     }
     return $utility;
 }
