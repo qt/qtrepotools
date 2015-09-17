@@ -88,6 +88,7 @@ initArguments:      Arguments to init-repository for -q.
 codeReviewUser:     User name for code review (Gerrit)
 branch:             'dev', 'stable', 'release' or other
 configureArguments: Arguments to configure
+skip:               List of Qt modules to exclude from building
 shadowBuildPostfix: Postfix to use for shadow build directory.
 
 Example:
@@ -566,9 +567,12 @@ if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) 
     $newCodeReviewUser = prompt('Enter CodeReview user name', $user) if ($newDeveloperBuild);
     my $newInitArguments = prompt('Enter arguments to init-repository', $newInitArgumentsDefault);
     my $newConfigureArguments = prompt('Enter arguments to configure', defaultConfigureArguments($newDeveloperBuild));
+    my $defaultkippedModules = 'qt3d qtcanvas3d qtconnectivity qtenginio qtfeedback qtgraphicaleffects qtlocation qtpim qtquick1 qtscript qtsensors qtserialport qtsystems qtwayland qtwebchannel qtwebengine qtwebsockets qtxmlpatterns';
+    my $newSkippedModules = prompt('Enter a list of modules to skip', $defaultkippedModules);
     my $newBranch = prompt('Branch', 'dev');
     my $configFileHandle = new IO::File('>' . $configFile) or die ('Unable to write to ' . $configFile . ':' . $!);
     print $configFileHandle 'configureArguments=', $newConfigureArguments, "\n" if $newConfigureArguments ne '';
+    print $configFileHandle 'skip=',$newSkippedModules, "\n" if $newSkippedModules ne '';
     print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
     print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
     print $configFileHandle $branchConfigKey, '=', $newBranch,"\n";
@@ -837,9 +841,16 @@ if ( $BUILD !=  0 ) {
     my @configureArguments;
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
     push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
-    if (!$BUILD_WEBKIT) {
-        push(@configureArguments, "-skip");
-        push(@configureArguments, "qtwebkit");
+    my $skippedModules =  readQt5ToolConfig('skip');
+    my @skipList;
+    push(@skipList, 'qtwebkit') if !$BUILD_WEBKIT;
+    push(@skipList, split(/ /, readQt5ToolConfig('skip')));
+    foreach my $skippedModule (@skipList) {
+        if (-d File::Spec->catfile($rootDir, $skippedModule)) {
+            push(@configureArguments, '-skip', $skippedModule);
+        } else {
+            warn('Module to be skipped does not exist : ' . $skippedModule);
+        }
     }
     $makeInstallRequired = grep(/^-prefix$/, @configureArguments);
     my $developerBuildSpecified = grep(/-developer-build/, @configureArguments);
@@ -855,6 +866,7 @@ if ( $BUILD !=  0 ) {
         chdir($shadowBuildDir) or die  ('Unable to chdir ' . $shadowBuildDir . ' :' . $!);
     }
 #   ---- Configure and build
+    print 'Configure arguments: ', join(' ', @configureArguments), "\n";
     my $brc = execute(File::Spec->catfile($rootDir, 'configure'), @configureArguments);
     die 'Configure failed'  if ($brc);
 } # BUILD
