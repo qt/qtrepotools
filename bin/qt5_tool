@@ -840,11 +840,11 @@ if ( $BUILD !=  0 ) {
     winRemoveGitFromPath() if $minGW;
     my @configureArguments;
     my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
-    push(@configureArguments, split(/ /, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
+    push(@configureArguments, split(/ +/, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
     my $skippedModules =  readQt5ToolConfig('skip');
     my @skipList;
     push(@skipList, 'qtwebkit') if !$BUILD_WEBKIT;
-    push(@skipList, split(/ /, readQt5ToolConfig('skip')));
+    push(@skipList, split(/ +/, readQt5ToolConfig('skip')));
     foreach my $skippedModule (@skipList) {
         if (-d File::Spec->catfile($rootDir, $skippedModule)) {
             push(@configureArguments, '-skip', $skippedModule);
