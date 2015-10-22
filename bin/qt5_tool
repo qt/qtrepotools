@@ -39,7 +39,6 @@ my $BOOTSTRAP=0;
 my $STATUS=0;
 my $UPDATE=0;
 my $TEST=0;
-my $BUILD_WEBKIT = 0;
 my $optGerritModule;
 my $optGitHooks;
 my $optDesiredBranch;
@@ -68,7 +67,6 @@ Options:
   -t  Test: Builds and runs tests located in tests/auto for each module,
       creates log file(s) in that directory as well as a summary log  file.
   -q  Quick bootstrap a new checkout under current folder.
-  -w  Build WebKit
   -g <module> Set up gerrit for the module.
 
 Example use cases:
@@ -448,17 +446,14 @@ sub determineModules
     opendir (DIR, $rootFolder) or die ('Cannot read ' . $rootFolder . $!);
     my @mods = ();
     while (my $e = readdir(DIR)) {
-        if ($e ne '.' && $e ne '..' && -d $e && $e ne 'qtquick3d') {
+        if ($e ne '.' && $e ne '..' && -d $e) {
             my $gitFolder = File::Spec->catfile($e, '.git');
             push(@mods, $e) if -e $gitFolder;
        }
     }
     closedir(DIR);
     die ('Failed to detect modules in ' . $rootFolder . ".\nNeeds to be called from the root directory.") if @mods == 0;
-    # Sort & Put a (potentially failing) webkit last.
-    my @nonWebKit = sort(grep(!/^qtwebkit$/, @mods));
-    my @webKit = grep(/^qtwebkit$/, @mods);
-    return (@nonWebKit, @webKit)
+    return sort(@mods);
 }
 
 # ---- Return the preferred branch for a module/Qt branch.
@@ -537,9 +532,8 @@ if (!GetOptions('clean' => \$CLEAN,
      'pull' => \$PULL, 'Branch=s' => \$optDesiredBranch, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
      'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
      'gerrit=s' => \$optGerritModule, 'hooks' => \$optGitHooks,
-     'quick-bootstrap'  => \$BOOTSTRAP, 'webkit'  => \$BUILD_WEBKIT)
-    || ($CLEAN + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS
-        + $TEST + $BUILD_WEBKIT== 0
+     'quick-bootstrap'  => \$BOOTSTRAP)
+    || ($CLEAN + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS + $TEST == 0
         && !defined $optGerritModule && !defined $optGitHooks)) {
     print $USAGE;
     exit (1);
@@ -563,7 +557,7 @@ if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) 
     print "\n### This appears to be the first use of qt5_tool on this machine.\n\nCreating configuration file '",$configFile, "'...\n";
     my $newDeveloperBuild = prompt('Developer build (y/n)', 'y') =~ /y/i;
     my $newCodeReviewUser = '';
-    my $newInitArgumentsDefault = '--module-subset=default,-qtwebkit,-qtwebkit-examples,-qtwebengine';
+    my $newInitArgumentsDefault = '--module-subset=default,-qtwebengine';
     $newCodeReviewUser = prompt('Enter CodeReview user name', $user) if ($newDeveloperBuild);
     my $newInitArguments = prompt('Enter arguments to init-repository', $newInitArgumentsDefault);
     my $newConfigureArguments = prompt('Enter arguments to configure', defaultConfigureArguments($newDeveloperBuild));
@@ -590,7 +584,6 @@ if ( $BOOTSTRAP != 0 ) {
     my @initOptions;
     push (@initOptions, '--codereview-username=' . $codeReviewUser) if $codeReviewUser ne '';
     my $initArgumentsFromConfig = readQt5ToolConfig('initArguments');
-#   -- Webkit is usually too slow to clone unless something is configured.
     if ($initArgumentsFromConfig ne '') {
         push(@initOptions, split(/ /, $initArgumentsFromConfig));
     }
@@ -843,7 +836,6 @@ if ( $BUILD !=  0 ) {
     push(@configureArguments, split(/ +/, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
     my $skippedModules =  readQt5ToolConfig('skip');
     my @skipList;
-    push(@skipList, 'qtwebkit') if !$BUILD_WEBKIT;
     push(@skipList, split(/ +/, readQt5ToolConfig('skip')));
     foreach my $skippedModule (@skipList) {
         if (-d File::Spec->catfile($rootDir, $skippedModule)) {
