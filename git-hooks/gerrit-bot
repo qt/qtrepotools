@@ -245,6 +245,14 @@ sub process_commit($$$$$)
       }
     }
   }
+  if (@invite) {
+    if (system(@gerrit, "set-reviewers", (map { ('-a', $_) } @invite), '--', $rev)) {
+      print "===== ".strftime("%c", localtime(time()))." ===== invitation FAILED\n";
+      printerr("Inviting reviewers to ".$rev." (".$project."/".$ref.") failed");
+    } else {
+      $verbose and print "Invited @invite to ".$rev." (".$project."/".$ref.")\n";
+    }
+  }
   if ($use_rest) {
     if (defined($$verdict{message}) || length($message)) {
       $$verdict{message} = $message.($$verdict{message} || "");
@@ -276,14 +284,6 @@ sub process_commit($$$$$)
     }
   }
   $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref."): $score\n";
-  if (@invite) {
-    if (system(@gerrit, "set-reviewers", (map { ('-a', $_) } @invite), '--', $rev)) {
-      print "===== ".strftime("%c", localtime(time()))." ===== invitation FAILED\n";
-      printerr("Inviting reviewers to ".$rev." (".$project."/".$ref.") failed");
-      return;
-    }
-    $verbose and print "Invited @invite to ".$rev." (".$project."/".$ref.")\n";
-  }
 }
 
 $| = 1; # make STDOUT autoflush
