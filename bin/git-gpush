@@ -8,14 +8,19 @@
 
 use strict;
 use warnings;
-no warnings qw(io);
 
-use Carp;
-$SIG{__WARN__} = \&Carp::cluck;
-
-use File::Spec;
-use File::Basename;
-use IPC::Open3 qw(open3);
+our ($script, $script_path);
+BEGIN {
+    use Cwd qw(abs_path);
+    if ($^O eq "msys") {
+        $0 =~ s,\\,/,g;
+        $0 =~ s,^(.):/,/$1/,g;
+    }
+    $script_path = $script = abs_path($0);
+    $script_path =~ s,/[^/]+$,,;
+    unshift @INC, $script_path;
+}
+use git_gpush;
 
 # Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
 # may not (msysgit for example) support this module, even if it's considered a Core module.
@@ -100,175 +105,12 @@ License:
 EOM
 }
 
-my $debug = 0;
-my $verbose = 0;
-my $quiet = 0;
-my $dry_run = 0;
-
 my $remote = "gerrit";
 my $ref_from = "HEAD";
 my $ref_to = "";
 
-my %aliases;
-
 my @reviewers;
 my @CCs;
-
-my %gitconfig;
-
-sub format_cmd(@)
-{
-    return join(' ', map { /\s/ ? '"' . $_ . '"' : $_ } @_);
-}
-
-use constant {
-    NUL_STDIN => 0,
-    USE_STDIN => 1,
-    # FWD_STDIN is not needed
-    NUL_STDOUT => 0,
-    USE_STDOUT => 4,
-    FWD_STDOUT => 8,
-    NUL_STDERR => 0,
-    # USE_STDERR is not needed
-    FWD_STDERR => 32,
-    FWD_OUTPUT => 40,
-    SILENT_STDIN => 64,  # Suppress debug output for stdin
-    SOFT_FAIL => 256,    # A non-zero exit from the process is not fatal
-    DRY_RUN => 512       # Don't actually run the command if $dry_run is true
-};
-
-sub open_process($@)
-{
-    my ($flags, @cmd) = @_;
-    my %process;
-
-    $flags &= ~DRY_RUN if (!$dry_run);
-    $process{flags} = $flags;
-    if ($flags & DRY_RUN) {
-        print "+ ".format_cmd(@cmd)." [DRY]\n" if ($debug);
-        return \%process;
-    }
-    my $cmd = format_cmd(@cmd);
-    $process{cmd} = $cmd;
-    my ($in, $out, $err);
-    if ($flags & USE_STDIN) {
-        $in = \$process{stdin};
-    } else {
-        $in = \'<&NUL';
-    }
-    if ($flags & USE_STDOUT) {
-        $out = \$process{stdout};
-    } elsif ($flags & FWD_STDOUT) {
-        $out = \'>&STDOUT';
-    } else {
-        $out = \'>&NUL';
-    }
-    if ($flags & FWD_STDERR) {
-        $err = \'>&STDERR';
-    } else {
-        $err = \'>&NUL';
-    }
-    print "+ $cmd\n" if ($debug);
-    open(NUL, '>'.File::Spec->devnull()) or die("Failed to open bitbucket: $!\n");
-    eval { $process{pid} = open3($$in, $$out, $$err, @cmd); };
-    die("Failed to run \"$cmd[0]\": $!\n") if ($@);
-    close(NUL);
-    return \%process;
-}
-
-sub close_process($)
-{
-    my ($process) = @_;
-
-    if ($$process{flags} & DRY_RUN) {
-        $? = 0;
-        return 0;
-    }
-    my $cmd = $$process{cmd};
-    if ($$process{stdout}) {
-        close($$process{stdout}) or die("Failed to close read pipe of '$cmd': $!\n");
-    }
-    waitpid($$process{pid}, 0) or die("Failed to wait for '$cmd': $!\n");
-    if ($? & 128) {
-        die("'$cmd' crashed with signal ".($? & 127).".\n") if ($? != 141); # allow SIGPIPE
-        $? = 0;
-    } elsif ($? && !($$process{flags} & SOFT_FAIL)) {
-        exit($? >> 8);
-    }
-    return 0;
-}
-
-# Write any number of lines to the process' stdin.
-# The input is expected to already contain trailing newlines.
-# This function must be called exactly once iff USE_STDIN is used.
-# Note that this will deadlock with USE_STDOUT if the process outputs
-# too much before all input is written.
-sub write_process($@)
-{
-    my ($process, @input) = @_;
-
-    my $stdin = $$process{stdin};
-    my $silent = ($$process{flags} & SILENT_STDIN);
-    my $dry = ($$process{flags} & DRY_RUN);
-    local $SIG{PIPE} = "IGNORE";
-    foreach (@input) {
-        print "> $_" if ($debug && !$silent);
-        print $stdin $_ if (!$dry);
-    }
-    $dry or close($stdin) or die("Failed to close write pipe of '$$process{cmd}': $!\n");
-}
-
-# Read a line from the process' stdout.
-sub read_process($)
-{
-    my ($process) = @_;
-
-    my $fh = $$process{stdout};
-    $_ = <$fh>;
-    if (defined($_)) {
-        chomp;
-        print "- $_\n" if ($debug);
-    }
-    return $_;
-}
-
-# Read any number of null-terminated fields from the process' stdout.
-sub read_fields($@)
-{
-    my $process = shift;
-    my $fh = $$process{stdout};
-    return 0 if (eof($fh));
-    local $/ = "\0";
-    for (@_) { chop($_ = <$fh>); }
-    return 1;
-}
-
-# The equivalent of system().
-sub run_process($@)
-{
-    my ($flags, @cmd) = @_;
-
-    close_process(open_process($flags, @cmd));
-}
-
-# The equivalent of popen("r").
-sub open_cmd_pipe($@)
-{
-    my ($flags, @cmd) = @_;
-
-    return open_process(USE_STDOUT | FWD_STDERR | $flags, @cmd);
-}
-
-# Run the specified command and try to read exactly one line from its stdout.
-sub read_cmd_line($@)
-{
-    my ($flags, @cmd) = @_;
-
-    my $proc = open_cmd_pipe($flags, @cmd);
-    read_process($proc);
-    close_process($proc);
-    return $_;
-}
 
 sub parse_arguments(@)
 {
@@ -326,76 +168,11 @@ sub parse_arguments(@)
         if ($quiet && $verbose);
 }
 
-sub fileContents($)
+sub process_config()
 {
-    my ($filename) = @_;
-
-    my @contents = "";
-    my $fh;
-    if (-e $filename && open($fh, "< $filename")) {
-        @contents = <$fh>;
-        close $fh;
-    }
-    return @contents;
-}
-
-sub git_configs($)
-{
-    my ($key) = @_;
-    my $ref = $gitconfig{$key};
-    return defined($ref) ? @$ref : ();
-}
-
-sub git_config($;$)
-{
-    my ($key, $dflt) = @_;
-    my @cfg = git_configs($key);
-    return scalar(@cfg) ? $cfg[-1] : $dflt;
-}
-
-sub load_config()
-{
-    my $script_path = dirname($0);
-
-    # Read aliases from .git-gpush-aliases file
-    my $in_aliases = 1;
-    foreach my $line (fileContents("$script_path/.git-gpush-aliases")) {
-        chomp $line;
-        $line =~ s,(#|//).*$,,;             # Remove any comments
-        if ($line =~ /^\[([^]]+)\]/) {
-            if ($1 eq "aliases") {
-                $in_aliases = 1;
-            } elsif ($1 eq "config") {
-                $in_aliases = 0;
-            } else {
-                die("Unrecognized section '$1' in alias file.\n");
-            }
-        } elsif ($line =~ /^\s*([^ =]+)\s*=\s*(.*?)\s*$/) {  # Capture the value
-            if ($in_aliases) {
-                for my $alias (split(/,/, $1)) {
-                    $aliases{$alias} = $2;
-                }
-            } else {
-                push @{$gitconfig{"gpush.$1"}}, $2;
-            }
-        }
-    }
-
-    # Read all git configuration at once, as that's faster than repeated
-    # git invocations, especially under Windows.
-    my $cfg = open_cmd_pipe(0, 'git', 'config', '-l', '-z');
-    while (read_fields($cfg, my $entry)) {
-        $entry =~ /^([^\n]+)\n(.*)$/;
-        push @{$gitconfig{$1}}, $2;
-    }
-    close_process($cfg);
+    load_config();
 
     $remote = git_config('gpush.remote', $remote);
-    foreach (keys %gitconfig) {
-        if (/^gpush\.alias\.(.*)$/) {
-            $aliases{$1} = git_config($_);
-        }
-    }
 }
 
 sub lookup_alias($)
@@ -409,12 +186,6 @@ sub lookup_alias($)
     }
 
     return $user;
-}
-
-sub goto_gitdir()
-{
-    my $cdup = read_cmd_line(0, 'git', 'rev-parse', '--show-cdup');
-    chdir($cdup) unless $cdup eq "";
 }
 
 # Find _the_ branch the specified commit lives on. This can be the current
@@ -498,7 +269,7 @@ sub push_patches()
     run_process(FWD_OUTPUT, @gitcmd);
 }
 
-load_config();
+process_config();
 parse_arguments(@ARGV);
 goto_gitdir();
 determine_target();
