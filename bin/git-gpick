@@ -104,6 +104,13 @@ Options:
         Pick Changes even if they are MERGED and were already pulled.
         This makes sense when re-applying reverted commits.
 
+    -fc, --force-closed
+        The Changes in a series are categorized by their "degree of openness"
+        (open, deferred, abandoned). Usually, only the ones in the "most open"
+        category are picked, while all "more closed" ones are omitted.
+        Specifying this option causes the Changes in the next actually present
+        category to be picked as well. May be specified twice.
+
     -i, --ignore
         Ignore the new PatchSets that appeared on Gerrit since the previous
         push from this clone. The local Changes will subsequently appear
@@ -218,6 +225,7 @@ my $merge = 0;
 my $force = 0;
 my $force_struct = 0;
 my $force_merged = 0;
+my $force_closed = 0;
 my $ignore = 0;
 my $ignore_struct = 0;
 my @commit_specs;
@@ -252,6 +260,8 @@ sub parse_arguments(@)
             $force_struct = 1;
         } elsif ($arg eq "-fm" || $arg eq "--force-merged") {
             $force_merged = 1;
+        } elsif ($arg eq "-fc" || $arg eq "--force-closed") {
+            $force_closed++;
         } elsif ($arg eq "-i" || $arg eq "--ignore") {
             $ignore = 1;
         } elsif ($arg eq "-is" || $arg eq "--ignore-struct") {
@@ -279,9 +289,9 @@ sub parse_arguments(@)
         # Note that --{force,ignore}-struct are intentionally omitted,
         # because one may want to preview the effects of (not) following
         # structural changes.
-        wfail("--check and --merge/--force/--force-merged/--ignore"
+        wfail("--check and --merge/--force/--force-merged/--force-closed/--ignore"
                 ." are mutually exclusive.\n")
-            if ($merge || $force || $force_merged || $ignore);
+            if ($merge || $force || $force_merged || $force_closed || $ignore);
     }
 
     fail("--merge/--force and --ignore are mutually exclusive.\n")
@@ -1357,6 +1367,7 @@ sub sort_series($$$$)
     my $report = $current && !$quiet;
     my %selected = map { $$_{id} => 1 } @$range;
     my @merged;
+    my @levels;
     foreach my $commit (map { @$_ } values %$commits) {
         my $changeid = $$commit{changeid};
 
@@ -1382,7 +1393,17 @@ sub sort_series($$$$)
             if (!defined($selected{$changeid})) {
                 $exclude{$changeid} = 'MERGED';
                 push @merged, $commit if ($report);
+                next;
             }
+        }
+
+        # Drop Changes "more closed" than the "most open" ones in the
+        # series, unless forced.
+        # This is the preparation part.
+        if ($force_closed < 2) {
+            my $status = $$ginfo{status};
+            my $lvl = ($status eq 'ABANDONED') ? 2 : ($status eq 'DEFERRED') ? 1 : 0;
+            push @{$levels[$lvl]}, $commit;
         }
     }
 
@@ -1390,6 +1411,37 @@ sub sort_series($$$$)
           .format_commits(\@merged)
           ."Use --force-merged to add them nonetheless.\n"
         if (@merged);
+
+    # The execution part of dropping closed Changes.
+    my $have_levels = 0;
+    for my $lvl (0..2) {
+        if (defined($levels[$lvl])) {
+            if ($have_levels > $force_closed) {
+                my $status = ($lvl == 1) ? 'DEFERRED' : 'ABANDONED';
+                my @closed;
+                foreach my $commit (@{$levels[$lvl]}) {
+                    my $changeid = $$commit{changeid};
+                    # If such a Change is already in the local branch, it might be
+                    # so because it was forced, or because it was still open at the
+                    # time of the previous push/pick. For reconstructing the previous
+                    # series this does not matter, so we just keep it. For the current
+                    # series, we prefer to follow recent abandonments, and the user
+                    # may need to use force again.
+                    if ($current || !defined($selected{$changeid})) {
+                        $exclude{$changeid} = $status;
+                        push @closed, $commit if ($report);
+                    }
+                }
+                if (@closed) {
+                    my $twice = ($have_levels > 1) ? " (twice)" : "";
+                    print "NOT adding $status Change(s) from series $name:\n"
+                          .format_commits(\@closed)
+                          ."Use --force-closed$twice to add them nonetheless.\n";
+                }
+            }
+            $have_levels++;
+        }
+    }
 
     my %order = map { $$_{id} => $$_{index} } @$range;
 
