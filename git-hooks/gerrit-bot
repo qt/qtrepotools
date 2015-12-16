@@ -235,6 +235,9 @@ sub process_commit($$$$$)
         push @invite, @MAINTAINERS;
       } else {
         $use_rest = 1;
+        while ($verdict =~ s/^([^\{][^\n]*\n)//s) {
+          print STDERR "Non-JSON output from worker: $1\n";
+        }
         $verdict = decode_json($verdict);
         defined($verdict) or die "cannot decode verdict as JSON\n";
         $$verdict{labels} = { 'Sanity-Review' => $score, 'Code-Review' => ($iswip ? -2 : 0) };
