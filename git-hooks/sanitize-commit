@@ -614,7 +614,7 @@ while (<DIFF>) {
             } elsif (/^diff --cc (.+)$/) {
                 $merge = 1;
             } else {
-                print STDERR "Warning: cannot parse diff header '".$_."'\n";
+                print STDERR "Warning: cannot parse diff header: ".$_;
                 next;
             }
             $file = $1;
