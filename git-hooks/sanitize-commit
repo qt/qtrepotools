@@ -267,19 +267,19 @@ sub check_apple_terminology()
 }
 
 my $msgline = 0;
-open MSG, "git log -1 --pretty=raw ".$sha1." |" or die "cannot run git: $!";
+open MSG, "git cat-file -p ".$sha1." |" or die "cannot run git: $!";
+while (<MSG>) {
+    last if ($_ eq "\n");
+    if (/^parent /) {
+        $parents++ ;
+    } elsif (/^author ([^<]*?) *<([^>]+)/) {
+        check_email($1, $2, $parents + 1, "author");
+    } elsif (/^commiter ([^<]*?) *<([^>]+)/) {
+        check_email($1, $2, $parents + 3, "committer");
+    }
+}
 while (<MSG>) {
     chomp;
-    if (!s/^    //) {
-        if (/^parent /) {
-            $parents++ ;
-        } elsif (/^author ([^<]*?) *<([^>]+)/) {
-            check_email($1, $2, $parents + 1, "author");
-        } elsif (/^commiter ([^<]*?) *<([^>]+)/) {
-            check_email($1, $2, $parents + 3, "committer");
-        }
-        next
-    }
     $lineno++;
     $msgline++;
     if ($msgline == 1) {
