@@ -368,7 +368,7 @@ while (<MSG>) {
     }
     check_spelling() if ($spell_check);
     check_apple_terminology();
-    styleFail("Trailing whitespace") if (s/[ \t]+\r?\n$//);
+    styleFail("Trailing whitespace") if (s/[ \t]+\r?$//);
     styleFail("Space indent followed by a TAB character") if (/^ +\t/);
     styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
 }
