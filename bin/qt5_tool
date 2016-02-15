@@ -96,6 +96,7 @@ shadowBuildPostfix-qt-5special=-special-build
 specifies that for a checkout in '/home/user/qt-5', shadow builds are to be
 done in '/home/user/qt-5-build'. It is overridden by a value for the checkout
 '/home/user/qt-5special', which would result in '/home/user/qt-5-special-build'
+Continuation lines are indicated by a trailing backslash (\\).
 EOF
 
 # --------------- Detect OS
@@ -334,6 +335,13 @@ sub readConfigFile
         chomp($line);
         if ($line =~ /^\s*$key\s*=\s*(.*)$/) {
            $configLine .= $1;
+           while (index($configLine, '\\') == length($configLine) - 1) { # continuation lines "a=b\", "continued..."
+               chop($configLine);
+               my $line = <$configFile>;
+               die('Trailing continuation line "' . $configLine . '"') unless defined $line;
+               chomp($line);
+               $configLine .= $line;
+           }
            last;
         }
     }
