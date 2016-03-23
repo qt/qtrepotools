@@ -9,8 +9,11 @@
 
 use strict;
 use warnings;
+use Config;
 use Cwd;
 use Encode;
+use File::Spec qw(path);
+use List::Util qw(any);
 
 if ($#ARGV < 0 or $#ARGV > 2 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit(-rest)?)$/)) {
     print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit|gerrit-rest} [instance]]\n";
@@ -175,6 +178,27 @@ sub check_spelling()
             }
         }
     }
+}
+
+my $seenIdentify; # Cached result of PATH check
+sub haveIdentify()
+{
+    $seenIdentify = any { $_ && -x "$_/identify$Config{_exe}" } File::Spec->path()
+        unless defined($seenIdentify);
+    return $seenIdentify;
+}
+
+sub dodgyPng($$)
+{
+    # Not uncommonly, PNGs get generated with a bogus sRGB chunk; this
+    # can readily be removed using pngcrush, eliminating the warning
+    # from identify.  This check may find other kinds of errors; we'll
+    # have to learn how to fix those when we meet them.  The identify
+    # program is part of the ImageMagick package.
+    my ($commit, $file) = @_;
+    my $err = `git cat-file blob "$commit:$file" 2>/dev/null | \
+                identify - 2>&1 1>/dev/null`;
+    return $err =~ m/\bMagickPNGWarningHandler\b/;
 }
 
 my @style_fails = ();
@@ -652,6 +676,13 @@ while (<DIFF>) {
                 if (!defined($cfg{giant}) && $size > (2 << 20)) {
                     complain("Changing huge binary file (".formatSize($size)." > 2MiB)", "giant", 1);
                 }
+            }
+            if ($file =~ /\.png$/i
+                # If identify is available, check for faults:
+                && haveIdentify() && dodgyPng($sha1, $file)
+                # Only complain if the issue is new, of course:
+                && ($new_file || !dodgyPng("${sha1}^", $file))) {
+                complain("Defect in PNG format, see: identify $file", "cruft");
             }
             next;
         }
