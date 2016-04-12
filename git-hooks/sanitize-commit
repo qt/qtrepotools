@@ -13,7 +13,7 @@ use Config;
 use Cwd;
 use Encode;
 use File::Spec qw(path);
-use List::Util qw(any);
+use List::Util qw(first);
 
 if ($#ARGV < 0 or $#ARGV > 2 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit(-rest)?)$/)) {
     print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit|gerrit-rest} [instance]]\n";
@@ -183,7 +183,7 @@ sub check_spelling()
 my $seenIdentify; # Cached result of PATH check
 sub haveIdentify()
 {
-    $seenIdentify = any { $_ && -x "$_/identify$Config{_exe}" } File::Spec->path()
+    $seenIdentify = defined(first { $_ && -x "$_/identify$Config{_exe}" } File::Spec->path())
         unless defined($seenIdentify);
     return $seenIdentify;
 }
