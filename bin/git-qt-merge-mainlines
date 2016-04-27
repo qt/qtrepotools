@@ -49,13 +49,12 @@ def reset_module(module, config):
     return True
 
 # Run git merge for one module
-def do_merge(module, config):
-    opts = {}
-    opts['from'] = config.branch_from
-    opts['to'] = config.branch_to
+def do_merge(module, config, from_ref):
     try:
-        git_merge = "git merge origin/%(from)s --no-edit --no-ff" %opts
-        ret = subprocess.call(git_merge.split(), stdout=fnull)
+        cmd_git_merge = ["git", "merge", "-m", \
+                         "Merge remote-tracking branch \'origin/" + config.branch_from + "\' into " + config.branch_to, \
+                         from_ref, "--no-edit", "--no-ff"]
+        ret = subprocess.call(cmd_git_merge, stdout=fnull)
         if ret != 0 and config.mergetool:
             print("Starting mergetool")
             ret = subprocess.call(['git', 'mergetool', '-y'])
@@ -115,10 +114,10 @@ def push_gerrit(module, config):
         print(colors.WARNING + "Merge not pushed." + colors.ENDC)
 
 # Perform merge and push it for one module
-def merge(module, config):
+def merge(module, config, from_ref):
     push_required = False
     if config.merge:
-        if not do_merge(module, config):
+        if not do_merge(module, config, from_ref):
             return False
         push_required = True
 
@@ -131,11 +130,23 @@ def merge(module, config):
         push_gerrit(module, config)
     return True
 
+def get_module_sha_from_super(module, branch):
+    result = ""
+    cmd_git_lstree = ["git", "ls-tree", "origin/" + branch, module]
+    lstree_output = subprocess.check_output(cmd_git_lstree).decode('utf-8').strip()
+    lstree_outputs = lstree_output.split()
+    if len(lstree_outputs) == 4 and lstree_outputs[3] == module:
+        result = lstree_outputs[2].strip()
+    return result
+
 # Iterate over all modules (either default or passed with -m option)
 def process_modules(config):
     if config.list_modules:
         print("Modules: ", config.modules)
         return;
+
+    cmd_git_fetch = ["git", "fetch"]
+    subprocess.check_call(cmd_git_fetch, stdout=fnull, stderr=fnull)
 
     manual_merges = []
 
@@ -150,7 +161,20 @@ def process_modules(config):
                 cmd_git_fetch = ["git", "fetch"]
                 subprocess.check_call(cmd_git_fetch, stdout=fnull, stderr=fnull)
 
-                cmd_git_cherry = ["git", "cherry", "origin/" + config.branch_to, "origin/" + config.branch_from, "-v"]
+                to_string = "origin/" + config.branch_to
+                from_string = "origin/" + config.branch_from
+
+                if config.super:
+                    os.chdir("..")
+                    from_sha1 = get_module_sha_from_super(module, config.branch_from)
+                    if from_sha1:
+                        from_string = from_sha1
+                    else:
+                        print("Unable to obtain sha1 from super module for module ", module, "\n")
+                    os.chdir(module)
+
+                print("Merge from", from_string, "to", to_string, ":")
+                cmd_git_cherry = ["git", "cherry", to_string, from_string, "-v"]
                 cherry_output = subprocess.check_output(cmd_git_cherry).decode('utf-8').strip()
 
                 change_count = 0
@@ -165,7 +189,7 @@ def process_modules(config):
                     reset_module(module, config)
 
                 if change_count > 0:
-                    if not merge(module, config):
+                    if not merge(module, config, from_string):
                         manual_merges.append(module)
 
             except Exception as e:
@@ -215,6 +239,7 @@ if __name__== "__main__":
         description="Merge branches for the Qt Project")
     parser.add_argument('-s', '--status', action="store_true", help='show the status (which patches will be merged)')
     parser.add_argument('-d', '--merge', action="store_true", help='do the merge')
+    parser.add_argument('-u', '--super', action="store_true", help='obtain sha1s from supermodule instead of using branch tips')
     parser.add_argument('-m', '--modules', type=str, default=' '.join(default_modules), help='override the list of modules (eg. -m "qtbase qtdeclarative")')
     parser.add_argument('-l', '--list-modules', action="store_true", help='list the modules to be merged and exit')
     parser.add_argument('--reset', action="store_true", help='reset to origin/to_branch. this is implicit in the merge command')
