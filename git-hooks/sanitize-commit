@@ -258,35 +258,41 @@ sub check_apple_terminology()
         }
 
         if (/\bQ_OS_MAC\b/) {
-            complain_ln("Using deprecated define Q_OS_MAC; use Q_OS_OSX (for OS X only)" .
+            complain_ln("Using deprecated define Q_OS_MAC; use Q_OS_MACOS (for macOS only)" .
                         " or Q_OS_DARWIN (for all Apple platforms) instead", "terminology");
         }
 
         if (/\bQ_OS_MACX\b/) {
-            complain_ln("Using deprecated define Q_OS_MACX; use Q_OS_OSX instead", "terminology");
+            complain_ln("Using deprecated define Q_OS_MACX; use Q_OS_MACOS instead", "terminology");
+        }
+
+        if (/\bQ_OS_OSX\b/) {
+            complain_ln("Using deprecated define Q_OS_OSX; use Q_OS_MACOS instead", "terminology");
         }
     } elsif ($qmake) {
         # check qmake scopes
         if (s/\bmac\s*:\s*!\s*ios\b/X/) {
-            complain_ln("Use of deprecated idiom 'mac:!ios', use 'osx' instead", "terminology");
+            complain_ln("Use of deprecated idiom 'mac:!ios', use 'macos' instead", "terminology");
         }
 
         if (s/^([^#]*)\bmac\b( *[|:{])/$1X$2/) {
-            complain_ln("Using deprecated qmake scope 'mac': use 'osx' (for OS X only)" .
+            complain_ln("Using deprecated qmake scope 'mac': use 'macos' (for macOS only)" .
                         " or 'darwin' (for all Apple platforms) instead", "terminology");
         }
 
         # Match the word macx but avoid matching macx- and macx* since these are valid for mkspecs
         if (/\bmacx\b(?![-*])/) {
-            complain_ln("Using deprecated qmake scope 'macx'; use 'osx' instead", "terminology");
+            complain_ln("Using deprecated qmake scope 'macx'; use 'macos' instead", "terminology");
+        }
+
+        if (/\bosx\b) {
+            complain_ln("Using deprecated qmake scope 'osx'; use 'macos' instead", "terminology");
         }
     }
 
-    # Note that Mac(intosh)? is the name of the hardware that runs the OS X operating system and is
-    # valid for use, however users are likely to use Mac(intosh)? to incorrectly refer to the OS so
-    # we'll still flag it
-    if (/\bmac(([\s_-]*os)([\s_-]*x)?)?\b/i or /\bmacintosh\b/i) {
-        complain_ln("Possible incorrect use of Apple-related terminology", "", -1);
+    if (/\bMacOS\b/ or /\bOS[\s]*X\b/ or /\bmac(([\s_-]*os)([\s_-]*x))?\b/i or /\bmacintosh\b/i) {
+        complain_ln("Possible incorrect use of Apple-related terminology; " .
+                    "the correct name of Apple's desktop operating system is 'macOS'", "", -1);
     }
 }
 
