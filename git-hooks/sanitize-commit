@@ -285,7 +285,7 @@ sub check_apple_terminology()
             complain_ln("Using deprecated qmake scope 'macx'; use 'macos' instead", "terminology");
         }
 
-        if (/\bosx\b) {
+        if (/\bosx\b/) {
             complain_ln("Using deprecated qmake scope 'osx'; use 'macos' instead", "terminology");
         }
     }
