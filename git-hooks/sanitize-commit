@@ -322,6 +322,9 @@ while (<MSG>) {
         if (/\bQT[A-Z]+-\d+\b/) {
             complain_cln("Bug reference in summary", "log");
         }
+        if (/\.$/) {
+            complain_cln("Summary ends with period", "log");
+        }
         if (!$badlog && length($_) < 7) {
             complain_cln("Summary is too short", "log");
         } elsif (!$badlog && !$revert1 && length($_) > 120) {
