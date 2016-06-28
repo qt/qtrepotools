@@ -329,7 +329,7 @@ while (<MSG>) {
             complain_cln("Summary is too short", "log");
         } elsif (!$badlog && !$revert1 && length($_) > 120) {
             complain_cln("Summary is excessively long", "log");
-        } elsif ($parents < 2 && !$revert1 && length($_) > 70) {
+        } elsif ($parents < 2 && !$revert1 && length($_) > 72) {
             complain_cln("Aim for shorter summaries", "", -1);
         }
     } else {
