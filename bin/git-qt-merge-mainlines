@@ -226,9 +226,6 @@ def get_submodules():
 
 
 if __name__== "__main__":
-    class Config(object): pass
-    config = Config()
-
     import argparse
     parser = argparse.ArgumentParser(prog="git-qt-merge-branches",
         description="Merge branches for the Qt Project",
@@ -247,12 +244,12 @@ sub-modules checked out (e.g. using qt5/init-repository).
     parser.add_argument('-t', '--branch-to', default='dev', help='the target branch')
     parser.add_argument('-v', '--version', default='', help='set version in .qmake.conf to given version string')
     parser.add_argument('--mergetool', action="store_true", help='run mergetool for conflicts')
-    args = parser.parse_args(namespace=config)
+    config = parser.parse_args()
 
     print("Qt Project merge tool\n")
     default_modules, modules_not_checked_out = get_submodules()
-    if args.modules is None:
-        args.modules = ' '.join(default_modules)
+    if config.modules is None:
+        config.modules = ' '.join(default_modules)
     print("Submodules: ", default_modules)
     print("Ignored submodules: ", modules_not_checked_out)
 
