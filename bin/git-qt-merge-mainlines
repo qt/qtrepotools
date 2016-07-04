@@ -234,15 +234,16 @@ if __name__== "__main__":
 Run from within a work tree of the qt5 super-module, with all relevant
 sub-modules checked out (e.g. using qt5/init-repository).
 """)
-    parser.add_argument('-s', '--status', action="store_true", help='show the status (which patches will be merged)')
-    parser.add_argument('-d', '--merge', action="store_true", help='do the merge')
+    group = parser.add_argument_group("Primary action", "Chose one of:")
+    group.add_argument('-s', '--status', action="store_true", help='show the status (which patches will be merged)')
+    group.add_argument('-d', '--merge', action="store_true", help='do the merge')
     parser.add_argument('-u', '--super', action="store_true", help='obtain sha1s from supermodule instead of using branch tips')
     parser.add_argument('-m', '--modules', help='override the list of modules (eg. -m "qtbase qtdeclarative")')
-    parser.add_argument('-l', '--list-modules', action="store_true", help='list the modules to be merged and exit')
-    parser.add_argument('--reset', action="store_true", help='reset to origin/to_branch. this is implicit in the merge command')
+    group.add_argument('-l', '--list-modules', action="store_true", help='list the modules to be merged and exit')
+    group.add_argument('--reset', action="store_true", help='reset to origin/to_branch. this is implicit in the merge command')
     parser.add_argument('-f', '--branch-from', default='stable', help='from which branch to merge')
     parser.add_argument('-t', '--branch-to', default='dev', help='the target branch')
-    parser.add_argument('-v', '--version', default='', help='set version in .qmake.conf to given version string')
+    group.add_argument('-v', '--version', default='', help='set version in .qmake.conf to given version string')
     parser.add_argument('--mergetool', action="store_true", help='run mergetool for conflicts')
     config = parser.parse_args()
 
