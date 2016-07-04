@@ -99,7 +99,7 @@ def push_gerrit(module, config):
     try: input = raw_input
     except NameError: pass
     confirm = input('Push merge? [Y/n] ')
-    if len(confirm) == 0 or confirm[0].lower() == 'y':
+    if not confirm or confirm.startswith(('y', 'Y')):
         output = subprocess.check_output(('git push gerrit HEAD:refs/for/%s' % config.branch_to).split()).decode('utf-8')
         #url = re.search("https.*", output).group(0).strip()
         #print(url)
@@ -121,7 +121,7 @@ def merge(module, config, from_ref):
             return False
         push_required = True
 
-    if len(config.version) > 0:
+    if config.version:
         print('Updating .qmake.conf for', module)
         if update_qmake_conf(module, config.version):
             push_required = True
@@ -143,7 +143,7 @@ def get_module_sha_from_super(module, branch):
 def process_modules(config):
     if config.list_modules:
         print("Modules: ", config.modules)
-        return;
+        return
 
     cmd_git_fetch = ["git", "fetch"]
     subprocess.check_call(cmd_git_fetch, stdout=fnull, stderr=fnull)
@@ -178,14 +178,14 @@ def process_modules(config):
                 cherry_output = subprocess.check_output(cmd_git_cherry).decode('utf-8').strip()
 
                 change_count = 0
-                if len(cherry_output) > 0:
+                if cherry_output:
                     change_count = len(cherry_output.split('\n'))
 
                 if config.status:
                     print(cherry_output)
                     print(colors.GREEN, change_count, colors.ENDC, "patches to be merged in", module, "\n")
 
-                if config.reset or config.merge or len(config.version):
+                if config.reset or config.merge or config.version:
                     reset_module(module, config)
 
                 if change_count > 0:
@@ -204,7 +204,7 @@ def process_modules(config):
             import traceback
             traceback.print_exc(file=sys.stdout)
 
-    if len(manual_merges):
+    if manual_merges:
         print("Modules failed to merge: ", manual_merges)
 
 # get a list of submodules and a list of submodules that are not checked out
@@ -214,14 +214,13 @@ def get_submodules():
     modules_not_checked_out = []
     for line in git_submodule_status.split('\n'):
         module = line.strip().split(' ')[1]
-        if line[0] == '-':
-            modules_not_checked_out += [module]
+        if line.startswith('-'):
+            modules_not_checked_out.append(module)
             print('WARNING:', module, 'is not checked out')
+        elif module in ('qtqa', 'qtrepotools'):
+            print('skipping', module)
         else:
-            if module == 'qtqa' or module == 'qtrepotools':
-                print('skipping', module)
-            else:
-                modules += [module]
+            modules.append(module)
     return modules, modules_not_checked_out
 
 
