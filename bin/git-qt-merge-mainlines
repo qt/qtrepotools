@@ -226,21 +226,21 @@ def get_submodules():
 
 
 if __name__== "__main__":
-    print("Qt Project merge tool\n")
-
-    default_modules, modules_not_checked_out = get_submodules()
-    print("Submodules: ", default_modules)
-    print("Ignored submodules: ", modules_not_checked_out)
-
     class Config(object): pass
     config = Config()
+
     import argparse
     parser = argparse.ArgumentParser(prog="git-qt-merge-branches",
-        description="Merge branches for the Qt Project")
+        description="Merge branches for the Qt Project",
+        epilog="""
+
+Run from within a work tree of the qt5 super-module, with all relevant
+sub-modules checked out (e.g. using qt5/init-repository).
+""")
     parser.add_argument('-s', '--status', action="store_true", help='show the status (which patches will be merged)')
     parser.add_argument('-d', '--merge', action="store_true", help='do the merge')
     parser.add_argument('-u', '--super', action="store_true", help='obtain sha1s from supermodule instead of using branch tips')
-    parser.add_argument('-m', '--modules', type=str, default=' '.join(default_modules), help='override the list of modules (eg. -m "qtbase qtdeclarative")')
+    parser.add_argument('-m', '--modules', type=str, help='override the list of modules (eg. -m "qtbase qtdeclarative")')
     parser.add_argument('-l', '--list-modules', action="store_true", help='list the modules to be merged and exit')
     parser.add_argument('--reset', action="store_true", help='reset to origin/to_branch. this is implicit in the merge command')
     parser.add_argument('-f', '--branch-from', type=str, default='stable', help='from which branch to merge')
@@ -248,6 +248,13 @@ if __name__== "__main__":
     parser.add_argument('-v', '--version', type=str, default='', help='set version in .qmake.conf to given version string')
     parser.add_argument('--mergetool', action="store_true", help='run mergetool for conflicts')
     args = parser.parse_args(namespace=config)
+
+    print("Qt Project merge tool\n")
+    default_modules, modules_not_checked_out = get_submodules()
+    if args.modules is None:
+        args.modules = ' '.join(default_modules)
+    print("Submodules: ", default_modules)
+    print("Ignored submodules: ", modules_not_checked_out)
 
     logging.basicConfig(format='%(levelname)s: %(message)s')
 
