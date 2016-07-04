@@ -256,8 +256,8 @@ sub-modules checked out (e.g. using qt5/init-repository).
 
     logging.basicConfig(format='%(levelname)s: %(message)s')
 
-    if not config.status and not config.merge and not config.reset and not config.list_modules and not len(config.version):
-        parser.print_help()
-    else:
+    if config.status or config.merge or config.reset or config.list_modules or config.version:
         process_modules(config)
+    else:
+        parser.print_help()
     print("Submodules that are not checked out and are ignored:\n", ' '.join(modules_not_checked_out))
