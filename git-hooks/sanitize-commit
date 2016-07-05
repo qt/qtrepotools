@@ -537,6 +537,7 @@ my $in_plus;
 my $conflict_fail;
 my $tabs_check;
 my $ws_check;
+my $allow_2spaces;
 my $tsv_check;
 my $eof_check;
 my $ctlkw_check;
@@ -609,6 +610,9 @@ while (<DIFF>) {
             if ($tsv_check) {
                 styleFail("Mixing spaces with TABs") if (/^ +\t|\t +/);
             } else {
+                if ($allow_2spaces) {
+                    s/(?<=\S)  (?=\r?\n$)//;
+                }
                 styleFail("Trailing whitespace") if (s/[ \t]+\r?\n$//);
                 styleFail("Space indent followed by a TAB character") if (/^ +\t/);
                 styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
@@ -665,6 +669,7 @@ while (<DIFF>) {
             $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
             $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
             $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(plist(\.[^.\/]+)?|def|spec|changes|[xn]ib|storyboardc?|go)(?:\.in)?$)/);
+            $allow_2spaces = $ws_check && ($file =~ /\.md$/);
             $ctlkw_check = $tabs_check && $clike;
             $eof_check = !$is_bin && ($file !~ /\.plist(\.[^.\/]+)?$/); # Xcode consistently forgets the trailing newline
             # .ts files usually contain languages other than English
