@@ -32,8 +32,8 @@ if test -L "$me"; then
         me=$nme
     else
         # No GNU readlink(1), so let's try ls -l
-        me=`ls -l "$me" | sed 's/^.*-> //'`
         base=`dirname "$me"`
+        me=`ls -l "$me" | sed 's/^.*-> //'`
         me=`makeAbsolute "$me" "$base"`
     fi
 fi
