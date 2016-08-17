@@ -807,6 +807,7 @@ if ( $PULL !=  0 ) {
         $desiredBranch = 'dev';
         print 'No branch has been set up in ', $configFile, ' (key: ', $branchConfigKey, '), assuming ', $desiredBranch, "\n";
     }
+    die ('Cannot checkout ' . $desiredBranch . ' in qt5') unless checkoutBranch('qt5', $desiredBranch);
     my @pullArgs = ('pull', '--rebase');
     my $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY);
     die 'Pull failed'  if ($prc);
