@@ -118,18 +118,7 @@ use constant {
 
 my $clike = 0;
 my $qmake = 0;
-my $badrev = 0;
-my $badsign = 0;
-my $badid = defined($cfg{changeid});
-my $badurl_rx = $config{badurl};
-my $badurl = !defined($badurl_rx) || defined($cfg{url});
-my $badlog = defined($cfg{log});
 my $spell_check = !defined($cfg{spell});
-my $parents = 0;
-my $inchangelog = 0;
-my $doftr = !defined($cfg{footer});
-my ($footer, $cherry) = (STS_BLANK, 0);
-my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 
 # Load spelling errors dataset if available
 our %MISTAKES;
@@ -296,6 +285,17 @@ sub check_apple_terminology()
     }
 }
 
+my $badlog = defined($cfg{log});
+my $badurl_rx = $config{badurl};
+my $badurl = !defined($badurl_rx) || defined($cfg{url});
+my $badid = defined($cfg{changeid});
+my $badrev = 0;
+my $badsign = 0;
+my $parents = 0;
+my $inchangelog = 0;
+my $doftr = !defined($cfg{footer});
+my ($footer, $cherry) = (STS_BLANK, 0);
+my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 my $msgline = 0;
 open MSG, "git cat-file -p ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
