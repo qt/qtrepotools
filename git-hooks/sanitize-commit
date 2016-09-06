@@ -708,7 +708,7 @@ while (<DIFF>) {
             my ($old_trees, $new_tree) = ($1, $2);
             #print "*** got index $old_trees $new_tree.\n";
             $size = `git cat-file -s $new_tree`;
-            my $issrc = $clike || ($file =~ /\.(s|asm|pas|l|m4|bat|cmd|sh|py|php|qdoc(conf)?)$/i);
+            my $issrc = $clike || ($file =~ /\.(s|asm|pas|l|m4|bat|cmd|sh|py|php|qdoc(conf)?|json)$/i);
             if ($old_trees =~ /^0{40}(,0{40})*$/) {
             #print "*** adding ".$file.".\n";
                 if (!$conflict_fail && $file =~ /\.(BACKUP|BASE|LOCAL|REMOTE)\.[^\/]+$/) {
@@ -727,7 +727,7 @@ while (<DIFF>) {
                 }
                 $size = 0;
                 $new_file = 1;
-                $no_copyright = $issrc && $file !~ /\.qdocconf$/i;
+                $no_copyright = $issrc && $file !~ /\.(qdocconf|json)$/i;
             } elsif ($size > 20000 && !$issrc && !defined($cfg{size})) {
                 my $old_size = 0;
                 for my $old_tree (split(/,/, $old_trees)) {
