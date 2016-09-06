@@ -700,9 +700,18 @@ while (<DIFF>) {
             }
             next;
         }
-        if ($_ eq "new file mode 160000\n" || $_ eq "new file mode 120000\n") {
-            $is_special = 1;
-            next;
+        if (/^new file mode (\d+)$/) {
+            my $text = $1;
+            if ($text eq "160000" || $text eq "120000") {
+                $is_special = 1;
+                next;
+            }
+            if (oct($text) & 0111) {
+                if ($clike || $qmake || $file =~ /\.(ps|pdf|png|qdoc(cconf)?|json)$/) {
+                    # Should not be executable.
+                    complain("Adding implausibly executable file", "permissions");
+                }
+            }
         }
         if (!$is_special && /^index ([\w,]+)\.\.(\w+)(?! 160000)( |$)/) {
             my ($old_trees, $new_tree) = ($1, $2);
