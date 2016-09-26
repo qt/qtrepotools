@@ -716,7 +716,12 @@ while (<DIFF>) {
                 $is_special = 1;
                 next;
             }
-            if (oct($text) & 0111) {
+            my $perm = oct($text);
+            # Executable or set*id:
+            if ($perm & 07000) {
+                # set*id; git discards it - but asking for it is misguided.
+                complain("Adding file with set*id permissions", "permissions", 1);
+            } elsif ($perm & 0111) {
                 if ($clike || $qmake || $file =~ /\.(ps|pdf|png|qdoc(cconf)?|json)$/) {
                     # Should not be executable.
                     complain("Adding implausibly executable file", "permissions");
