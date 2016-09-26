@@ -530,6 +530,7 @@ my $new_file;
 my $is_bin;
 my $maybe_bin;
 my $is_special;
+my $need_hash_bang;
 my $size;
 my $check_gen = 0;
 my $crlf_fail;
@@ -589,6 +590,14 @@ while (<DIFF>) {
             if ($mixws_check) {
                 push @addi, $_;
                 $chunk = 1;
+            }
+        }
+        if ($lineno == 1 && $need_hash_bang) {
+            if (/^#! ?\//) {
+                $need_hash_bang = 0;
+            } else {
+                # Can still be valid if run via the right interpreter, so level -1:
+                complain("Executable file with no initial #! line", "permissions", -1);
             }
         }
         $in_plus = 1;
@@ -663,6 +672,7 @@ while (<DIFF>) {
             $new_file = 0;
             $maybe_bin = 0;
             $is_special = 0;
+            $need_hash_bang = 0;
             $crlf_fail = $is_bin || defined($cfg{crlf});
             $in_plus = 0;
             $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
@@ -710,6 +720,10 @@ while (<DIFF>) {
                 if ($clike || $qmake || $file =~ /\.(ps|pdf|png|qdoc(cconf)?|json)$/) {
                     # Should not be executable.
                     complain("Adding implausibly executable file", "permissions");
+                } elsif ($file =~ /\.(py|pm|pl|sh|bash|php)$/
+                         # i.e. known script suffix; or no suffix at all:
+                         || $file !~ m,[^/.]\.[^/.]+$,) {
+                    $need_hash_bang = 1;
                 }
             }
         }
