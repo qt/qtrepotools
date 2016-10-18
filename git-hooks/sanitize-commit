@@ -681,7 +681,7 @@ while (<DIFF>) {
             $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(plist(\.[^.\/]+)?|def|spec|changes|[xn]ib|storyboardc?|go)(?:\.in)?$)/);
             $allow_2spaces = $ws_check && ($file =~ /\.md$/);
             $ctlkw_check = $tabs_check && $clike;
-            $eof_check = !$is_bin && ($file !~ /\.plist(\.[^.\/]+)?$/); # Xcode consistently forgets the trailing newline
+            $eof_check = !$is_bin && ($file !~ /(\.plist(\.[^.\/]+)?|\.xcassets\/.*\.json)$/); # Xcode consistently forgets the trailing newline
             # .ts files usually contain languages other than English
             $spell_check = !defined($cfg{spell}) && !$foreign && ($file !~ /\.ts$/i);
             $apple_check = !$foreign && ($file !~ /\.ts$/i);
