@@ -221,6 +221,13 @@ sub check_email($$$$)
             do_complain(-1, "Bogus $label address", "email", 1);
         }
     }
+    if ($addr =~ /\@theqtcompany\.com$/) {
+        if ($gerrit_rest) {
+            do_complain($line, "Obsolete domain. Please update to qt.io.", "email", 1);
+        } else {
+            do_complain(-1, "Obsolete domain in $label address. Please update to qt.io.", "email", 1);
+        }
+    }
     # UTF-8 is a pretty safe bet - all modern Unix systems use it, and
     # when not printing to a Windows console, msysgit also uses it.
     eval { $real = decode_utf8($real, Encode::FB_CROAK); };
