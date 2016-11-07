@@ -74,6 +74,46 @@ def do_merge(module, config, from_ref):
 
     return True
 
+def wip_merge(module, config, from_ref):
+    conflicts = []
+    try:
+        cmd_git_status = ["git", "status", "--porcelain"]
+        status_output = subprocess.check_output(cmd_git_status).decode('utf-8').strip()
+        status_count = 0
+        if status_output:
+            lines = status_output.split('\n')
+            status_count = len(lines)
+
+            for line in lines:
+                try: mode, file = line.split()
+                except (ValueError, TypeError): pass # not exactly two tokens
+                else:
+                    if 'U' in mode:
+                        print("conflict: ", file)
+                        conflicts.append(file)
+
+        if not conflicts:
+            print("Didn't find any conflict. Need to check carefully.")
+            return False
+
+        cmd_git_commit = ["git", "commit", "-a", "-m",
+                          "WIP: Merge remote-tracking branch \'origin/" + config.branch_from + "\' into " + config.branch_to + "\n"
+                          + '\nConflicts:\n\t' + '\n\t'.join(conflicts) + '\n']
+        ret = subprocess.call(cmd_git_commit, stdout=fnull)
+        if ret != 0:
+            print("Failed to do \"git commit -a\".")
+            return False
+
+        # Make sure we get a change-id as git merge doesn't generate it for us
+        git_amend = "git commit --amend --no-edit"
+        subprocess.check_call(git_amend.split(), stdout=fnull)
+
+    except Exception as e:
+        logging.error("Create WIP change failed: %s", str(e))
+        return False
+
+    return True
+
 # Change the version number in the .qmake.conf file to a given string
 def update_qmake_conf(module, version):
     fileName = ".qmake.conf"
@@ -116,7 +156,7 @@ def push_gerrit(module, config):
 # Perform merge and push it for one module
 def merge(module, config, from_ref):
     push_required = False
-    if config.merge:
+    if config.merge or config.wip:
         if not do_merge(module, config, from_ref):
             return False
         push_required = True
@@ -128,6 +168,16 @@ def merge(module, config, from_ref):
 
     if push_required:
         push_gerrit(module, config)
+    return True
+
+# Create WIP change when having conflicts
+def create_wip(module, config, from_ref):
+    if config.wip:
+        if not wip_merge(module, config, from_ref):
+            return False
+
+        push_gerrit(module, config)
+
     return True
 
 def get_module_sha_from_super(module, branch):
@@ -185,12 +235,14 @@ def process_modules(config):
                     print(cherry_output)
                     print(colors.GREEN, change_count, colors.ENDC, "patches to be merged in", module, "\n")
 
-                if config.reset or config.merge or config.version:
+                if config.reset or config.merge or config.version or config.wip:
                     reset_module(module, config)
 
                 if change_count > 0:
                     if not merge(module, config, from_string):
                         manual_merges.append(module)
+                        if config.wip:
+                            create_wip(module, config, from_string)
 
             except Exception as e:
                 logging.error("Command execution failed: %s", str(e))
@@ -254,6 +306,8 @@ sub-modules checked out (e.g. using qt5/init-repository).
                        help='set version in .qmake.conf to given version string')
     parser.add_argument('--mergetool', action="store_true",
                         help='run mergetool for conflicts')
+    parser.add_argument('-w', '--wip', action="store_true",
+                        help='create WIP change when conflicts arise')
     config = parser.parse_args()
 
     print("Qt Project merge tool\n")
@@ -265,7 +319,7 @@ sub-modules checked out (e.g. using qt5/init-repository).
 
     logging.basicConfig(format='%(levelname)s: %(message)s')
 
-    if config.status or config.merge or config.reset or config.list_modules or config.version:
+    if config.status or config.merge or config.reset or config.list_modules or config.version or config.wip:
         process_modules(config)
     else:
         parser.print_help()
