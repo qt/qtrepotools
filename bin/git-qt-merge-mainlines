@@ -15,6 +15,7 @@ import sys
 import logging
 import subprocess
 import re
+import warnings
 
 fnull = open(os.devnull, "w")
 
@@ -26,6 +27,63 @@ class colors:
     FAIL = '\033[91m'
     ENDC = '\033[0m'
 
+class BlameParser:
+    __begin = ('<' * 7, '=' * 7)
+    __end_map = {'merge': '=', 'diff3': '|'}
+    # One example line to parse (result from git blame -c --date=short):
+    # "ddd8ab31	(Andras Becsi	2014-06-13 18:17:07 +0200	414)bool GLSurface::InitializeOneOffInternal()"
+    __matcher = re.compile(r"([0-9a-f]+)\s+\((.*?)\s+\d+\)(.*)").match
+
+    def __init__(self):
+        self.__end = (self.__from_git_config('merge.conflictstyle', 'merge', self.__end_map) * 7, '>' * 7)
+
+    def __from_git_config(self, parameter, default, mapping):
+        try:
+            value = subprocess.check_output(['git', 'config', parameter]).decode('utf-8').strip()
+        except subprocess.CalledProcessError:
+            # When the value is unset
+            value = ''
+        try:
+            return mapping[value or default]
+        except KeyError:
+            raise ValueError('Unknown git config', parameter, value)
+
+    def __parse_blame_line(self, codeline):
+        # Match a "git blame -c --date=short" output line
+        m = self.__matcher(codeline)
+        if m:
+            return m.group(1, 2, 3)
+        raise ValueError("Failed to parse blame line: %s" % (codeline))
+
+    def __get_blame_results(self, conflict):
+        cmd_git_blame = ["git", "blame", "-c", "--date=short", conflict]
+        blame_output = subprocess.check_output(cmd_git_blame).decode('utf-8')
+        return blame_output.split('\n')
+
+    def parse(self, conflict):
+        results, scan = {}, False
+        for line in self.__get_blame_results(conflict):
+            if not line.strip():
+                continue
+            sha1, info, code = self.__parse_blame_line(line)
+            if any(code.startswith(b) for b in self.__begin):
+                scan = True
+                continue
+            if any(code.startswith(e) for e in self.__end):
+                scan = False
+            if scan:
+                results[sha1] = info
+
+        return results.items()
+
+# Try to find related commits for the conflicts
+def check_conflicts(module, config, from_ref, conflicts):
+    results = ''
+    blameparser = BlameParser()
+    for conflict in conflicts:
+        changes = blameparser.parse(conflict)
+        results += conflict + ':\n\t' + '\n\t'.join('%s %s' %c for c in changes) + '\n'
+    return results
 
 # Replace all occurrences of searchExp in one file
 def replaceInFile(file, searchExp, replaceExp):
@@ -107,6 +165,9 @@ def wip_merge(module, config, from_ref):
         # Make sure we get a change-id as git merge doesn't generate it for us
         git_amend = "git commit --amend --no-edit"
         subprocess.check_call(git_amend.split(), stdout=fnull)
+
+        related = check_conflicts(module, config, from_ref, conflicts)
+        print("Related: ", related)
 
     except Exception as e:
         logging.error("Create WIP change failed: %s", str(e))
