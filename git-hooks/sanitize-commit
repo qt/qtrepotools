@@ -729,7 +729,7 @@ while (<DIFF>) {
                 # set*id; git discards it - but asking for it is misguided.
                 complain("Adding file with set*id permissions", "permissions", 1);
             } elsif ($perm & 0111) {
-                if ($clike || $qmake || $file =~ /\.(ps|pdf|png|qdoc(cconf)?|json)$/) {
+                if ($qmake || ($clike && $file !~ /\.pl$/) || $file =~ /\.(ps|pdf|png|qdoc(cconf)?|json)$/) {
                     # Should not be executable.
                     complain("Adding implausibly executable file", "permissions");
                 } elsif ($file =~ /\.(py|pm|pl|sh|bash|php)$/
