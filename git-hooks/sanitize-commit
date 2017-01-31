@@ -292,6 +292,87 @@ sub check_apple_terminology()
     }
 }
 
+# The hard-coded fallback could be avoided by init-repository setting it up.
+my $LTS = $config{'lts-branch'} || "5.6";
+
+my @allHeads = ();
+my @stableHeads = ();
+my @ltsHeads = ();
+my $foundDev = 0;
+my $seenOrigin = 0;
+open HEADS, '-|', 'git', 'for-each-ref',
+                  '--format=%(objectname) %(refname)',
+                  'refs/heads/', 'refs/remotes/origin/' or die "cannot run git: $!";
+while (<HEADS>) {
+    last if (!m,^([[:xdigit:]]{40}) refs/(.*),);
+    my ($rev, $name) = ($1, $2);
+    if ($name =~ m,^remotes/,) {
+        if (!$seenOrigin) {
+            ($foundDev, @allHeads, @stableHeads, @ltsHeads) = (0);
+            $seenOrigin = 1;
+        }
+    } elsif ($seenOrigin) {
+        next;
+    }
+    if ($name =~ m,/dev$,) {
+        $foundDev = 1;
+    } elsif ($name =~ m,/(\d+(?:\.\d+)+)$,) {
+        my $branch = $1;
+        if ($branch =~ /^$LTS(?:\.|$)/) {
+            push(@ltsHeads, $rev);
+        } else {
+            push(@stableHeads, $rev);
+        }
+    } elsif ($name !~ m,/master$,) {
+        next;
+    }
+    push(@allHeads, $rev);
+}
+close HEADS;
+printerr;
+
+my $sha1OnLts = -1;
+if ($foundDev && @ltsHeads) {
+    my $refPfx = ($seenOrigin ? "refs/remotes/origin" : "refs/heads");
+    my $diverge = $config{'cached-lts-fork'};
+    if (!$diverge || ($config{'cached-lts-branch'} || "") ne $LTS) {
+        chomp($diverge = `git merge-base $refPfx/dev $refPfx/$LTS`);
+        system("git config sanity.${instance}.cached-lts-fork $diverge && ".
+               "git config sanity.${instance}.cached-lts-branch $LTS");
+    }
+    chomp(my $sha1Base = `git merge-base $sha1 $refPfx/dev`);
+    $sha1OnLts = ($sha1Base eq $diverge);
+}
+
+sub check_cherry_pick($)
+{
+    my ($orig) = @_;
+
+    if ($sha1OnLts >= 0) {
+        my @sources = ($sha1OnLts ? @stableHeads : @ltsHeads);
+        if (@sources) {  # Expected to be always true ...
+            # git creates a hypothetical merge between the sources, so
+            # valid commits will lie in the ancestry of this merge,
+            # making the commit itself the best merge base.
+            chomp(my $origBase = `git merge-base $orig @sources`);
+            return if ($origBase eq $orig);
+        }
+    } else {
+        # The general policy when no LTS branch is present.
+        # No line, so people are less likely to get stupid ideas.
+        complain("Cherry-picks are strongly discouraged", "cherry");
+    }
+    return if (!@allHeads);  # Some truly weird repo
+    chomp(my $origBase = `git merge-base $orig @allHeads`);
+    if ($origBase ne $orig) {
+        # Most likely not integrated yet, but may also be a wip/ branch.
+        complain_ln("Cherry-pick's source is not an upstream commit", "cherry", 1);
+    } elsif ($sha1OnLts >= 0) {
+        complain("Cherry-pick is not between stable and LTS branch", "cherry");
+    }
+}
+
+my $havecherry = defined($cfg{cherry});
 my $badlog = defined($cfg{log});
 my $badurl_rx = $config{badurl};
 my $badurl = !defined($badurl_rx) || defined($cfg{url});
@@ -325,6 +406,7 @@ while (<MSG>) {
         $revert1 = 1 if (/^Revert ".*"$/);
         if (/^revert(ed|ing)? (commit )?[0-9a-f]{7,40}\.?$/i) {
             complain_cln("Summary of revert mentions only SHA1", "log");
+            # TODO: confirm reverted commit is real
         }
         if (/\bQT[A-Z]+-\d+\b/) {
             complain_cln("Bug reference in summary", "log");
@@ -370,7 +452,9 @@ while (<MSG>) {
                 complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
             }
             my $ftr = 0;
-            if (/^\((partial(ly)? )?(cherry[- ]pick|(back)?port)(ed)? /) {
+            if (/^\((?:partial(?:ly)? )?(?:cherry[- ]pick|(?:back-?)?port)(?:ed)?(?: from| of)?(?: commit)? ([[:xdigit:]]{7,40})/) {
+                check_cherry_pick($1) if (!defined($cfg{cherry}));
+                $havecherry = 1;
                 $cherry = 1 if (!/\)/);
                 # Some bad footers are ok above cherry-pick lines.
                 $badrev = 0;
@@ -427,6 +511,9 @@ if ($badrev && !defined($cfg{revby})) {
 }
 if ($badsign) {
     do_complain($badsign, "Unnecessary Signed-off-by footer", "", -1);
+}
+if (!$havecherry && $sha1OnLts > 0) {
+    complain("Commit on LTS branch is not a cherry-pick", "cherry");
 }
 
 complain_spelling();
