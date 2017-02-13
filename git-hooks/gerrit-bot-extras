@@ -1,0 +1,108 @@
+#! /usr/bin/perl
+
+# Copyright (C) 2017 The Qt Company Ltd.
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use strict;
+use warnings;
+use JSON;
+
+# Usage: $0 <project> <SHA1> [instance]
+# - default instance is 'sanitybot'
+# - configure git: git config --global <instance>.<option> <value>
+# Valid options are:
+#   watches (optional)
+#     Space-separated list of path watches. Each watch requires an own
+#     section named watches.<name> with the following keys (note that
+#     these sections are NOT namespaced with the instance):
+#       projects (default ".*")
+#         Regular expression specifying the projects to watch.
+#       files
+#         Regular expression specifying the filepaths to watch.
+#       message (optional)
+#         The message to post when this watch triggers.
+#       invite (optional)
+#         Space-separated list of reviewers to add when this watch triggers.
+
+die "usage: $0 <project> <SHA1> [instance]\n" if ($#ARGV < 1);
+my $project = shift @ARGV;
+my $rev = shift @ARGV;
+
+my $instance = 'sanitybot';
+$instance = $ARGV[0] if ($#ARGV > -1);
+
+# Doing this is less expensive than calling git repeatedly.
+my %config = ();
+for (`git config -l`) {
+    /^([^=]+)=(.*$)/;
+    $config{$1} = $2;
+}
+
+sub getcfg($;$)
+{
+    my ($key, $def) = @_;
+    my $fkey = $instance.'.'.$key;
+    if (defined $config{$fkey}) {
+        return $config{$fkey};
+    } elsif (@_ > 1) {
+        return $def;
+    } else {
+        die $fkey." not set.\n";
+    }
+}
+
+my @messages = ();
+my %verdict = ();
+my @invite = ();
+
+my (@watches, %watch_files, %watch_messages, %watch_invites);
+for my $w (split(/\s+/, getcfg('watches', ""))) {
+    my $p = $config{'watches.'.$w.'.projects'};
+    next if (defined($p) && $project !~ qr/^$p$/);
+    my $f = $config{'watches.'.$w.'.files'};
+    die "watches.$w.files not set.\n" if (!defined($f));
+    $watch_files{$w} = qr/^$f$/;
+    $watch_messages{$w} = $config{'watches.'.$w.'.message'};
+    my $i = $config{'watches.'.$w.'.invite'};
+    $watch_invites{$w} = defined($i) ? [ split(/\s+/, $i) ] : [];
+    push @watches, $w;
+}
+
+my $subject;
+
+if (@watches) {
+    my @touched = `git show --pretty=\%s --name-only --ignore-submodules -C $rev`;
+    chop(@touched);
+    $subject = shift @touched;
+    shift @touched;  # empty line
+    for my $w (@watches) {
+        for my $file (@touched) {
+            if ($file =~ $watch_files{$w}) {
+                push @messages, $watch_messages{$w} if (defined($watch_messages{$w}));
+                push @invite, @{$watch_invites{$w}};
+                last;
+            }
+        }
+    }
+}
+
+if (!defined($subject)) {
+    $subject = `git show --pretty=\%s -s $rev`;
+    chop($subject);
+}
+
+my $cr = 0;
+if ($subject =~ /^[<[]?[Ww]ip\b|\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/) {
+    unshift @messages, "Apparently pushing a Work In Progress";
+    $cr = -2;
+}
+$verdict{labels}{'Code-Review'} = $cr;
+
+$verdict{message} = join("\n\n", @messages) if (@messages);
+$verdict{invite} = \@invite if (@invite);
+
+print encode_json(\%verdict)."\n";
