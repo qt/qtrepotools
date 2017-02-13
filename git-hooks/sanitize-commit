@@ -15,14 +15,13 @@ use Encode;
 use File::Spec qw(path);
 use List::Util qw(first);
 
-if ($#ARGV < 0 or $#ARGV > 2 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit(-rest)?)$/)) {
-    print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit|gerrit-rest} [instance]]\n";
+if ($#ARGV < 0 or $#ARGV > 2 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit-rest)$/)) {
+    print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit-rest} [instance]]\n";
     exit 2;
 }
 my $sha1 = $ARGV[0];
 my $gerrit_rest = ($#ARGV >= 1 && $ARGV[1] eq "gerrit-rest");
-my $gerrit = $gerrit_rest || ($#ARGV >= 1 && $ARGV[1] eq "gerrit");
-my $strict = $gerrit || ($#ARGV >= 1 && $ARGV[1] eq "strict");
+my $strict = $gerrit_rest || ($#ARGV >= 1 && $ARGV[1] eq "strict");
 my $instance = ($#ARGV == 2) ? $ARGV[2] : "default";
 
 my $repo = getcwd();
@@ -80,7 +79,7 @@ sub do_complain($$$;$@)
     $level = 0 if (!defined($level) || ($level < 0 && $strict && length($key)));
     if ($level >= 0) {
         $fail = $level + 1 if ($level >= $fail);
-        $msg .= " (key \"".$key."\")" if (!$gerrit);
+        $msg .= " (key \"".$key."\")" if (!$gerrit_rest);
     } else {
         $msg = "Hint: ".$msg;
     }
@@ -920,12 +919,13 @@ if ($gerrit_rest) {
     }
     require JSON;
     print JSON::encode_json(\%gerrit_review)."\n";
-} elsif (%complaints) {
-    if (!$gerrit) {
-        $summary =~ s/^(.{50}).{5,}$/$1\[...]/;
-        print "***\n*** Suspicious changes in commit ".$sha1." (".$summary."):\n";
-    }
-    my ($lpfx, $elpfx) = ($gerrit ? ("", "\n") : ("***   ", "***\n"));
+    exit(!$fail ? 11 : (10 - $fail));
+}
+
+if (%complaints) {
+    $summary =~ s/^(.{50}).{5,}$/$1\[...]/;
+    print "***\n*** Suspicious changes in commit ".$sha1." (".$summary."):\n";
+    my ($lpfx, $elpfx) = ("***   ", "***\n");
     foreach my $fn (sort keys %complaints) {
         my $fpfx;
         if (length($fn) && ($fn ne "~~~~~")) {
@@ -952,5 +952,4 @@ if ($gerrit_rest) {
     }
     print $elpfx.$lpfx."See http://wiki.qt.io/Early_Warning_System for explanations.\n";
 }
-
-exit ($gerrit ? (!$fail ? 11 : (10 - $fail)) : $fail)
+exit($fail);

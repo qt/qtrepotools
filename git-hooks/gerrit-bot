@@ -12,6 +12,7 @@ use warnings;
 use POSIX;
 use JSON;
 use File::Path;
+use Gerrit::REST;
 
 # Usage: $0 [instance]
 # - default instance is 'sanitybot'
@@ -22,7 +23,7 @@ use File::Path;
 #     Target host. The identification is done via SSH.
 #   gerritactorhost
 #     Target host for inviting reviewers. Falls back go gerrithost.
-#   resthost
+#   resthost (mandatory)
 #     The REST base URL of the target host.
 #   restuser
 #     The user name for resthost. If omitted, credentials are expected in .netrc.
@@ -40,7 +41,7 @@ use File::Path;
 #   worker
 #     The worker is run in a local bare clone of the inspected repository.
 #     The magic string @SHA@ is replaced by the commit to be checked.
-#     Everything it dumps to stdout & stderr will be attached as a comment.
+#     It is expected to dump a Gerrit ReviewInput JSON entity to stdout.
 #     It is supposed to return a score (offset by +10).
 #   excluded (optional)
 #     Space-separated list of exclusions of the form <project> or
@@ -93,7 +94,7 @@ my $GERRIT_HOST = getcfg 'gerrithost';
 my $GERRIT_ACTOR_HOST = getcfg 'gerritactorhost', $GERRIT_HOST;
 my $USER_EMAIL = getcfg 'useremail';
 my $INVITE_ONLY = getcfg 'inviteonly', 0;
-my $REST_HOST = getcfg 'resthost', undef;
+my $REST_HOST = getcfg 'resthost';
 my $REST_USER = getcfg 'restuser', undef;
 my $REST_PASS = getcfg 'restpass', undef;
 my $GIT_BASEDIR = getcfg 'gitbasedir';
@@ -117,14 +118,9 @@ for my $w (@WATCHES) {
   $watch_invites{$w} = defined($i) ? [ split(/\s+/, $i) ] : [];
 }
 
-my $gerrit_rest;
-if ($REST_HOST) {
-  use Gerrit::REST;
-  $gerrit_rest = Gerrit::REST->new($REST_HOST, $REST_USER, $REST_PASS);
-}
-
 my @gerrit = ("ssh", $GERRIT_HOST, "gerrit");
 my @gerrit_actor = ("ssh", $GERRIT_ACTOR_HOST, "gerrit");
+my $gerrit_rest = Gerrit::REST->new($REST_HOST, $REST_USER, $REST_PASS);
 
 my %processed = ();
 my %skipfetch = ();
@@ -147,15 +143,14 @@ sub process_commit($$$$$)
   $processed{$ref} = 1;
   my $orig_project = $project;
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
-  my ($score, $verdict);
+  my ($score, $verdict) = (undef, {});
   my $message = "";
   my $iswip = 0;
   my @invite;
-  my $use_rest = 0;
   if (defined($EXCLUDED_PROJECTS{$project}) || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
     $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project."\n";
     $score = 1;
-    $verdict = "(skipped)";
+    $message = "(skipped)";
   } else {
     $verbose and print "===== ".strftime("%c", localtime(time()))." ===== processing commit ".$ref." in ".$project."\n";
     my $GIT_DIR = $GIT_BASEDIR."/".$project.".git";
@@ -223,33 +218,27 @@ sub process_commit($$$$$)
 
     my $worker = $WORKER;
     $worker =~ s/\@SHA1\@/$rev/g;
+    my $output;
     open VERDICT, $worker." 2>&1 |" or die "cannot run worker: ".$!;
     {
       local $/;
-      $verdict = <VERDICT>;
+      $output = <VERDICT>;
     }
     close VERDICT;
     die "Worker for commit ".$ref." in ".$project." crashed with signal ".$?.".\n" if ($? & 127);
     $score = $? >> 8;
     die "Worker returned invalid score ".$score." for commit ".$ref." in ".$project.".\n" if ($score > 20);
     $score -= 10;
-    if ($REST_HOST) {
-      if (length($verdict) > 50000) {
-        $verdict = "**** Worker produced an unreasonable amount of output. You should ask the bot maintainers for advice.";
-        push @invite, @MAINTAINERS;
-      } else {
-        $use_rest = 1;
-        while ($verdict =~ s/^([^\{][^\n]*\n)//s) {
-          print STDERR "Non-JSON output from worker: $1\n";
-        }
-        $verdict = decode_json($verdict);
-        defined($verdict) or die "cannot decode verdict as JSON\n";
-        $$verdict{labels} = { 'Sanity-Review' => $score, 'Code-Review' => ($iswip ? -2 : 0) };
-      }
+    if (length($output) > 50000) {
+      $message = "**** Worker produced an unreasonable amount of output. You should ask the bot maintainers for advice.";
+      push @invite, @MAINTAINERS;
     } else {
-      if (length($verdict) > 20000) {
-        $verdict = substr($verdict, 0, 20000)."\n\n**** Output truncated. Fix the problems above to get more output.\n";
+      while ($output =~ s/^([^\{][^\n]*\n)//s) {
+        print STDERR "Non-JSON output from worker: $1\n";
       }
+      $verdict = decode_json($output);
+      defined($verdict) or die "cannot decode verdict as JSON\n";
+      $$verdict{labels} = { 'Sanity-Review' => $score, 'Code-Review' => ($iswip ? -2 : 0) };
     }
   }
   if (@invite) {
@@ -260,35 +249,16 @@ sub process_commit($$$$$)
       $verbose and print "Invited @invite to ".$rev." (".$project."/".$ref.")\n";
     }
   }
-  if ($use_rest) {
-    if (defined($$verdict{message}) || length($message)) {
-      $$verdict{message} = $message.($$verdict{message} || "");
-    }
-    eval {
-      $gerrit_rest->POST("/changes/$number/revisions/$rev/review", $verdict);
-    };
-    if ($@) {
-      print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
-      print STDERR "Submission of REST verdict for ".$rev." (".$project."/".$ref.") failed: $@\n";
-      return;
-    }
-  } else {
-    $verdict = $message.$verdict;
-    my @args = ();
-#    push @args, ("--project", $project);
-    push @args, ("--project", $orig_project);  # XXX Workaround QTQAINFRA-381
-    push @args, ("--sanity-review", ($score > 0) ? "+".$score : $score);
-    push @args, ("--code-review", $iswip ? -2 : 0);
-    if (length($verdict)) {
-      $verdict =~ s/([\"\\\$\`])/\\$1/g; # ssh doesn`t properly quote the arguments for sh
-      $verdict =~ s/^\s+|\s+$//g;
-      push @args, ("--message", '"'.$verdict.'"');
-    }
-    if (system(@gerrit, "review", @args, $rev)) {
-      print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
-      printerr("Submission of verdict for ".$rev." (".$project."/".$ref.") failed");
-      return;
-    }
+  if (defined($$verdict{message}) || length($message)) {
+    $$verdict{message} = $message.($$verdict{message} || "");
+  }
+  eval {
+    $gerrit_rest->POST("/changes/$number/revisions/$rev/review", $verdict);
+  };
+  if ($@) {
+    print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
+    print STDERR "Submission of REST verdict for ".$rev." (".$project."/".$ref.") failed: $@\n";
+    return;
   }
   $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref."): $score\n";
 }
