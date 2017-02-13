@@ -20,6 +20,8 @@ use File::Path;
 # Valid options are:
 #   gerrithost (mandatory)
 #     Target host. The identification is done via SSH.
+#   gerritactorhost
+#     Target host for inviting reviewers. Falls back go gerrithost.
 #   resthost
 #     The REST base URL of the target host.
 #   restuser
@@ -88,6 +90,7 @@ sub getcfg($;$)
 }
 
 my $GERRIT_HOST = getcfg 'gerrithost';
+my $GERRIT_ACTOR_HOST = getcfg 'gerritactorhost', $GERRIT_HOST;
 my $USER_EMAIL = getcfg 'useremail';
 my $INVITE_ONLY = getcfg 'inviteonly', 0;
 my $REST_HOST = getcfg 'resthost', undef;
@@ -121,6 +124,7 @@ if ($REST_HOST) {
 }
 
 my @gerrit = ("ssh", $GERRIT_HOST, "gerrit");
+my @gerrit_actor = ("ssh", $GERRIT_ACTOR_HOST, "gerrit");
 
 my %processed = ();
 my %skipfetch = ();
@@ -249,7 +253,7 @@ sub process_commit($$$$$)
     }
   }
   if (@invite) {
-    if (system(@gerrit, "set-reviewers", (map { ('-a', $_) } @invite), '--', $rev)) {
+    if (system(@gerrit_actor, "set-reviewers", (map { ('-a', $_) } @invite), '--', $rev)) {
       print "===== ".strftime("%c", localtime(time()))." ===== invitation FAILED\n";
       printerr("Inviting reviewers to ".$rev." (".$project."/".$ref.") failed");
     } else {
