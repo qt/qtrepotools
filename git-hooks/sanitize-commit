@@ -917,9 +917,10 @@ if ($gerrit_rest) {
         push @cover_texts, "See http://wiki.qt.io/Early_Warning_System for explanations.";
         $gerrit_review{message} = join "\n\n", @cover_texts;
     }
+    $gerrit_review{labels}{'Sanity-Review'} = (!$fail ? 1 : -$fail);
     require JSON;
     print JSON::encode_json(\%gerrit_review)."\n";
-    exit(!$fail ? 11 : (10 - $fail));
+    exit(0);
 }
 
 if (%complaints) {

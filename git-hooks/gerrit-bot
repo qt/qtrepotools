@@ -42,7 +42,6 @@ use Gerrit::REST;
 #     The worker is run in a local bare clone of the inspected repository.
 #     The magic string @SHA@ is replaced by the commit to be checked.
 #     It is expected to dump a Gerrit ReviewInput JSON entity to stdout.
-#     It is supposed to return a score (offset by +10).
 #   excluded (optional)
 #     Space-separated list of exclusions of the form <project> or
 #     <project>:<branch>.
@@ -143,14 +142,14 @@ sub process_commit($$$$$)
   $processed{$ref} = 1;
   my $orig_project = $project;
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
-  my ($score, $verdict) = (undef, {});
+  my $verdict = {};
   my $message = "";
   my $iswip = 0;
   my @invite;
   if (defined($EXCLUDED_PROJECTS{$project}) || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
     $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project."\n";
-    $score = 1;
     $message = "(skipped)";
+    $$verdict{labels}{'Sanity-Review'} = 1;
   } else {
     $verbose and print "===== ".strftime("%c", localtime(time()))." ===== processing commit ".$ref." in ".$project."\n";
     my $GIT_DIR = $GIT_BASEDIR."/".$project.".git";
@@ -226,9 +225,7 @@ sub process_commit($$$$$)
     }
     close VERDICT;
     die "Worker for commit ".$ref." in ".$project." crashed with signal ".$?.".\n" if ($? & 127);
-    $score = $? >> 8;
-    die "Worker returned invalid score ".$score." for commit ".$ref." in ".$project.".\n" if ($score > 20);
-    $score -= 10;
+    die "Worker returned non-zero exit code for commit ".$ref." in ".$project.".\n" if ($?);
     if (length($output) > 50000) {
       $message = "**** Worker produced an unreasonable amount of output. You should ask the bot maintainers for advice.";
       push @invite, @MAINTAINERS;
@@ -238,7 +235,7 @@ sub process_commit($$$$$)
       }
       $verdict = decode_json($output);
       defined($verdict) or die "cannot decode verdict as JSON\n";
-      $$verdict{labels} = { 'Sanity-Review' => $score, 'Code-Review' => ($iswip ? -2 : 0) };
+      $$verdict{labels}{'Code-Review'} = ($iswip ? -2 : 0);
     }
   }
   if (@invite) {
@@ -260,7 +257,7 @@ sub process_commit($$$$$)
     print STDERR "Submission of REST verdict for ".$rev." (".$project."/".$ref.") failed: $@\n";
     return;
   }
-  $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref."): $score\n";
+  $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref.")\n";
 }
 
 $| = 1; # make STDOUT autoflush
