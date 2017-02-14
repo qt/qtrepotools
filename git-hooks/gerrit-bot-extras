@@ -65,34 +65,26 @@ for my $w (split(/\s+/, getcfg('watches', ""))) {
     next if (defined($p) && $project !~ qr/^$p$/);
     my $f = $config{'watches.'.$w.'.files'};
     die "watches.$w.files not set.\n" if (!defined($f));
-    $watch_files{$w} = qr/^$f$/;
+    $watch_files{$w} = qr/^$f$/m;
     $watch_messages{$w} = $config{'watches.'.$w.'.message'};
     my $i = $config{'watches.'.$w.'.invite'};
     $watch_invites{$w} = defined($i) ? [ split(/\s+/, $i) ] : [];
     push @watches, $w;
 }
 
-my $subject;
-
-if (@watches) {
-    my @touched = `git show --pretty=\%s --name-only --ignore-submodules -C $rev`;
-    chop(@touched);
-    $subject = shift @touched;
-    shift @touched;  # empty line
-    for my $w (@watches) {
-        for my $file (@touched) {
-            if ($file =~ $watch_files{$w}) {
-                push @messages, $watch_messages{$w} if (defined($watch_messages{$w}));
-                push @invite, @{$watch_invites{$w}};
-                last;
-            }
-        }
-    }
+my ($subject, $files);
+{
+    local $/;
+    my $output = `git show --pretty=\%s\%x00 --name-only --ignore-submodules -C $rev`;
+    ($subject, $files) = split(/\x00/, $output);
 }
 
-if (!defined($subject)) {
-    $subject = `git show --pretty=\%s -s $rev`;
-    chop($subject);
+for my $w (@watches) {
+    if ($files =~ /$watch_files{$w}/) {
+        push @messages, $watch_messages{$w} if (defined($watch_messages{$w}));
+        push @invite, @{$watch_invites{$w}};
+        last;
+    }
 }
 
 my $cr = 0;
