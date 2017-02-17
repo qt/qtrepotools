@@ -96,8 +96,11 @@ if (!defined($subject)) {
 }
 
 my $cr = 0;
-if ($subject =~ /^[<[]?[Ww]ip\b|\bWIP\b|\*{3}|^(?:squash|fixup)! |^(.)\1*$/) {
+if ($subject =~ /^[<[]?[Ww]ip\b|\bWIP\b|\*{3}|^(.)\1*$/) {
     unshift @messages, "Apparently pushing a Work In Progress";
+    $cr = -2;
+} elsif ($subject =~ /^(?:squash|fixup)! /) {
+    unshift @messages, "Commit was meant to be squashed";
     $cr = -2;
 }
 $verdict{labels}{'Code-Review'} = $cr;
