@@ -414,7 +414,7 @@ while (<MSG>) {
             complain_cln("Summary ends with period", "log");
         }
         # Detect wrong tense, but exclude cases like 'Speed up ...'
-        if (/^\w+(ing|[^e](ed)|es)\s/) {
+        if (s/^[^:]+: //r =~ /^\w+(ing|[^e](ed)|es)\s/) {
             complain_cln("Summary does not use imperative mood", "log");
         }
         if (!$badlog && length($_) < 7) {
