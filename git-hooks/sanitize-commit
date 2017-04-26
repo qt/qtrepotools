@@ -775,7 +775,8 @@ while (<DIFF>) {
             $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
             $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
             $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
-            $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs}) && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(pbxproj|plist(\.[^.\/]+)?|def|spec|changes|[xn]ib|storyboardc?|go|svg)(?:\.in)?$)/);
+            $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs})
+                && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(pbxproj|plist(\.[^.\/]+)?|def|mk|spec|changes|[xn]ib|storyboardc?|go|svg)(?:\.in)?$)/);
             $allow_2spaces = $ws_check && ($file =~ /\.md$/);
             $ctlkw_check = $tabs_check && $clike;
             $eof_check = !$is_bin && ($file !~ /(\.plist(\.[^.\/]+)?|\.xcassets\/.*\.json)$/); # Xcode consistently forgets the trailing newline
