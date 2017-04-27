@@ -853,7 +853,7 @@ while (<DIFF>) {
                 }
                 $size = 0;
                 $new_file = 1;
-                $no_copyright = $issrc && $file !~ /\.(qdocconf|json)$/i;
+                $no_copyright = $issrc && $file !~ /\.(qdocconf|json)$|/i && $file !~ /(^|\/)3rdparty\//;
             } elsif ($size > 20000 && !$issrc && !defined($cfg{size})) {
                 my $old_size = 0;
                 for my $old_tree (split(/,/, $old_trees)) {
