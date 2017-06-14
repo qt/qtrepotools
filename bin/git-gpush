@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# Copyright (C) 2015 The Qt Company Ltd.
+# Copyright (C) 2017 The Qt Company Ltd.
 # Contact: http://www.qt.io/licensing/
 #
 # You may use this file under the terms of the 3-clause BSD license.
@@ -28,29 +28,25 @@ Usage:
     Pushes Changes to Gerrit and adds reviewers and CC to the PatchSets.
 
 Description:
-    This script is used to push PatchSets to Gerrit, and at the same
+    This program is used to push PatchSets to Gerrit, and at the same
     time add reviewers and CCs to the PatchSets pushed.
 
-    You can use email addresses, Gerrit usernames or aliases for the
+    You can use email addresses, Gerrit usernames, or aliases for the
     name of the reviewers/CCs.
 
     If no sha1 or ref-from is specified, 'HEAD' is used.
-    Note that git gpush can be used in the middle of an interactive
-    rebase, in which case ref-from can often be omitted.
 
     If no ref-to is specified, the upstream branch for 'ref-from' is
-    used as
-        'refs/for/<upstream branch>'.
-
-    If no remote is specified or configured, 'gerrit' is used. You may
-    configure a remote like this:
-        git config gpush.remote <remote name>
+    used as the target branch.
 
     If all the options above have been populated, the remainder
     options are passed on directly to the normal 'git push' command.
     If you want to avoid specifying all options first, any options
     specified after a '--' are also passed on directly to the
     underlying 'git push' command.
+
+    Note that this program can be used in the middle of an interactive
+    rebase, to push out the amended commits instantly.
 
 Options:
     -d, --draft
@@ -62,7 +58,7 @@ Options:
         WIP markers.
 
     -r, --remote
-        Specify the git remote to push to. The default is 'gerrit'.
+        Specify the git remote to push to.
 
     --aliases
         Report all registered aliases and quit.
@@ -79,29 +75,37 @@ Options:
     --debug
         Print debug information.
 
-Configuring Aliases:
-    Aliases are read from the
-        .git-gpush-aliases
-    located next to the script, then from the git config which may
-    have aliases set either locally in the current repository,
-    globally (in your ~/.gitconfig), or system-wide.
+Configuration:
+    This program uses options from the git configuration. All its keys
+    use the 'gpush.' prefix. Consequently, to configure any option, you
+    can use a command like this:
+        git config --global gpush.<the option> <the value>
+    If you want it to be local to the current repository, just drop the
+    --global option. The following options are supported:
 
-    You can add aliases to your global git config like this:
-        git config --global gpush.alias.<alias key> <alias value>
-    and if you only want it to be local to the current repository,
-    just drop the --global option.
-    Note that git config keys are constrained regarding allowed
-    characters, so it is impossible to map some IRC nicks via git
-    configuration.
+    alias.<alias>
+        An alias definition. The value is a comma-separated list of Gerrit
+        login names and/or email addresses, so it's possible to map, for
+        example, IRC nicknames or entire teams. Note that git config keys
+        are constrained regarding allowed characters, so it is impossible
+        to map some IRC nicks via git configuration; see below for an
+        alternative.
 
-    An alias may contain multiple comma-separated email addresses;
-    for example, to set a single alias for an entire team.
+    remote
+        The default git remote to use for pushing to Gerrit.
+        Defaults to 'gerrit' if not configured.
 
-    Inside .git-gpush-aliases, each alias may also be a comma-separated
-    list, in case a user uses multiple handles.
+    In addition to the git configuration (which takes precedence), the file
+    .git-gpush-aliases located next to this program is also read. It may
+    contain two sections: 'config' where you can use the options specified
+    above, and 'aliases'. The latter works just like alias definitions via
+    the git configuration, except that:
+    - The alias name itself may also be a comma-separated list, thus
+      supporting users with multiple handles.
+    - Most characters are permitted in the alias names.
 
 Copyright:
-    Copyright (C) 2015 The Qt Company Ltd.
+    Copyright (C) 2017 The Qt Company Ltd.
     Contact: http://www.qt.io/licensing/
 
 License:
