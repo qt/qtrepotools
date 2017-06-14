@@ -190,7 +190,7 @@ sub lookup_alias($)
 
 # Find _the_ branch the specified commit lives on. This can be the current
 # branch (and other branches are ignored), or _one_ other branch.
-sub determine_branch($)
+sub branch_for_commit($)
 {
     my ($commit) = @_;
 
@@ -224,29 +224,47 @@ sub determine_branch($)
     return $curbranch;
 }
 
-sub determine_target()
+# Extract the local branch from the specified source.
+# There are four possibilities where the source revision may be located:
+# - On any named branch in a regular state.
+#   The branch is usable up to its tip, which may be pointed to by HEAD.
+# - On the current named branch mid-rebase.
+#   The branch is pointed to by HEAD, and is usable only up to this point.
+# - On a detached head, possibly mid-rebase.
+#   HEAD is the only reference and thus also the tip. There is no name.
+# - Nowhere, except possibly in the reflog.
+#   It is the tip, as there are no references. There is no name.
+# Note that commits specified by SHA1 which live on exactly one named
+# branch fall into the first case.
+sub determine_local_branch()
 {
     # Validate the source commit, to avoid confusing errors later.
     run_process(FWD_STDERR, "git", "rev-parse", $ref_from, '--');
 
-    # Detect upstream branch if ref-to is not set
+    # First, try to extract a branch name directly.
+    $local_branch = ($ref_from =~ s/[~^].*$//r);
+    if ($local_branch eq "HEAD") {
+        my $sref = read_cmd_line(SOFT_FAIL, "git", "symbolic-ref", "-q", "HEAD");
+        $local_branch = $sref if (!$?);
+    }
+    $local_branch =~ s,^refs/heads/,,;
+    run_process(SOFT_FAIL, "git", "rev-parse", "--verify", "-q", "refs/heads/".$local_branch);
+    if ($?) {
+        # Next, try to deduce a branch from the commit.
+        $local_branch = branch_for_commit($ref_from);
+    }
+}
+
+# Obtain the upstream branch for the local branch, unless the remote
+# branch has been specified.
+sub determine_remote_branch()
+{
     if ($ref_to eq "") {
-        # First, try to extract a branch name directly.
-        my $ref = $ref_from;
-        $ref =~ s/[~^].*$//;
-        if ($ref eq "HEAD") {
-            my $sref = read_cmd_line(SOFT_FAIL, "git", "symbolic-ref", "-q", "HEAD");
-            $ref = $sref if (!$?);
-        }
-        $ref =~ s,^refs/heads/,,;
-        run_process(SOFT_FAIL, "git", "rev-parse", "--verify", "-q", "refs/heads/".$ref);
-        if ($?) {
-            # Next, try to deduce a branch from the commit.
-            $ref = determine_branch($ref_from);
-            fail("Cannot deduce source branch for $ref_from.\n") if (!defined($ref));
-        }
-        $ref_to = git_config("branch.$ref.merge");
-        fail("$ref has no upstream branch.\n") if (!defined($ref_to));
+        fail("Cannot deduce source branch for $ref_from. Please use --branch.\n")
+            if (!defined($local_branch));
+        $ref_to = git_config("branch.$local_branch.merge");
+        fail("$local_branch has no upstream branch. Please use --branch.\n")
+            if (!defined($ref_to));
         $ref_to =~ s,^refs/heads/,,;
     }
 }
@@ -272,5 +290,6 @@ sub push_patches()
 process_config();
 parse_arguments(@ARGV);
 goto_gitdir();
-determine_target();
+determine_local_branch();
+determine_remote_branch();
 push_patches();

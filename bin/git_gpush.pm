@@ -329,6 +329,14 @@ sub load_config()
     }
 }
 
+######################
+# branches & remotes #
+######################
+
+# The name of the local branch we're working with (not necessarily the
+# current branch). May be undef.
+our $local_branch;
+
 #############################
 # export all public symbols #
 #############################
