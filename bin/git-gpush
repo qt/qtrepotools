@@ -38,9 +38,9 @@ Description:
     Note that git gpush can be used in the middle of an interactive
     rebase, in which case ref-from can often be omitted.
 
-    If no ref-to is specified, the remote tracking branch for 'ref-from'
-    is used as
-        'refs/for/<remote tracking branch>'.
+    If no ref-to is specified, the upstream branch for 'ref-from' is
+    used as
+        'refs/for/<upstream branch>'.
 
     If no remote is specified or configured, 'gerrit' is used. You may
     configure a remote like this:
@@ -488,7 +488,7 @@ sub determine_branch($)
     close_process($branches);
     if (!defined($curbranch)) {
         # If the commit is not on the current branch, see if it is on _one_
-        # other branch with a tracking branch.
+        # other branch with an upstream branch.
         my @goodbranches;
         foreach my $other (@otherbranches) {
             push @goodbranches, $other if (defined(git_config("branch.$other.merge")));
@@ -503,7 +503,7 @@ sub determine_target()
     # Validate the source commit, to avoid confusing errors later.
     run_process(FWD_STDERR, "git", "rev-parse", $ref_from, '--');
 
-    # Detect tracking branch if ref-to is not set
+    # Detect upstream branch if ref-to is not set
     if ($ref_to eq "") {
         # First, try to extract a branch name directly.
         my $ref = $ref_from;
@@ -520,7 +520,7 @@ sub determine_target()
             die("Cannot deduce source branch for $ref_from.\n") if (!defined($ref));
         }
         $ref_to = git_config("branch.$ref.merge");
-        die("$ref has no tracking branch.\n") if (!defined($ref_to));
+        die("$ref has no upstream branch.\n") if (!defined($ref_to));
         $ref_to =~ s,^refs/heads/,,;
     }
 }
