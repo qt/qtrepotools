@@ -45,11 +45,12 @@ Description:
 Options:
     -d, --draft
         Mark the pushed Changes as drafts. This switch is usually
-        unnecessary, as gpush will recognize WIP Changes by subject.
+        unnecessary, as gpush will recognize drafts by "***" in the
+        subject. Note that "WIP" is specifically NOT a draft indicator.
 
     -p, --publish
-        Do not mark the pushed Changes as drafts even if they have
-        WIP markers.
+        Do not mark the pushed Changes as drafts even if they have a
+        draft indicator.
 
     -r, --remote
         Specify the git remote to push to.
@@ -505,7 +506,7 @@ sub push_patches()
 {
     if (!$draft) {
         $_ = read_cmd_line(0, 'git', 'log', '--pretty=%s', '-1', $ref_from);
-        $draft = 1 if (/\bWIP\b|\*{3}|^(.)\1*$/i);
+        $draft = 1 if (/\*{3}|^(.)\1*$/i);
     }
 
     print "Pushing $ref_from for $ref_to on $remote ...\n" if (!$quiet);
