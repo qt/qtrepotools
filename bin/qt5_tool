@@ -141,15 +141,13 @@ sub msysGitUtility
     return $utility;
 }
 
-my $qmakeSpec = $ENV{'QMAKESPEC'};
 my $make = 'make';
 my @makeArgs = ('-s');
 my $makeForceArg = '-k';
 my $minGW = 0;
 
 if ($os == $OS_WINDOWS) {
-    $minGW = defined($qmakeSpec) && index($qmakeSpec,'g++') > 0;
-    if ($minGW) {
+    if (which('g++')) {
         $make = 'mingw32-make';
     } else {
         @makeArgs = ('/s', '/l');
