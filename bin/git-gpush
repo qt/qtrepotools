@@ -411,8 +411,6 @@ sub load_config()
     close_process($cfg);
 
     $remote = git_config('gpush.remote', $remote);
-    die("Configuring ref-from is not supported any more.\n") if (git_config('gpush.ref-from'));
-    die("Configuring ref-to is not supported any more.\n") if (git_config('gpush.ref-to'));
     foreach (keys %gitconfig) {
         if (/^gpush\.alias\.(.*)$/) {
             $aliases{$1} = git_config($_);
