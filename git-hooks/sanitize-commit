@@ -848,8 +848,8 @@ while (<DIFF>) {
                     if (!defined($cfg{giant})) {
                         complain("Adding huge file (".formatSize($size)." > 2MiB)", "giant", 1);
                     }
-                } elsif ($size > 51200 && !$issrc && !defined($cfg{size})) {
-                    complain("Warning: Adding big file (".formatSize($size)." > 50KiB)", "size");
+                } elsif ($size >= 51200 && !$issrc && !defined($cfg{size})) {
+                    complain("Warning: Adding big file (".formatSize($size)." >= 50KiB)", "size");
                 }
                 $size = 0;
                 $new_file = 1;
