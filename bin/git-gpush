@@ -23,7 +23,7 @@ sub usage
 {
     print << "EOM";
 Usage:
-    git gpush [opts] [[sha1/ref-from]:[ref-to]] [+<reviewer>] [=<CC user>]
+    git gpush [opts] [sha1/ref-from] [+<reviewer>] [=<CC user>]
 
     Pushes Changes to Gerrit and adds reviewers and CC to the PatchSets.
 
@@ -35,9 +35,6 @@ Description:
     name of the reviewers/CCs.
 
     If no sha1 or ref-from is specified, 'HEAD' is used.
-
-    If no ref-to is specified, the upstream branch for 'ref-from' is
-    used as the target branch.
 
     Note that this program can be used in the middle of an interactive
     rebase, to push out the amended commits instantly.
@@ -54,6 +51,10 @@ Options:
 
     -r, --remote
         Specify the git remote to push to.
+
+    -b, --branch
+        Specify the git branch to push for. If not specified, the
+        upstream branch for 'ref-from' is used as the target branch.
 
     --aliases
         Report all registered aliases and quit.
@@ -300,6 +301,9 @@ sub parse_arguments(@)
         } elsif ($arg eq "-r" || $arg eq "--remote") {
             die("--remote needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $remote = shift @_;
+        } elsif ($arg eq "-b" || $arg eq "--branch") {
+            die("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
+            $ref_to = shift @_;
         } elsif ($arg eq "--aliases") {
             foreach my $key (sort(keys %aliases)) {
                 print "$key = $aliases{$key}\n";
@@ -314,12 +318,18 @@ sub parse_arguments(@)
             push @CCs, split(/,/, lookup_alias($1));
         } elsif ($arg !~ /^\-/) {
             if ($arg =~ /(.*):(.*)/) {
-                $ref_from = $1 if (defined $1 && $1 ne "");
-                $ref_to = $2 if (defined $2 && $2 ne "");
+                if (length($1)) {
+                    $ref_from = $1;
+                    print STDERR "Warning: Specifying <ref-from>: is deprecated.".
+                                 " Use just <ref-from> instead.\n";
+                }
+                if (length($2)) {
+                    $ref_to = $2;
+                    print STDERR "Warning: Specifying :<ref-to> is deprecated.".
+                                 " Use --branch instead.\n";
+                }
             } else {
-                print STDERR "Warning: Specifying a bare remote is deprecated.".
-                             " Use --remote instead.\n";
-                $remote = $arg;
+                $ref_from = $arg;
             }
         } else {
             die("Unrecognized option '$arg'.\n");
