@@ -25,7 +25,7 @@ BEGIN {
 }
 use git_gpush;
 
-use List::Util qw(first);
+use List::Util qw(first any all);
 use JSON;
 
 # Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
@@ -96,6 +96,11 @@ Options:
         Group Changes into series without pushing them yet.
         Note that this resets the pending properties (branch, topic,
         and base) from a previous grouping that was not pushed out yet.
+
+    -x, --exclude
+        Like --group, but the series is excluded from --all. It is
+        possible to exclude existing series. To (re-)include a series,
+        use --group or push it separately.
 
     -m, --minimal
         Try to avoid creating new PatchSets for unmodified Changes even
@@ -264,6 +269,7 @@ my $topic;
 my $force = 0;
 my $push_all = 0;
 my $group_only = 0;
+my $exclude = 0;
 my $list_only = 0;
 my $list_online = 0;
 
@@ -274,6 +280,7 @@ sub parse_arguments(@)
 {
     my $rebase = 0;
     my $minimal_override = 0;
+    my $not_exclude = 0;
     while (scalar @_) {
         my $arg = shift @_;
 
@@ -292,6 +299,10 @@ sub parse_arguments(@)
             $capture = 1;
         } elsif ($arg eq "-g" || $arg eq "--group") {
             $group_only = 1;
+            $not_exclude = 1;
+        } elsif ($arg eq "-x" || $arg eq "--exclude") {
+            $group_only = 1;
+            $exclude = 1;
         } elsif ($arg eq "-m" || $arg eq "--minimal") {
             $minimal = 1;
             $minimal_override = 1;
@@ -390,12 +401,14 @@ sub parse_arguments(@)
             || defined($remote);
 
     if ($group_only) {
-        fail("--group and --list are mutually exclusive.\n")
+        fail("--group/--exclude and --list are mutually exclusive.\n")
             if ($list_only);
-        fail("--group and --all are mutually exclusive.\n")
+        fail("--group/--exclude and --all are mutually exclusive.\n")
             if ($push_all);
-        fail("--group is incompatible with push-modifying options.\n")
-            if ($push_specific || $minimal_override);
+        fail("--group/--exclude is incompatible with push-modifying options.\n")
+            if ($push_specific);
+        fail("--group and --exclude are mutually exclusive.\n")
+            if ($exclude && $not_exclude);
     } elsif ($list_only) {
         fail("--list/--list-online is incompatible with --quiet/--verbose.\n")
             if ($quiet || ($verbose && !$debug));
@@ -485,7 +498,11 @@ sub caption_group($)
     my $tpc = $$group{topic};
     my $tpcs = length($tpc) ? ", topic '$tpc'" : "";
     my ($pfx, $rmt) = $list_only
-                          ? ("Series of",
+                          ? ($$group{exclude_mix}
+                                 ? "Partially excluded series of"
+                                 : $$group{exclude}
+                                       ? "Excluded series of"
+                                       : "Series of",
                              ($list_online && length($tos)) ? " on '$remote'" : "")
                           : $group_only
                                 ? ("Grouping", "")
@@ -547,6 +564,34 @@ sub aggregate_property($$$$)
         return $p;
     }
     return undef;
+}
+
+sub aggregate_bool_property($$$$$)
+{
+    my ($group, $prop, $ann_prop, $err_label, $err_msg) = @_;
+
+    print "Testing $prop.\n" if ($debug);
+    my $changes = $$group{changes};
+    return if (!any { $$_{$prop} } @$changes);
+
+    print "Have some $prop.\n" if ($debug);
+    $$group{$prop} = 1;
+    return if (all { $$_{$prop} } @$changes);
+
+    print "Have mixed $prop.\n" if ($debug);
+    $$group{"${prop}_mix"} = 1;
+    return if ($list_only);
+
+    foreach my $change (@$changes) {
+        $$change{annotation} = "  [$ann_prop]"
+            if ($$change{$prop});
+    }
+    my @reports;
+    report_flowed(\@reports,
+                  "Series of ".int(@$changes)." Changes has mixed $err_label states:");
+    report_local_changes(\@reports, $changes);
+    report_fixed(\@reports, $err_msg."\n");
+    fail_formatted(\@reports);
 }
 
 # Find _the_ branch the specified commit lives on. This can be the current
@@ -811,6 +856,9 @@ sub get_all_changes()
         my ($changes, $gid);
         ($changes, $gid, $change, undef) = do_determine_series($change, 0, 0, 1);
         my $group = finalize_get_changes($changes, $gid);
+        aggregate_bool_property($group, "exclude", "EXCLUDED", "exclusion",
+                                "Please gpush it separately or use --group/--exclude"
+                                ." to make it consistent.");
         unshift @groups, $group;
         $have_loose++ if (!$gid);
         last if (!$change);
@@ -1532,8 +1580,10 @@ sub annotate_changes($)
 {
     my ($group) = @_;
 
+    my $excl_mix = $list_only && $$group{exclude_mix};
     foreach my $change (@{$$group{changes}}) {
         my @attribs;
+        push @attribs, 'EXCLUDED' if ($excl_mix && $$change{exclude});
         # Changes can be loose only when pushing all or listing, as
         # otherwise they are currently being assigned, and showing
         # them as still loose would be weird.
@@ -1775,6 +1825,7 @@ sub update_state_grouping($)
         $$change{ntopic} = $topic;
         $$change{ntgt} = $ref_to;
         $$change{nbase} = $ref_base;
+        $$change{exclude} = $exclude ? 1 : undef;
     }
 }
 
@@ -1804,6 +1855,7 @@ sub update_state($)
         $base = undef if (@{$$commit{parents}} > 1);
         $$change{base} = $base;
         $$change{nbase} = undef;
+        $$change{exclude} = undef;
     }
 }
 
@@ -1835,16 +1887,17 @@ sub execute_grouping()
 sub execute_pushing()
 {
     my $online = !$list_only || $list_online;
-    my $groups;
+    my ($groups, $all_groups);
     if ($push_all) {
         my $have_loose;
-        ($have_loose, $groups) = get_all_changes();
+        ($have_loose, $all_groups) = get_all_changes();
         if ($have_loose && !$list_only) {
-            foreach my $group (@$groups) {
+            foreach my $group (@$all_groups) {
                 classify_changes_offline($group);
             }
-            fail_push($groups, "Cannot push all with any free-standing loose Changes.\n");
+            fail_push($all_groups, "Cannot push all with any free-standing loose Changes.\n");
         }
+        $groups = [ grep { !$$_{exclude} } @$all_groups ];
     } else {
         $groups = $all_groups = [ get_changes() ];
     }
@@ -1861,7 +1914,7 @@ sub execute_pushing()
         resolve_ref_base(\@queries);
         my @args;
         push @args, "--all-reviewers" if (@reviewers || @CCs);
-        query_gerrit(\@queries, \@args);
+        query_gerrit(\@queries, \@args) if (@queries);
     }
     foreach my $group (@$groups) {
         determine_remote_branch($group);
@@ -1901,7 +1954,7 @@ sub execute_pushing()
         }
     }
     if ($list_only) {
-        show_changes($groups);
+        show_changes($all_groups);
         print "Not pushing - list mode.\n" if ($debug);
     } else {
         print_errors($groups);

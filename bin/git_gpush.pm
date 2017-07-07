@@ -651,6 +651,8 @@ our %gerrit_infos_by_id;
 # - orig: SHA1 of the _local_ commit 'pushed' was derived from.
 # - nbase/ntgt/ntopic: Non-committed values of the respective
 #   attributes, used by --group mode.
+# - exclude: Flag indicating whether the Change is excluded from
+#   push --all mode.
 
 my $next_key = 10000;
 # All known Gerrit Changes for the current repository.
@@ -701,7 +703,7 @@ sub save_state(;$$)
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
     my @fkeys = ('key', 'grp', 'id', 'src', 'tgt', 'topic', 'base',
-                 'ntgt', 'ntopic', 'nbase');
+                 'ntgt', 'ntopic', 'nbase', 'exclude');
     my @rkeys = ('pushed', 'orig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";
