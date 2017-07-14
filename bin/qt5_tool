@@ -371,7 +371,7 @@ sub winRemoveGitFromPath
 sub initTrackingBranch
 {
     my ($branchName, $remoteBranchName) = @_;
-    my $strc = execute($git, ('fetch', '--all'));
+    my $strc = execute($git, ('fetch', 'origin'));
     die 'fetch failed.' if $strc;
     print 'Switching to ', $branchName, ' from ', $remoteBranchName, "\n";
     $strc = execute($git, ('branch', '--track', $branchName, $remoteBranchName));
@@ -515,7 +515,7 @@ sub checkoutBranch
     if (!grep(/^  $desiredBranch$/, @branches)) {
         my $remoteBranchName = 'origin/' . $desiredBranch;
         # Does the remote branch exist?
-        $rc = execute($git, ('fetch', '--all'));
+        $rc = execute($git, ('fetch', 'origin'));
         die 'fetch of ' . $mod . ' failed'  if ($rc);
         my @availableRemoteBranches = split("\n", `"$git" branch -r`);
         if (!grep(/^  $remoteBranchName$/, @availableRemoteBranches)) {
