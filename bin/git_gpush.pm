@@ -672,6 +672,19 @@ sub analyze_local_branch($)
     print "Enumerating local Changes ...\n" if ($debug);
     my $commits = visit_local_commits([ $tip ]);
 
+    # ... then sanity-check a bit ...
+    my %seen;
+    foreach my $commit (@$commits) {
+        my $subject = $$commit{subject};
+        my $changeid = $$commit{changeid};
+        my $excommit = $seen{$changeid};
+        fail("Duplicate Change-Id $changeid on ".($local_branch // "<detached HEAD>").":\n  "
+                .format_subject($$excommit{id}, $$excommit{subject}, -2)."\n  "
+                .format_subject($$commit{id}, $subject, -2)."\n")
+            if (defined($excommit));
+        $seen{$changeid} = $commit;
+    }
+
     # ... and then add them to the set of local Changes.
     foreach my $commit (@$commits) {
         my $change = change_for_id($$commit{changeid}, CREATE);
