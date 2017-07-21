@@ -23,7 +23,7 @@ sub usage
 {
     print << "EOM";
 Usage:
-    git gpush [opts] [[sha1/ref-from]:[ref-to]] [+<reviewer>] [=<CC user>] [-- <push opts>]
+    git gpush [opts] [[sha1/ref-from]:[ref-to]] [+<reviewer>] [=<CC user>]
 
     Pushes Changes to Gerrit and adds reviewers and CC to the PatchSets.
 
@@ -38,12 +38,6 @@ Description:
 
     If no ref-to is specified, the upstream branch for 'ref-from' is
     used as the target branch.
-
-    If all the options above have been populated, the remainder
-    options are passed on directly to the normal 'git push' command.
-    If you want to avoid specifying all options first, any options
-    specified after a '--' are also passed on directly to the
-    underlying 'git push' command.
 
     Note that this program can be used in the middle of an interactive
     rebase, to push out the amended commits instantly.
@@ -119,10 +113,8 @@ my $quiet = 0;
 my $dry_run = 0;
 
 my $remote = "gerrit";
-my $remote_override = 0;
 my $ref_from = "HEAD";
 my $ref_to = "";
-my $ref_override = 0;
 my $draft = 0;
 
 my %aliases;
@@ -317,28 +309,21 @@ sub parse_arguments(@)
         } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
             usage();
             exit 0;
-        } elsif ($arg eq "--") {
-            push @arguments, @_;
-            return;
         } elsif ($arg =~ /^\+(.+)/) {
             push @reviewers, split(/,/, lookup_alias($1));
         } elsif ($arg =~ /^\=(.+)/) {
             push @CCs, split(/,/, lookup_alias($1));
-        } elsif ($arg =~ /^\-(.+)/) {
-            push @arguments, $arg;
-        } elsif (!$remote_override || !$ref_override) {
+        } elsif ($arg !~ /^\-/) {
             if ($arg =~ /(.*):(.*)/) {
                 $ref_from = $1 if (defined $1 && $1 ne "");
                 $ref_to = $2 if (defined $2 && $2 ne "");
-                $ref_override = 1;
             } else {
                 print STDERR "Warning: Specifying a bare remote is deprecated.".
                              " Use --remote instead.\n";
                 $remote = $arg;
-                $remote_override = 1;
             }
         } else {
-            push @arguments, $arg;
+            die("Unrecognized option '$arg'.\n");
         }
     }
 
