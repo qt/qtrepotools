@@ -460,7 +460,7 @@ while (<MSG>) {
                 $badsign = 0;
                 # cherry-pick lines count as footers as well.
                 $ftr = 1;
-            } elsif (/^([A-Z][a-z]+|GPush)(-[A-Za-z][a-z]+)+: /) {
+            } elsif (/^[A-Z][A-Za-z]+(-[A-Za-z][a-z]+)+: /) {
                 $ftr = 1;
             } elsif (/^(\[change-?log\]|change-?log: )/i && !defined($cfg{changelog})) {
                 $inchangelog = 1;
