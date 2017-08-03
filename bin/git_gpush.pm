@@ -653,6 +653,8 @@ our %gerrit_infos_by_id;
 #   attributes, used by --group mode.
 # - exclude: Flag indicating whether the Change is excluded from
 #   push --all mode.
+# - hide: Flag indicating whether the Change is excluded from all
+#   pushes.
 
 my $next_key = 10000;
 # All known Gerrit Changes for the current repository.
@@ -703,7 +705,7 @@ sub save_state(;$$)
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
     my @fkeys = ('key', 'grp', 'id', 'src', 'tgt', 'topic', 'base',
-                 'ntgt', 'ntopic', 'nbase', 'exclude');
+                 'ntgt', 'ntopic', 'nbase', 'exclude', 'hide');
     my @rkeys = ('pushed', 'orig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";
@@ -785,31 +787,6 @@ sub _init_change($$)
     push @{$changes_by_id{$changeid}}, $change;
     $change_by_key{$next_key} = $change;
     $next_key++;
-}
-
-use constant {
-    CREATE => 1
-};
-
-# Get a Change object for a given Id on the _local_ branch. If no such
-# object exists, create a new one if requested, otherwise return undef.
-sub change_for_id($;$)
-{
-    my ($changeid, $create) = @_;
-
-    my $br = $local_branch // "-";
-    my $chgs = $changes_by_id{$changeid};
-    if ($chgs) {
-        foreach my $chg (@$chgs) {
-            return $chg if ($$chg{src} eq $br);
-        }
-    }
-    if ($create) {
-        my %chg = (src => $br);
-        _init_change(\%chg, $changeid);
-        return \%chg;
-    }
-    return undef;
 }
 
 sub load_state_file(;$)
@@ -1187,6 +1164,11 @@ our $local_tip;
 # Mapping of Change-Ids to commits on the local branch.
 my %changeid2local;  # { change-id => SHA1 }
 
+sub _source_map_prepare();
+sub source_map_assign($$);
+sub source_map_traverse();
+sub _source_map_finish_initial();
+
 sub analyze_local_branch($)
 {
     my ($tip) = @_;
@@ -1222,14 +1204,25 @@ sub analyze_local_branch($)
 
     $local_base = $$commits[0]{parents}[0];
 
+    # This needs to happen early, for parse_local_rev(), which
+    # _source_map_prepare() calls.
     $changeid2local{$$_{changeid}} = $$_{id} foreach (@$commits);
+
+    # ... then map them to Change objects ...
+    _source_map_prepare();
+    while (1) {
+        foreach my $commit (@$commits) {
+            source_map_assign($commit, undef);
+        }
+        last if (!source_map_traverse());
+    }
+    _source_map_finish_initial();
 
     # ... and then add them to the set of local Changes.
     my $idx = 0;
     my $prev;
     foreach my $commit (@$commits) {
-        my $change = change_for_id($$commit{changeid}, CREATE);
-        $$commit{change} = $change;
+        my $change = $$commit{change};
         $$change{local} = $commit;
         $$change{index} = $idx++;
         $$change{parent} = $prev;
@@ -1551,6 +1544,496 @@ sub create_commit($$$$$)
 ###################
 # branch tracking #
 ###################
+
+# This tracks the local branch each Change lives on, following cherry-picks
+# and purges as much as possible.
+
+# Format a single branch name for display.
+sub _format_branch($)
+{
+    my ($branch) = @_;
+
+    return ($branch ne '-') ? "'$branch'" : '<detached HEAD>';
+}
+
+# Format the source branch names from an array of Changes,
+# using Oxford English grammar.
+sub _format_branches_raw($)
+{
+    my ($changes) = @_;
+
+    my @branches = sort map { _format_branch($$_{src}) } @$changes;
+    my $str = "$branches[0]";
+    if (@branches > 1) {
+        if (@branches > 2) {
+            $str .= ", $branches[$_]" for (1 .. @branches - 2);
+            $str .= ",";
+        }
+        $str .= " and $branches[-1]";
+    }
+    return $str;
+}
+
+# As above, but with quantifiers to signify that we mean all branches.
+sub _format_branches(@)
+{
+    my ($changes) = @_;
+
+    my $str = _format_branches_raw($changes);
+    return $str if (@$changes == 1);
+    return "both $str" if (@$changes == 2);
+    return "all of $str";
+}
+
+# Format the message about the outcome of a Change assignment attempt.
+sub _format_result($$$@)
+{
+    my ($commit, $new, $fmt, @args) = @_;
+
+    my $lbr = $local_branch // "-";
+    return sprintf("%s\n    %son %s $fmt.\n", format_commit($commit),
+                   $new ? "newly " : "", _format_branch($lbr), @args);
+}
+
+use constant {
+    _SRC_NOOP => 0,
+    _SRC_MOVE => 1,
+    _SRC_COPY => 2,
+    _SRC_HIDE => 3
+};
+
+my @sm_options;
+my $sm_option_new;
+my %sm_option_by_id;
+my %sm_wanted;
+my %sm_present;
+my $sm_printed = 0;
+my $sm_changed = 0;
+my $sm_failed = 0;
+
+# Parse a single command line option relating to source branch tracking.
+# $arg is the currently processed argument, while $args are the remaining
+# arguments on the command line. If $rmt_ok is true, plus-prefixed remote
+# specifications are accepted as well; note that these are not removed
+# from the command line, unlike local ones.
+sub parse_source_option($$\@)
+{
+    my ($arg, $rmt_ok, $args) = @_;
+
+    my $action;
+    if ($arg eq "--move") {
+        $action = _SRC_MOVE;
+    } elsif ($arg eq "--copy") {
+        $action = _SRC_COPY;
+    } elsif ($arg eq "--hide") {
+        $action = _SRC_HIDE;
+    } else {
+        return undef;
+    }
+    fail("$arg needs an argument.\n")
+        if (!@$args || ($$args[0] =~ /^-/));
+    my $orig = shift @$args;
+    my $tip = $orig;
+    my ($base, $count);
+    my $branch = $1 if ($tip =~ s,/(.*)$,,);
+    my $rmt_id;
+    if ($rmt_ok && $tip =~ /^\+(\w+)/) {
+        $rmt_id = $1;
+        unshift @$args, $tip;
+    } else {
+        $base = $1 if ($tip =~ s,^(.*)\.\.,,);
+        $count = $1 if ($tip =~ s,:(.*)$,,);
+        $tip = undef if ($tip eq "new");
+        fail("Specifying a commit count and a range base are mutually exclusive.\n")
+            if (defined($base) && defined($count));
+        if (defined($base) || defined($count)) {
+            wfail("Specifying a commit count or range base is incompatible with range 'new'.\n")
+                if (!defined($tip));
+        } else {
+            wfail("Automatic ranges are not supported with $arg."
+                    ." Use $tip:1 if you actually meant a single Change.\n")
+                if (defined($tip));
+        }
+    }
+    fail("$arg does not support specifying a source branch.\n")
+        if (defined($branch) && ($action != _SRC_MOVE));
+    push @sm_options, {
+        action => $action,
+        orig => $orig,
+        rmt_id => $rmt_id,
+        base => defined($base) ? length($base) ? $base : '@{u}' : undef,
+        tip => defined($tip) ? length($tip) ? $tip : 'HEAD' : undef,
+        count => $count,
+        branch => $branch
+    };
+    return 1;
+}
+
+# Do final sanity checking on the source branch tracking related commands,
+# expand the supplied ranges into series of commits, and create a reverse
+# mapping of commits to command objects.
+sub _source_map_prepare()
+{
+    my $br = $local_branch // "-";
+    foreach my $option (@sm_options) {
+        my $sbr = $$option{branch};
+        wfail("Source and target branch are both '$br' in attempt to move Changes.\n")
+            if (defined($sbr) && ($sbr eq $br));
+
+        my $rmt_id = $$option{rmt_id};
+        if (defined($rmt_id)) {
+            $sm_option_by_id{$rmt_id} = $option;
+            next;
+        }
+
+        my $raw_tip = $$option{tip};
+        if (defined($raw_tip)) {
+            my $commits;
+            my $tip = parse_local_rev($raw_tip, SPEC_TIP);
+            my $raw_base = $$option{base};
+            if (defined($raw_base)) {
+                my $base = parse_local_rev($raw_base, SPEC_BASE);
+                $commits = get_commits_base($base, $tip, $raw_base, $raw_tip);
+            } else {
+                my $count = $$option{count};
+                $commits = get_commits_count($tip, $count, $raw_tip);
+            }
+            foreach my $commit (@$commits) {
+                my $sha1 = $$commit{id};
+                my $old_option = $sm_option_by_id{$sha1};
+                wfail("Range $$option{orig} intersects $$old_option{orig} (at $sha1).\n")
+                    if ($old_option);
+                $sm_option_by_id{$sha1} = $option;
+            }
+            $$option{commits} = $commits;
+            next;
+        }
+
+        wfail("Only one of --move, --copy, and --hide may be specified with 'new'.\n")
+            if (defined($sm_option_new));
+        $sm_option_new = $option;
+    }
+}
+
+# Schedule the removal a single Change object from the state database.
+sub _obliterate_change($$)
+{
+    my ($change, $changes) = @_;
+
+    print "Obliterating $$change{key} ($$change{id}) from $$change{src}.\n" if ($debug);
+    @$changes = grep { $_ != $change } @$changes;  # From %changes_by_id
+    $$change{garbage} = 1;  # Mark it for %change_by_key traversal
+}
+
+# Visit the requested non-current local branches with the purpose of
+# determining which Change objects still correspond with actual commits.
+sub source_map_traverse()
+{
+    # It would be tempting to always query all local branches in
+    # advance, to save the extra git call. However, this would also
+    # collect *really* old branches, and even though they are short,
+    # calculating the exclusion takes hundreds of milliseconds,
+    # which is slower than an extra git call even on Windows.
+    # Additionally, we need to traverse down to the push base of the
+    # previously pushed Changes (in case they were upstreamed already),
+    # and this can also have a significant cost if the corresponding
+    # local branch advanced a lot since a Change was pushed last time,
+    # so it's better to do that selectively.
+
+    return if (!%sm_wanted);
+
+    # This loop is likely to run only once per call, so don't bother
+    # coalescing the resulting visit_*() calls.
+    foreach my $br (keys %sm_wanted) {
+        print "Investigating other local branch $br ...\n" if ($debug);
+        my %present;
+        my @changes = grep { $$_{src} eq $br } values %change_by_key;
+        my (@missing, $utips);
+        my $tip = $local_refs{$br};
+        if (defined($tip)) {
+            visit_local_commits([ $tip ]);
+            my $commits = get_commits_free($tip);
+            print "Still present on the branch:\n".format_commits($commits) if ($debug);
+            if (@$commits) {
+                %present = map { $$_{changeid} => 1 } @$commits;
+
+                # Prepare garbage collection.
+                @missing = grep { !defined($present{$$_{id}}) } @changes;
+                $utips = [ get_1st_parent($$commits[0]) ];
+            } else {
+                @missing = @changes;
+                $utips = [ $tip ];
+            }
+        } else {
+            print "Branch disappeared.\n" if ($debug);
+            # The branch was deleted, so all its Changes are missing.
+            @missing = @changes;
+            # For the upstream check, we fall back to the branches the Changes
+            # were targeting. This is worse than using the actual upstream, as
+            # the target may be outdated and the Change actually went to another
+            # branch. Also, it's potentially more work.
+            my $urefs = $remote_refs{$upstream_remote};
+            if ($urefs) {
+                my %utiph = map { $_ => 1 } grep { $_ } map { $$urefs{$$_{tgt}} } @changes;
+                $utips = [ keys %utiph ];
+            }
+        }
+        $sm_present{$br} = \%present;
+
+        # We may need to garbage-collect the branch.
+        # Failure to do this would affect cherry-picks of Changes that were
+        # upstreamed - neither do we want to need --copy for Changes that are
+        # actually gone, nor do we want them to be detected as moves (and thus
+        # inherit the now incorrect target branch).
+        if (@missing) {
+            # Record the push base of each Change - if a Change is actually
+            # in our upstream, it will be so between its push base (which
+            # cannot be younger than the branch's tip at that time) and the
+            # branch's merge base with upstream.
+            my %bases = map { $_ => 1 } grep { $_ } map { $$_{base} } @missing;
+            if (%bases) {
+                print "Visiting upstream of other local branch $br ...\n" if ($debug);
+                my $urevs = visit_upstream_commits($utips, [ keys %bases ]);
+                foreach my $change (@missing) {
+                    my $changeid = $$change{id};
+                    _obliterate_change($change, $changes_by_id{$changeid})
+                        if (defined($$urevs{$changeid}));
+                }
+            }
+        }
+    }
+    %sm_wanted = ();
+    return 1;
+}
+
+# Determine which of the Change objects in $changes still refer to
+# actual commits.
+sub _find_candidate_sources($$$)
+{
+    my ($changes, $vanished, $persisting) = @_;
+
+    return 0 if (!$changes);
+
+    my $lbr = $local_branch // "-";
+    my $retry = 0;
+    foreach my $chg (@$changes) {
+        # Hidden Changes are supposed to be skipped over, so it
+        # would be backwards to use them as sources for moves.
+        next if ($$chg{hide});
+
+        my $obr = $$chg{src};
+        # The current branch is obviously not a sensible source.
+        next if ($obr eq $lbr);
+
+        # Note that detached HEADs "vanish" after switching to an actual
+        # branch, thereby freeing all Changes assigned to them, sans the
+        # garbage-collected ones.
+        my $present = $sm_present{$obr};
+        if (!$present) {
+            # Ensure that the branch is visited and garbage-collected.
+            $sm_wanted{$obr} = 1;
+            $retry = 1;
+        } elsif (defined($$present{$$chg{id}})) {
+            print "$$chg{id} persists on $obr.\n" if ($debug);
+            push @$persisting, $chg;
+        } else {
+            print "$$chg{id} vanished from $obr.\n" if ($debug);
+            $$chg{vanished} = 1;
+            push @$vanished, $chg;
+        }
+    }
+    return $retry;
+}
+
+sub source_map_assign($$)
+{
+    my ($commit, $reference) = @_;
+
+    my $change = $$commit{change};
+    return $change if ($change);
+
+    my $lbr = $local_branch // "-";
+
+    my $changeid = $$commit{changeid};
+    my $changes = $changes_by_id{$changeid};
+    my %change_by_branch;
+    if ($changes) {
+        foreach my $chg (@$changes) {
+            my $br = $$chg{src};
+            $change_by_branch{$br} = $chg;
+        }
+    }
+    $change = $change_by_branch{$lbr};
+    my $new = !$change;
+
+    my $option = $sm_option_by_id{$reference // $$commit{id}} // $sm_option_new;
+    my $new_only = $option && !defined($$option{tip});
+    my $action = $option ? $$option{action} : _SRC_NOOP;
+    if ($action == _SRC_COPY || $action == _SRC_HIDE) {
+        # Note: We don't bother finding Changes which could be recycled -
+        # gpull will clean up.
+        # We don't complain about no-ops, as they don't hurt.
+        my $label = ($action == _SRC_HIDE) ? "hidden" : "copied";
+        if ($new || !$new_only) {
+            if ($new) {
+                $change = {};
+                _init_change($change, $changeid);
+            }
+            $$change{hide} = ($action == _SRC_HIDE) ? 1 : undef;
+            wout(_format_result($commit, $new, "marked as $label"))
+                if (!$quiet);
+            goto PRINTED;
+        }
+        print "Already have $$change{key} ($changeid) on $lbr; not $label.\n"
+            if ($debug);
+        goto FOUND;
+    }
+    if ($new || ($action == _SRC_MOVE && !$new_only)) {
+        my $schange;
+        my $sbr = ($action == _SRC_MOVE) ? $$option{branch} : undef;
+        if (defined($sbr)) {
+            $schange = $change_by_branch{$sbr};
+            if (!$schange) {
+                werr("Change $changeid does not exist on '$sbr'; cannot move.\n");
+                goto FAIL;
+            }
+            if ($$schange{hide}) {
+                werr("Change $changeid is hidden on '$sbr'; cannot move.\n");
+                goto FAIL;
+            }
+        } else {
+            my (@vanished, @persisting);
+            if (_find_candidate_sources($changes, \@vanished, \@persisting)) {
+                print "Need to come back for $changeid.\n" if ($debug);
+                return undef;
+            }
+            if ($new) {
+                if (@vanished) {
+                    if (@vanished > 1) {
+                        werr(_format_result(
+                                $commit, 1, "was previously on %s.\n"
+                                ."  Use --move with a source, or use --copy/--hide",
+                                _format_branches(\@vanished)));
+                        goto FAIL;
+                    }
+                    $change = pop @vanished;
+                    # Note: this is a post-fact notice, so if the user failed to use
+                    # --copy/--hide in advance, they'll need to fix it laboriously.
+                    # This seems acceptable, as moving is the much more common case.
+                    wout(_format_result(
+                            $commit, 1, "was previously on %s. Inferring move",
+                            _format_branch($$change{src})))
+                        if (!$quiet);
+                    goto PRINTED;
+                }
+                if (!@persisting) {
+                    # This is the common case: an entirely new Change.
+                    $change = {};
+                    _init_change($change, $changeid);
+                    goto CHANGED;
+                }
+                if ($action != _SRC_MOVE) {
+                    werr(_format_result(
+                            $commit, 1, "exists also on %s.\n"
+                            ."  Prune unneeded copies, or use --move/--copy/--hide",
+                            _format_branches_raw(\@persisting)));
+                    goto FAIL;
+                }
+            } else { # implies $action == _SRC_MOVE
+                if (!$$change{hide}) {
+                    # Attempts to move over active Changes are most likely mistakes.
+                    werr(_format_result(
+                            $commit, 0, "is not hidden.\n"
+                            ."  Pass a source to --move if you really mean it"));
+                    goto FAIL;
+                }
+                if (@vanished) {
+                    if (@vanished > 1) {
+                        werr(_format_result(
+                                $commit, 0, "was previously on %s.\n"
+                                ."  Pass a source to --move to disambiguate",
+                                _format_branches(\@vanished)));
+                        goto FAIL;
+                    }
+                    $schange = pop @vanished;
+                } elsif (!@persisting) {
+                    werr(_format_result(
+                            $commit, 0, "exists on no other branch. Use --copy to unhide it"));
+                    goto FAIL;
+                }
+            }
+            if (!$schange) {
+                if (@persisting > 1) {
+                    werr(_format_result(
+                            $commit, $new, "exists also on %s.\n"
+                            ."  Prune unneeded copies, pass a source to --move,"
+                                ." or use --copy/--hide",
+                            _format_branches_raw(\@persisting)));
+                    goto FAIL;
+                }
+                $schange = pop @persisting;
+            }
+            $sbr = $$schange{src};
+        }  # !defined($sbr)
+        if ($change) {
+            # If the slot on the current branch is busy, we need to free it first.
+            # Note that this might be a hidden entry from a previous --move/--hide.
+            _obliterate_change($change, $changes);
+        }
+        if (!$$schange{vanished}) {
+            # If the Change still does or might exist on the source branch, we
+            # need to create a hidden entry for it, so it does not appear to be
+            # new next time around.
+            my %chg = (src => $sbr, grp => $$schange{grp}, hide => 1);
+            _init_change(\%chg, $changeid);
+            print "... and hidden on $sbr.\n" if ($debug);
+        }
+        wout(_format_result($commit, $new, "moved from %s", _format_branch($sbr)))
+            if (!$quiet);
+        $change = $schange;
+        goto PRINTED;
+    }
+    print "Already have $$change{key} ($changeid) on $lbr; leaving alone.\n"
+        if ($debug);
+    goto FOUND;
+
+  PRINTED:
+    $sm_printed = 1 if (!$quiet);
+  CHANGED:
+    $$change{src} = $lbr;
+    $sm_changed = 1;
+  FOUND:
+    $$commit{change} = $change;
+    return $change;
+
+  FAIL:
+    $sm_failed = 1;
+    return undef;
+}
+
+sub source_map_finish()
+{
+    exit(1) if ($sm_failed);
+    print "\n" if ($sm_printed);  # Delimit from remaining output.
+    $sm_printed = 0;
+}
+
+sub _source_map_finish_initial()
+{
+    foreach my $option (@sm_options) {
+        # Only --copy & --hide imply grouping.
+        my $action = $$option{action};
+        next if ($action != _SRC_COPY && $action != _SRC_HIDE);
+
+        my $commits = $$option{commits};
+        next if (!$commits);
+        assign_series(changes_from_commits($commits));
+        $sm_changed = 1;
+    }
+
+    source_map_finish();
+    save_state() if ($sm_changed);
+}
 
 # Update the target branches of local Changes according to the data
 # from a Gerrit query.

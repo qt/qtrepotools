@@ -144,6 +144,42 @@ Options:
         Reset the base of a previously pushed series to the local branch's
         base. Typically used after a conflicted pull.
 
+    --move {new|<range>}[/<from>]
+        After cherry-picking Changes to the current branch, mark the picks
+        as the _only_ source for subsequent pushes of these Changes.
+        The Changes on the current branch inherit all persistent properties,
+        while those on the source branch are hidden, in case they were not
+        dropped to start with.
+        <from> must be supplied only if the source branch is ambiguous.
+        This option is necessary only when a move cannot be unambiguously
+        inferred.
+
+    --copy {new|<range>}
+        After cherry-picking Changes to the current branch, mark the picks
+        as an _additional_ source for subsequent pushes of these Changes.
+        The Changes on the source branch are left alone, while those on the
+        current branch start out with a clean slate (which implies a
+        different default target branch).
+        When a range is specified, the Changes are also --group'd.
+
+    --hide {new|<range>}
+        After cherry-picking Changes to the current branch, mark the picks
+        as an _unacceptable_ source for subsequent pushes of these Changes.
+        When a range is specified, the Changes are also --group'd.
+
+        The range can be specified as <base>..<tip> (either end can be left
+        off) or <tip>:<count>. When using 'new' instead of a range, all
+        Changes which were previously not seen on the current branch are
+        selected, while actual ranges select Changes regardless of whether
+        they were already seen, which makes it possible to revise previous
+        decisions about the authoritative source for pushes.
+        --move, --copy, and --hide can be specified multiple times. The
+        ranges may not overlap, but will override a single also specified
+        operation which uses 'new'.
+        Note that the ranges supplied to these options do NOT imply these
+        Changes getting pushed; to do so, specify them a second time as a
+        regular <from> argument.
+
     -l, --list
         Report all Changes that would be pushed, then quit.
         This is a purely off-line operation.
@@ -342,6 +378,8 @@ sub parse_arguments(@)
         } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
             usage();
             exit 0;
+        } elsif (parse_source_option($arg, 0, @_)) {
+            # Nothing
         } elsif ($arg =~ /^\+(.+)/) {
             push @reviewers, split(/,/, lookup_alias($1));
         } elsif ($arg =~ /^\=(.+)/) {
@@ -498,11 +536,15 @@ sub caption_group($)
     my $tpc = $$group{topic};
     my $tpcs = length($tpc) ? ", topic '$tpc'" : "";
     my ($pfx, $rmt) = $list_only
-                          ? ($$group{exclude_mix}
-                                 ? "Partially excluded series of"
-                                 : $$group{exclude}
-                                       ? "Excluded series of"
-                                       : "Series of",
+                          ? ($$group{hide_mix}
+                                 ? "Partially hidden series of"
+                                 : $$group{hide}
+                                       ? "Hidden series of"
+                                       : $$group{exclude_mix}
+                                               ? "Partially excluded series of"
+                                               : $$group{exclude}
+                                                     ? "Excluded series of"
+                                                     : "Series of",
                              ($list_online && length($tos)) ? " on '$remote'" : "")
                           : $group_only
                                 ? ("Grouping", "")
@@ -780,6 +822,8 @@ sub finalize_get_changes($$)
     my ($changes, $gid) = @_;
 
     my %group = (changes => $changes, gid => $gid);
+    aggregate_bool_property(\%group, "hide", "HIDDEN", "hiding",
+                            "Use --move/--copy/--hide to make it consistent.");
     return \%group;
 }
 
@@ -842,6 +886,20 @@ sub get_changes()
     }
     fail("Specified commit range is empty.\n") if (!@$changes);
     my $group = finalize_get_changes($changes, $gid);
+    # Note that grouping/excluding hidden series is also rejected,
+    # as there is just no point to it - --copy and --hide imply
+    # regrouping anyway, and --move uses the grouping of the source,
+    # so any grouping done while the Changes are hidden will be lost.
+    if ($$group{hide}) {
+        my @reports;
+        report_flowed(\@reports,
+                      "Refusing to operate hidden series of ".int(@$changes)." Change(s):");
+        report_local_changes(\@reports, $changes);
+        report_fixed(\@reports,
+                     "Operate it from the previously chosen source branch,\n",
+                     "or use --move/--copy to unhide it.\n");
+        fail_formatted(\@reports);
+    }
     return $group;
 }
 
@@ -858,7 +916,8 @@ sub get_all_changes()
         my $group = finalize_get_changes($changes, $gid);
         aggregate_bool_property($group, "exclude", "EXCLUDED", "exclusion",
                                 "Please gpush it separately or use --group/--exclude"
-                                ." to make it consistent.");
+                                ." to make it consistent.")
+            if (!$$group{hide});
         unshift @groups, $group;
         $have_loose++ if (!$gid);
         last if (!$change);
@@ -1580,9 +1639,11 @@ sub annotate_changes($)
 {
     my ($group) = @_;
 
-    my $excl_mix = $list_only && $$group{exclude_mix};
+    my $hide_mix = $list_only && $$group{hide_mix};
+    my $excl_mix = !$hide_mix && $list_only && $$group{exclude_mix};
     foreach my $change (@{$$group{changes}}) {
         my @attribs;
+        push @attribs, 'HIDDEN' if ($hide_mix && $$change{hide});
         push @attribs, 'EXCLUDED' if ($excl_mix && $$change{exclude});
         # Changes can be loose only when pushing all or listing, as
         # otherwise they are currently being assigned, and showing
@@ -1897,7 +1958,7 @@ sub execute_pushing()
             }
             fail_push($all_groups, "Cannot push all with any free-standing loose Changes.\n");
         }
-        $groups = [ grep { !$$_{exclude} } @$all_groups ];
+        $groups = [ grep { !$$_{hide} && !$$_{exclude} } @$all_groups ];
     } else {
         $groups = $all_groups = [ get_changes() ];
     }

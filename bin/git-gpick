@@ -146,6 +146,14 @@ Options:
         to Gerrit. In case of ambiguity, the default is the upstram branch
         of the current local branch.
 
+    --move/--copy/--hide <args>
+        Deal with cherry-picks of Changes between local branches.
+        This works the same as documented for git-gpush, except that the
+        range may also be a plus-sign prefixed addition specification.
+        Unlike local ranges, these DO get picked without being specified
+        redundantly, because otherwise there would be nothing to operate
+        on in the first place.
+
     -n, --dry-run
         Do everything except actually replacing any commits and updating
         state.
@@ -287,6 +295,8 @@ sub parse_arguments(@)
         } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
             usage();
             exit 0;
+        } elsif (parse_source_option($arg, 1, @_)) {
+            # Nothing
         } elsif ($arg !~ /^-/) {
             push @commit_specs, $arg;
         } else {
@@ -1549,17 +1559,20 @@ sub resolve_insertion_spec($$)
     $$spec{changes} = \%result;
 }
 
-sub changify_remote_series($)
+sub changify_remote_series($$)
 {
-    my ($series) = @_;
+    my ($series, $reference) = @_;
 
+    my $fails;
     my @result;
     foreach my $commit (@$series) {
-        my $change = change_for_id($$commit{changeid}, CREATE);
+        my $change = source_map_assign($commit, $reference);
+        $fails = 1 if (!$change);
+        next if ($fails);
         $$change{gerrit} = $gerrit_info_by_sha1{$$commit{id}};
         push @result, $change;
     }
-    return \@result;
+    return $fails ? undef : \@result;
 }
 
 sub do_sort_series($$$$$);
@@ -1740,7 +1753,7 @@ sub finalize_remote_series($$$)
 
     my $sorted = sort_series($name, $range, $commits, 1);
     fail("Series $name is empty after filtering.\n") if (!@$sorted && !$check);
-    return changify_remote_series($sorted);
+    return $sorted;
 }
 
 # Download the metadata and PatchSets referenced by the specs.
@@ -1894,6 +1907,25 @@ sub complete_spec_tails($)
     }
 }
 
+sub changify_remote_specs($)
+{
+    my ($specs) = @_;
+
+    while (1) {
+        foreach my $spec (@$specs) {
+            my $commits = $$spec{new_range_commits};
+            next if (!$commits);
+            my $changes = changify_remote_series($commits, $$spec{new_range_reference});
+            if ($changes) {
+                $$spec{new_range} = $changes;
+                delete $$spec{new_range_commits};
+            }
+        }
+        last if (!source_map_traverse());
+    }
+    source_map_finish();
+}
+
 sub check_specs($)
 {
     my ($specs) = @_;
@@ -1905,8 +1937,10 @@ sub check_specs($)
         # the step may be obsoleted by the spec being matched up.
         next if ($$spec{action} != INSERT);
 
-        $$spec{new_range} = finalize_remote_series($$spec{orig}, [], $$spec{changes});
+        $$spec{new_range_commits} = finalize_remote_series($$spec{orig}, [], $$spec{changes});
+        $$spec{new_range_reference} = $$spec{tip};
     }
+    changify_remote_specs($specs);
 
     print "Checking remote commit specs for collisions ...\n" if ($debug);
     my @new_specs;
@@ -2065,9 +2099,11 @@ sub finalize_specs($)
         next if ($$spec{action} != UPDATE);
 
         next if ($$spec{new_range});
-        $$spec{new_range} =
+        $$spec{new_range_commits} =
                 finalize_remote_series("$$spec{orig}/remote", $$spec{range}, $$spec{changes});
+        $$spec{new_range_reference} = $$spec{range}[-1];
     }
+    changify_remote_specs($specs);
 
     return if ($force_struct);
 
