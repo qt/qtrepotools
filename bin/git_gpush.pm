@@ -676,6 +676,9 @@ sub analyze_local_branch($)
     my %seen;
     foreach my $commit (@$commits) {
         my $subject = $$commit{subject};
+        fail("Commit on ".($local_branch // "<detached HEAD>")." was meant to be squashed:\n  "
+                .format_subject($$commit{id}, $subject, -2)."\n")
+            if ($subject =~ /^(squash|fixup)! /);
         my $changeid = $$commit{changeid};
         my $excommit = $seen{$changeid};
         fail("Duplicate Change-Id $changeid on ".($local_branch // "<detached HEAD>").":\n  "
