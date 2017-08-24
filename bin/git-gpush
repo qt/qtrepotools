@@ -264,23 +264,40 @@ sub determine_local_branch()
     setup_remotes($ref_from);
 }
 
-# Obtain the upstream branch for the local branch, unless the remote
-# branch has been specified.
-sub determine_remote_branch()
+# Determine the target branch for the given series.
+# The local branch's upstream branch will be used, unless a target branch
+# has been specified by the user.
+sub determine_remote_branch($)
 {
-    if (!defined($ref_to)) {
+    my ($group) = @_;
+
+    my $br = $ref_to;
+    if (!defined($br)) {
         fail("Cannot deduce source branch for $ref_from. Please use --branch.\n")
             if (!defined($local_branch));
-        $ref_to = git_config("branch.$local_branch.merge");
+        $br = git_config("branch.$local_branch.merge");
         fail("$local_branch has no upstream branch. Please use --branch.\n")
-            if (!defined($ref_to));
-        $ref_to =~ s,^refs/heads/,,;
+            if (!defined($br));
+        $br =~ s,^refs/heads/,,;
     }
+    $$group{branch} = $br;
 }
 
-sub push_patches()
+sub get_changes()
 {
-    print "Pushing $ref_from for $ref_to on $remote ...\n" if (!$quiet);
+    my %group;
+    $group{tip} = $ref_from;
+    return \%group;
+}
+
+sub push_changes($)
+{
+    my ($group) = @_;
+
+    my $tip = $$group{tip};
+    my $to = $$group{branch};
+
+    print "Pushing $tip for $to on $remote ...\n" if (!$quiet);
 
     my @push_options;
     push @push_options, map { "r=$_" } @reviewers;
@@ -291,9 +308,16 @@ sub push_patches()
     push @gitcmd, '-q' if ($quiet);
     push @gitcmd, '-n' if ($dry_run);
     push @gitcmd, map { ("-o", "$_") } @push_options;
-    push @gitcmd, $remote, "$ref_from:refs/for/$ref_to";
+    push @gitcmd, $remote, "$tip:refs/for/$to";
 
     run_process(FWD_OUTPUT, @gitcmd);
+}
+
+sub execute_pushing()
+{
+    my $group = get_changes();
+    determine_remote_branch($group);
+    push_changes($group);
 }
 
 process_config();
@@ -301,5 +325,4 @@ parse_arguments(@ARGV);
 goto_gitdir();
 load_state();
 determine_local_branch();
-determine_remote_branch();
-push_patches();
+execute_pushing();
