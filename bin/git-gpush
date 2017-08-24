@@ -107,7 +107,7 @@ EOM
 
 my $remote = "gerrit";
 my $ref_from = "HEAD";
-my $ref_to = "";
+my $ref_to;
 
 my @reviewers;
 my @CCs;
@@ -259,7 +259,7 @@ sub determine_local_branch()
 # branch has been specified.
 sub determine_remote_branch()
 {
-    if ($ref_to eq "") {
+    if (!defined($ref_to)) {
         fail("Cannot deduce source branch for $ref_from. Please use --branch.\n")
             if (!defined($local_branch));
         $ref_to = git_config("branch.$local_branch.merge");
