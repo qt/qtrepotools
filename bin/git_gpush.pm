@@ -336,6 +336,9 @@ sub load_config()
 # The name of the local branch we're working with (not necessarily the
 # current branch). May be undef.
 our $local_branch;
+# The tips of the local and remote branches.
+our %local_refs;  # { branch => sha1 }
+our %remote_refs;  # { remote => { branch => sha1 } }
 
 # The name of the local branch's upstream remote, or a configurable fallback.
 our $upstream_remote;
@@ -391,6 +394,31 @@ sub setup_remotes($)
             $remote = $upstream_remote if (!defined($remotes{$remote}));
         }
     }
+}
+
+##################
+# state handling #
+##################
+
+sub load_refs(@)
+{
+    my (@refs) = @_;
+
+    my $info = open_cmd_pipe(0, 'git', 'for-each-ref', '--format=%(objectname) %(refname)', @refs);
+    while (read_process($info)) {
+        if (m,^(.{40}) refs/heads/(.*)$,) {
+            $local_refs{$2} = $1;
+        } elsif (m,^(.{40}) refs/remotes/([^/]+)/(.*)$,) {
+            $remote_refs{$2}{$3} = $1;
+        }
+    }
+    close_process($info);
+}
+
+sub load_state()
+{
+    print "Loading state ...\n" if ($debug);
+    load_refs("refs/heads/", "refs/remotes/");
 }
 
 #############################

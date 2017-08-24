@@ -257,8 +257,7 @@ sub determine_local_branch()
         $local_branch = $sref if (!$?);
     }
     $local_branch =~ s,^refs/heads/,,;
-    run_process(SOFT_FAIL, "git", "rev-parse", "--verify", "-q", "refs/heads/".$local_branch);
-    if ($?) {
+    if (!defined($local_refs{$local_branch})) {
         # Next, try to deduce a branch from the commit.
         $local_branch = branch_for_commit($ref_from);
     }
@@ -300,6 +299,7 @@ sub push_patches()
 process_config();
 parse_arguments(@ARGV);
 goto_gitdir();
+load_state();
 determine_local_branch();
 determine_remote_branch();
 push_patches();
