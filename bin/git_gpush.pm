@@ -7,6 +7,7 @@
 
 package git_gpush;
 
+use v5.14;
 use strict;
 use warnings;
 no warnings qw(io);
@@ -17,6 +18,7 @@ $SIG{__DIE__} = \&Carp::confess;
 
 use List::Util qw(min max);
 use File::Spec;
+use File::Temp qw(mktemp);
 use IPC::Open3 qw(open3);
 use Term::ReadKey;
 use Text::Wrap;
@@ -195,6 +197,18 @@ sub read_process($)
     return $_;
 }
 
+# Read all lines from the process' stdout.
+sub read_process_all($)
+{
+    my ($process) = @_;
+
+    my $fh = $$process{stdout};
+    my @lines = <$fh>;
+    chomp @lines;
+    printf("Read %d lines.\n", int(@lines)) if ($debug);
+    return \@lines;
+}
+
 # Read any number of null-terminated fields from the process' stdout.
 sub read_fields($@)
 {
@@ -274,6 +288,27 @@ sub git_config($;$)
     my ($key, $dflt) = @_;
     my @cfg = git_configs($key);
     return scalar(@cfg) ? $cfg[-1] : $dflt;
+}
+
+our $_indexfile;
+END { unlink($_indexfile) if ($_indexfile); }
+
+sub with_local_git_index($@)
+{
+    my ($callback, @args) = @_;
+
+    $_indexfile = mktemp(($ENV{TMPDIR} or "/tmp") . "/git-gpush.XXXXXX");
+    local $ENV{GIT_INDEX_FILE} = $_indexfile;
+
+    local ($SIG{HUP}, $SIG{INT}, $SIG{QUIT}, $SIG{TERM});
+    $SIG{HUP} = $SIG{INT} = $SIG{QUIT} = $SIG{TERM} = sub { exit; };
+
+    my $ret = $callback->(@args);
+
+    unlink($_indexfile);
+    $_indexfile = undef;
+
+    return $ret;
 }
 
 #################
@@ -442,21 +477,110 @@ sub changes_from_commits($)
 ##################
 
 # This is built upon Change objects with these attributes:
+# - key: Sequence number. This runs independently from Gerrit, so
+#   we can enumerate Changes which were never pushed, and to make
+#   it possible to re-associate local Changes with remote ones.
 # - id: Gerrit Change-Id.
 # - src: Local branch name, or "-" if Change is on a detached HEAD.
+# - pushed: SHA1 of the commit this Change was pushed as last time
+#   from this repository.
 
-# Known Gerrit Changes for the current repository, indexed by Change-Id.
-# A Change can exist on multiple branches, so the values are arrays.
+my $next_key = 10000;
+# All known Gerrit Changes for the current repository.
+our %change_by_key;  # { sequence-number => change-object }
+# Same, indexed by Gerrit Change-Id. A Change can exist on multiple branches.
 our %changes_by_id;  # { gerrit-id => [ change-object, ... ] }
+
+my $state_lines;
+my $state_updater = ($0 =~ s,^.*/,,r)." @ARGV";
+
+# Perform a batch update of refs.
+sub update_refs($$)
+{
+    my ($flags, $updates) = @_;
+
+    if (!@$updates) {
+        print "No refs to update.\n" if ($debug);
+        return;
+    }
+    my $pipe = open_process(USE_STDIN | FWD_STDERR | $flags, "git", "update-ref", "--stdin");
+    write_process($pipe, @$updates);
+    close_process($pipe);
+}
+
+sub _commit_state($)
+{
+    my ($blob) = @_;
+
+    run_process(0, 'git', 'update-index', '--add', '--cacheinfo', "100644,$blob,state");
+    my $tree = read_cmd_line(0, 'git', 'write-tree');
+    my $sha1 = read_cmd_line(0, 'git', 'commit-tree', '-m', 'Saving state', $tree);
+    run_process(0, 'git', 'update-ref', '-m', $state_updater,
+                   '--create-reflog', 'refs/gpush/state', $sha1);
+}
+
+sub save_state(;$)
+{
+    my ($dry) = @_;
+
+    print "Saving state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
+    my (@lines, @updates);
+    my @fkeys = ('key', 'id', 'src');
+    my @rkeys = ('pushed');
+    push @lines,
+        "next_key $next_key",
+        "";
+    foreach my $key (sort keys %change_by_key) {
+        my $change = $change_by_key{$key};
+        my $garbage = $$change{garbage};
+        foreach my $ky (@rkeys) {
+            my ($val, $oval) = ($garbage ? undef : $$change{$ky}, $$change{'_'.$ky});
+            if (!defined($val)) {
+                push @updates, "delete refs/gpush/i${key}_$ky\n"
+                    if (defined($oval));
+            } else {
+                push @updates, "update refs/gpush/i${key}_$ky $val\n"
+                    if (!defined($oval) || ($oval ne $val));
+            }
+            $$change{'_'.$ky} = $val;
+        }
+        next if ($garbage);
+        foreach my $ky (@fkeys) {
+            my $val = $$change{$ky};
+            if (defined($val)) {
+                push @lines, "$ky $val";
+            }
+        }
+        push @lines, "";
+    }
+    update_refs($dry ? DRY_RUN : 0, \@updates);
+
+    # We save the state file in a git ref as well, so the entire state
+    # can be synced between hosts with git operations.
+    if ("@lines" ne "@$state_lines") {
+        my $sts = open_process(USE_STDIN | SILENT_STDIN | USE_STDOUT | FWD_STDERR,
+                               'git', 'hash-object', '-w', '--stdin');
+        write_process($sts, map { "$_\n" } @lines);
+        my $blob = read_process($sts);
+        close_process($sts);
+        with_local_git_index(\&_commit_state, $blob) if (!$dry);
+        $state_lines = \@lines;
+    } else {
+        print "State file unmodified.\n" if ($debug);
+    }
+}
 
 # Constructor for the Change object.
 sub _init_change($$)
 {
     my ($change, $changeid) = @_;
 
-    print "Creating Change $changeid.\n" if ($debug);
+    print "Creating Change $next_key ($changeid).\n" if ($debug);
+    $$change{key} = $next_key;
     $$change{id} = $changeid;
     push @{$changes_by_id{$changeid}}, $change;
+    $change_by_key{$next_key} = $change;
+    $next_key++;
 }
 
 use constant {
@@ -484,31 +608,98 @@ sub change_for_id($;$)
     return undef;
 }
 
+sub load_state_file()
+{
+    my $sts = open_process(SOFT_FAIL | USE_STDOUT | NUL_STDERR,
+                           'git', 'cat-file', '-p', 'refs/gpush/state:state');
+    $state_lines = read_process_all($sts);
+    close_process($sts);
+    return if (!@$state_lines);
+
+    my $line = 0;
+    my $inhdr = 1;
+    my $change;
+    my @changes;
+    foreach (@$state_lines) {
+        $line++;
+        if (!length($_)) {
+            $inhdr = 0;
+            $change = undef;
+        } elsif (!/^(\w+) (.*)/) {
+            fail("Bad state file: Malformed entry at line $line.\n");
+        } elsif ($inhdr) {
+            if ($1 eq "next_key") {
+                $next_key = int($2);
+            } else {
+                fail("Bad state file: Unknown header keyword '$1' at line $line.\n");
+            }
+        } else {
+            if (!$change) {
+                $change = {};
+                $$change{line} = $line;
+                push @changes, $change;
+            }
+            $$change{$1} = $2;
+        }
+    }
+
+    foreach my $change (@changes) {
+        my $line = $$change{line};
+        my ($key, $id) = ($$change{key}, $$change{id});
+        fail("Bad state file: Change with no key at line $line.\n") if (!$key);
+        fail("Bad state file: Change with no id at line $line.\n") if (!$id);
+        fail("Bad state file: Change with duplicate id at line $line.\n")
+            if (defined($change_by_key{$key}));
+        $change_by_key{$key} = $change;
+        push @{$changes_by_id{$id}}, $change;
+    }
+}
+
 sub load_refs(@)
 {
     my (@refs) = @_;
 
+    my @updates;
     my $info = open_cmd_pipe(0, 'git', 'for-each-ref', '--format=%(objectname) %(refname)', @refs);
     while (read_process($info)) {
         if (m,^(.{40}) refs/heads/(.*)$,) {
             $local_refs{$2} = $1;
         } elsif (m,^(.{40}) refs/remotes/([^/]+)/(.*)$,) {
             $remote_refs{$2}{$3} = $1;
+        } elsif (m,^(.{40}) refs/gpush/i(\d+)_(.*)$,) {
+            my $change = $change_by_key{$2};
+            if (!$change) {
+                my $ref = substr($_, 41);
+                werr("Warning: Unrecognized Change key in state ref $ref - dropping.\n");
+                # It would cause trouble once the key is re-used.
+                push @updates, "delete $ref\n";
+                next;
+            }
+            $$change{$3} = $1;
+            $$change{'_'.$3} = $1;
         }
     }
     close_process($info);
+    update_refs(0, \@updates);
 }
 
 sub load_state()
 {
     print "Loading state ...\n" if ($debug);
-    load_refs("refs/heads/", "refs/remotes/");
+    load_state_file();
+    load_refs("refs/gpush/i*", "refs/heads/", "refs/remotes/");
 }
 
 ##########################
 # commit metadata output #
 ##########################
 
+# Don't let lists get arbitrarily wide, as this makes them hard to follow.
+use constant _LIST_WIDTH => 120;
+# The _minimal_ width assumed for annotations, even if absent. This
+# ensures that annotations always "stick out" on the right, even if only
+# short subjects have annotations.
+use constant _ANNOTATION_WIDTH => 6;
 # Elide over-long Change subjects, as they add nothing but noise.
 use constant _SUBJECT_WIDTH => 70;
 # Truncation width for Change-Ids and SHA1s; empirically determined to be
@@ -540,8 +731,8 @@ sub _unpack_report($@)
 {
     my $report = shift @_;
     my @a = ($$report{id}, $$report{subject},
-             $$report{prefix} // "");
-    push @a, length($a[2]);
+             $$report{prefix} // "", $$report{suffix} // "", $$report{annotation} // "");
+    push @a, length($a[2]) + length($a[3]) + max(length($a[4]), _ANNOTATION_WIDTH);
     for (@_) { $_ = shift @a; }
 }
 
@@ -549,15 +740,26 @@ sub format_reports($)
 {
     my ($reports) = @_;
 
+    my $width = 0;
+    foreach my $report (@$reports) {
+        next if ($$report{type} ne "change");
+        _unpack_report($report, my ($id, $subject, $pfx_, $sfx_, $ann_, $fixlen));
+        my $w = length($subject);
+        $w += _ID_WIDTH + 3 if (defined($id));
+        $width = max($width, min($w, _SUBJECT_WIDTH) + $fixlen);
+    }
+    $width = min($width, $tty_width, _LIST_WIDTH);
     my $output = "";
     foreach my $report (@$reports) {
         my $type = $$report{type} // "";
         if ($type eq "flowed") {
             $output .= wrap("", "", $_)."\n" foreach (@{$$report{texts}});
         } elsif ($type eq "change") {
-            _unpack_report($report, my ($id, $subject, $prefix, $fixlen));
-            my $str = format_subject($id, $subject, -$fixlen);
-            $output .= $prefix.$str."\n";
+            _unpack_report($report, my ($id, $subject, $prefix, $suffix, $annot, $fixlen));
+            my $w = $width - $fixlen;
+            my $str = format_subject($id, $subject, min($w, _SUBJECT_WIDTH));
+            my $spacing = length($annot) ? (" " x max($w - length($str), 0)) : "";
+            $output .= $prefix.$str.$suffix.$spacing.$annot."\n";
         } else {
             die("Unknown report type '$type'.\n");
         }
@@ -586,6 +788,7 @@ sub report_local_changes($$)
             id => $$commit{changeid},
             subject => $$commit{subject},
             prefix => "  ",
+            annotation => $$change{annotation}
         };
     }
 }

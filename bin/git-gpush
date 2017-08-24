@@ -64,7 +64,7 @@ Options:
         Report all registered aliases and quit.
 
     -n, --dry-run
-        Do everything except actually pushing any commits.
+        Do everything except actually pushing commits and updating state.
         This is useful mostly for debugging.
 
     -v, --verbose
@@ -356,10 +356,63 @@ sub get_changes()
     return $group;
 }
 
+use constant {
+    NEW => 'NEW',
+    MODIFIED => 'MODIFIED',
+    UNMODIFIED  => 'UNMODIFIED'
+};
+
+my $have_modified = 0;
+
+sub classify_changes_offline($)
+{
+    my ($group) = @_;
+
+    foreach my $change (@{$$group{changes}}) {
+        my $pushed = $$change{pushed};
+        if (defined($pushed)) {
+            my $commit = $$change{local}{id};
+            if ($commit eq $pushed) {
+                $$change{freshness} = UNMODIFIED;
+            } else {
+                $$change{freshness} = MODIFIED;
+                $have_modified++;
+            }
+        } else {
+            $$change{freshness} = NEW;
+            $have_modified++;
+        }
+    }
+}
+
+sub annotate_changes($)
+{
+    my ($group) = @_;
+
+    foreach my $change (@{$$group{changes}}) {
+        my @attribs;
+        # Changes in the 'modified' state (that is, the ones for which pushing
+        # actually has an effect) are annotated, while 'unmodified' ones are not.
+        # This behavior has been chosen after much deliberation following the
+        # principle that "no-op" should be silent, despite the fact that "doing
+        # nothing" is a diversion from what a regular git push would do, and is
+        # thus potentially confusing - but as having no modified changes at all
+        # leads to an additional message, the less noisy output (assuming that
+        # most Changes are usually not modified) seems most sensible.
+        my $freshness = $$change{freshness};
+        if ($freshness ne UNMODIFIED) {
+            push @attribs, $freshness;
+        }
+        $$change{annotation} = '  ['.join('; ', @attribs).']'
+            if (@attribs);
+    }
+}
+
 sub make_listing($)
 {
     my ($group) = @_;
 
+    annotate_changes($group);
     return report_pushed_changes($group);
 }
 
@@ -392,16 +445,35 @@ sub push_changes($)
     run_process(FWD_OUTPUT, @gitcmd);
 }
 
+sub update_state($)
+{
+    my ($group) = @_;
+
+    foreach my $change (@{$$group{changes}}) {
+        my $sha1 = $$change{local}{id};
+        $$change{pushed} = $sha1;
+    }
+}
+
 sub execute_pushing()
 {
     my $group = get_changes();
     determine_remote_branch($group);
+    classify_changes_offline($group);
     if ($list_only) {
         show_changes($group);
         print "Not pushing - list mode.\n" if ($debug);
     } else {
         show_changes($group) if (!$quiet);
-        push_changes($group);
+        if ($have_modified) {
+            push_changes($group);
+        } else {
+            print "No modified commits - nothing to push.\n" if (!$quiet);
+        }
+
+        # This makes sense even if no modified commits are pushed
+        # (e.g., syncing state after a dumb push).
+        update_state($group);
     }
 }
 
@@ -411,3 +483,4 @@ goto_gitdir();
 load_state();
 determine_local_branch();
 execute_pushing();
+save_state($dry_run);
