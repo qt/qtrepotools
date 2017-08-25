@@ -482,6 +482,7 @@ sub changes_from_commits($)
 #   it possible to re-associate local Changes with remote ones.
 # - id: Gerrit Change-Id.
 # - src: Local branch name, or "-" if Change is on a detached HEAD.
+# - tgt: Target branch name.
 # - pushed: SHA1 of the commit this Change was pushed as last time
 #   from this repository.
 
@@ -765,6 +766,23 @@ sub format_reports($)
         }
     }
     return $output;
+}
+
+sub fail_formatted($)
+{
+    my ($reports) = @_;
+
+    fail(format_reports($reports));
+}
+
+sub report_text($$@)
+{
+    my ($reports, $type, @texts) = @_;
+
+    push @$reports, {
+        type => $type,
+        texts => \@texts
+    };
 }
 
 sub report_flowed($@)

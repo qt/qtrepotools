@@ -55,6 +55,7 @@ Options:
     -b, --branch
         Specify the git branch to push for. If not specified, the
         upstream branch for 'ref-from' is used as the target branch.
+        This setting persists for the series, even when it grows.
 
     -l, --list
         Report all Changes that would be pushed, then quit.
@@ -220,15 +221,23 @@ sub lookup_alias($)
     return $user;
 }
 
+sub set_group_error($$$)
+{
+    my ($group, $style, $error) = @_;
+
+    ($$group{error_style}, $$group{error}) = ($style, $error);
+}
+
 sub caption_group($)
 {
     my ($group) = @_;
 
     my $changes = $$group{changes};
     my $to = $$group{branch};
-    my ($pfx, $tos, $rmt) = $list_only
-                                ? ("Series of", "", "")
-                                : ("Pushing", " for $to", " to '$remote'");
+    my $tos = defined($to) ? " for $to" : "";
+    my ($pfx, $rmt) = $list_only
+                          ? ("Series of", "")
+                          : ("Pushing", " to '$remote'");
     return (sprintf("%s %d Change(s)%s%s:",
                     $pfx, int(@$changes), $tos, $rmt),
             $changes);
@@ -241,6 +250,8 @@ sub report_pushed_group($$)
     my ($title, $changes) = caption_group($group);
     report_flowed($reports, $title);
     report_local_changes($reports, $changes);
+    my $error = $$group{error};
+    report_text($reports, $$group{error_style}, $error) if (defined($error));
 }
 
 sub report_pushed_changes($)
@@ -250,6 +261,33 @@ sub report_pushed_changes($)
     my @reports;
     report_pushed_group(\@reports, $group);
     return \@reports;
+}
+
+# Determine a singular value for a particular attribute from the Changes
+# in a series. Conflicting values are an error.
+sub aggregate_property($$$$)
+{
+    my ($group, $prop_name, $get_prop, $get_ann) = @_;
+
+    my $changes = $$group{changes};
+    my %prop_map = map { $_ => 1 } grep { $_ } map { $get_prop->($_) } @$changes;
+    my @props = keys %prop_map;
+    if (@props > 1) {
+        foreach my $change (@$changes) {
+            my $p = $get_prop->($change);
+            $$change{annotation} = $get_ann->($p) if (defined($p));
+        }
+        set_group_error($group, 'flowed',
+                        "Changes were previously pushed with mixed ${prop_name}s."
+                        ." Please specify one.");
+        fail_formatted(report_pushed_changes($group));
+    }
+    if (@props) {
+        my $p = $props[0];
+        print "Re-using $prop_name '$p'.\n" if ($debug);
+        return $p;
+    }
+    return undef;
 }
 
 # Find _the_ branch the specified commit lives on. This can be the current
@@ -327,6 +365,11 @@ sub determine_remote_branch($)
     my ($group) = @_;
 
     my $br = $ref_to;
+    if (!defined($br)) {
+        $br = aggregate_property($group, 'target',
+                                 sub { $_[0]->{tgt} },
+                                 sub { '  => '.$_[0] });
+    }
     if (!defined($br)) {
         fail("Cannot deduce source branch for $ref_from. Please use --branch.\n")
             if (!defined($local_branch));
@@ -449,9 +492,11 @@ sub update_state($)
 {
     my ($group) = @_;
 
+    my $branch = $$group{branch};
     foreach my $change (@{$$group{changes}}) {
         my $sha1 = $$change{local}{id};
         $$change{pushed} = $sha1;
+        $$change{tgt} = $branch;
     }
 }
 
