@@ -22,6 +22,7 @@ use File::Temp qw(mktemp);
 use IPC::Open3 qw(open3);
 use Term::ReadKey;
 use Text::Wrap;
+use JSON;
 
 our @_imported;
 BEGIN {
@@ -472,6 +473,12 @@ sub changes_from_commits($)
     return [ map { $$_{change} } @$commits ];
 }
 
+########################
+# gerrit query results #
+########################
+
+our %gerrit_info_by_key;
+
 ##################
 # state handling #
 ##################
@@ -526,7 +533,7 @@ sub save_state(;$)
 
     print "Saving state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
-    my @fkeys = ('key', 'id', 'src');
+    my @fkeys = ('key', 'id', 'src', 'tgt');
     my @rkeys = ('pushed');
     push @lines,
         "next_key $next_key",
@@ -917,6 +924,128 @@ sub analyze_local_branch($)
     }
 
     return $commits;
+}
+
+###################
+# branch tracking #
+###################
+
+# Update the target branches of local Changes according to the data
+# from a Gerrit query.
+# Each SHA1 is assigned to exactly one PatchSet, which in turn is
+# assigned to exactly one Change. That way we can identify each Change
+# by the last SHA1 we pushed it with, irrespective of the branch it is
+# targeting. If the latter changes on Gerrit, we just follow it, as
+# this is what the user usually wants.
+sub _update_target_branches($)
+{
+    my ($ginfos) = @_;
+
+    state %trackable_changes;
+    if (!%trackable_changes) {
+        # Changes on multiple local branches may have the same _pushed commit,
+        # so make sure to collect only the Changes on the current branch.
+        foreach my $change (values %change_by_key) {
+            next if ($$change{garbage});
+            next if (!$$change{local});
+            my $pushed = $$change{pushed};
+            $trackable_changes{$pushed} = $change if (defined($pushed));
+        }
+    }
+
+    my @changed;
+    my $need_save;
+    foreach my $ginfo (@$ginfos) {
+        foreach my $rev (@{$$ginfo{revs}}) {
+            my $change = $trackable_changes{$$rev{id}};
+            next if (!$change);
+            my $pbr = $$change{tgt} // "";
+            my $abr = $$ginfo{branch};
+            next if ($pbr eq $abr);
+            # Old gpush versions don't store the target branch. Make no noise about that.
+            if ((length($pbr) && !$quiet) || $debug) {
+                $$change{annotation} = "  [$pbr => $abr]";
+                push @changed, $change;
+            }
+            $$change{tgt} = $abr;
+            $need_save = 1;
+        }
+    }
+    if (@changed) {
+        my @reports;
+        report_flowed(\@reports,
+                "Notice: Adjusting ".int(@changed)." Change(s) to server-side re-targeting:");
+        report_local_changes(\@reports, \@changed);
+        print format_reports(\@reports)."\n";  # Delimit from remaining output.
+        # The Changes may be printed again later.
+        delete $$_{annotation} foreach (@changed);
+    }
+    save_state() if ($need_save);
+}
+
+#######################
+# gerrit ssh handling #
+#######################
+
+# SSH arguments for connecting the Gerrit instance.
+our @gerrit_ssh;
+# Target repository name on the Gerrit instance.
+our $gerrit_project;
+
+# Extract Gerrit configuration from the previously determined Gerrit remote.
+sub set_gerrit_config($)
+{
+    my ($rmt) = @_;
+
+    my $url = git_config('remote.'.$rmt.'.url');
+    fail("Remote '$rmt' does not exist.\n") if (!$url);
+    if ($url =~ m,^ssh://([^/:]+)(?::(\d+))?/(.*?)(?:\.git)?/?$,) {
+        push @gerrit_ssh, '-p', $2 if (defined($2));
+        push @gerrit_ssh, $1;
+        $gerrit_project = $3;
+    } elsif ($url =~ m,^([^/:]+):([^/].*?)(?:\.git)?/?$,) {
+        push @gerrit_ssh, $1;
+        $gerrit_project = $2;
+    } else {
+        fail("Remote '$rmt' does not use a supported protocol.\n")
+    }
+}
+
+sub query_gerrit($;$)
+{
+    my ($ids, $extra) = @_;
+
+    my @ginfos;
+    my $info = open_cmd_pipe(0, 'ssh', @gerrit_ssh, 'gerrit', 'query', '--format', 'JSON',
+                                '--no-limit', '--patch-sets', $extra ? @$extra : (),
+                                "project:$gerrit_project", '\\('.join(' OR ', @$ids).'\\)');
+    while (read_process($info)) {
+        my $review = decode_json($_);
+        defined($review) or fail("Cannot decode JSON string '".chomp($_)."'\n");
+        my ($key, $changeid) = ($$review{'number'}, $$review{'id'});
+        next if (!defined($key) || !defined($changeid));
+        my $ginfo = \%{$gerrit_info_by_key{$key}};
+        my $branch = $$review{'branch'};
+        defined($branch) or fail("Huh?! $changeid has no branch?\n");
+        my $pss = $$review{'patchSets'};
+        defined($pss) or fail("Huh?! $changeid has no PatchSets?\n");
+        my @revs;
+        foreach my $cps (@{$pss}) {
+            my ($number, $revision) = ($$cps{'number'}, $$cps{'revision'});
+            defined($number) or fail("Huh?! PatchSet in $changeid has no number?\n");
+            defined($revision) or fail("Huh?! PatchSet $number in $changeid has no commit?\n");
+            my %rev = (
+                id => $revision
+            );
+            $revs[$number] = \%rev;
+        }
+        $$ginfo{branch} = $branch;
+        $$ginfo{revs} = [ grep { $_ } @revs ];  # Drop deleted ones.
+        push @ginfos, $ginfo;
+    }
+    close_process($info);
+
+    _update_target_branches(\@ginfos);
 }
 
 #############################

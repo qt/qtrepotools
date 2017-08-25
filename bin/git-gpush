@@ -355,6 +355,7 @@ sub determine_local_branch()
         $local_branch = branch_for_commit($ref_from);
     }
     setup_remotes($ref_from);
+    set_gerrit_config($remote);
 }
 
 # Determine the target branch for the given series.
@@ -502,7 +503,17 @@ sub update_state($)
 
 sub execute_pushing()
 {
+    my $online = !$list_only;
     my $group = get_changes();
+    my $pushed_changes = $$group{changes};
+    if ($online) {
+        my @queries;
+        foreach my $change (@$pushed_changes) {
+            my $commit = $$change{pushed};
+            push @queries, "commit:".$commit if (defined($commit));
+        }
+        query_gerrit(\@queries);
+    }
     determine_remote_branch($group);
     classify_changes_offline($group);
     if ($list_only) {
