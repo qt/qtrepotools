@@ -478,6 +478,7 @@ sub changes_from_commits($)
 ########################
 
 our %gerrit_info_by_key;
+our %gerrit_infos_by_id;
 
 ##################
 # state handling #
@@ -762,6 +763,8 @@ sub format_reports($)
         my $type = $$report{type} // "";
         if ($type eq "flowed") {
             $output .= wrap("", "", $_)."\n" foreach (@{$$report{texts}});
+        } elsif ($type eq "fixed") {
+            $output .= join("", @{$$report{texts}});
         } elsif ($type eq "change") {
             _unpack_report($report, my ($id, $subject, $prefix, $suffix, $annot, $fixlen));
             my $w = $width - $fixlen;
@@ -798,6 +801,16 @@ sub report_flowed($@)
 
     push @$reports, {
         type => "flowed",
+        texts => \@texts
+    };
+}
+
+sub report_fixed($@)
+{
+    my ($reports, @texts) = @_;
+
+    push @$reports, {
+        type => "fixed",
         texts => \@texts
     };
 }
@@ -1025,6 +1038,9 @@ sub query_gerrit($;$)
         my ($key, $changeid) = ($$review{'number'}, $$review{'id'});
         next if (!defined($key) || !defined($changeid));
         my $ginfo = \%{$gerrit_info_by_key{$key}};
+        push @{$gerrit_infos_by_id{$changeid}}, $ginfo;
+        my $status = $$review{'status'};
+        defined($status) or fail("Huh?! $changeid has no status?\n");
         my $branch = $$review{'branch'};
         defined($branch) or fail("Huh?! $changeid has no branch?\n");
         my $pss = $$review{'patchSets'};
@@ -1039,6 +1055,8 @@ sub query_gerrit($;$)
             );
             $revs[$number] = \%rev;
         }
+        $$ginfo{id} = $changeid;
+        $$ginfo{status} = $status;
         $$ginfo{branch} = $branch;
         $$ginfo{revs} = [ grep { $_ } @revs ];  # Drop deleted ones.
         push @ginfos, $ginfo;

@@ -57,6 +57,10 @@ Options:
         upstream branch for 'ref-from' is used as the target branch.
         This setting persists for the series, even when it grows.
 
+    -fb, --force-branch
+        Push for specified branch despite the pushed Changes having
+        been pushed previously, but only for different branches.
+
     -l, --list
         Report all Changes that would be pushed, then quit.
         This is a purely off-line operation.
@@ -123,6 +127,7 @@ EOM
 
 my $ref_from;
 my $ref_to;
+my $force_branch = 0;
 my $list_only = 0;
 
 my @reviewers;
@@ -148,6 +153,8 @@ sub parse_arguments(@)
         } elsif ($arg eq "-b" || $arg eq "--branch") {
             fail("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $ref_to = shift @_;
+        } elsif ($arg eq "-fb" || $arg eq "--force-branch") {
+            $force_branch = 1;
         } elsif ($arg eq "-l" || $arg eq "--list") {
             $list_only = 1;
         } elsif ($arg eq "--aliases") {
@@ -192,7 +199,7 @@ sub parse_arguments(@)
     }
 
     my $push_specific =
-            @reviewers || @CCs
+            @reviewers || @CCs || $force_branch
             || defined($remote) || defined($ref_to);
 
     if ($list_only) {
@@ -400,6 +407,48 @@ sub get_changes()
     return $group;
 }
 
+# Assign each local Change to a matching remote Change if possible,
+# on the way complaining about creating duplicates.
+sub map_remote_changes($)
+{
+    my ($group) = @_;
+
+    my $changes = $$group{changes};
+    my $br = $$group{branch};
+    my (@bad_chg, %bad_br);
+    foreach my $change (@$changes) {
+        my $gis = $gerrit_infos_by_id{$$change{id}};
+        next if (!$gis);
+        my ($good, @bad);
+        foreach my $gi (@$gis) {
+            if ($$gi{branch} eq $br) {
+                $good = $gi;
+            } elsif ($$gi{status} ne "MERGED") {
+                # MERGED Changes are ignored, to avoid false positives for cherry-picks.
+                push @bad, $gi;
+            }
+        }
+        if ($good) {
+            $$change{gerrit} = $good;
+        } elsif (@bad && !$force_branch) {
+            my @bbr = map { $$_{branch} } @bad;
+            $$change{annotation} = '  ['.join(" ", sort @bbr).']';
+            push @bad_chg, $change;
+            $bad_br{$_} = 1 foreach (@bbr);
+        }
+    }
+    if (@bad_chg) {
+        my $reports = report_pushed_changes($group);
+        my $tpfx = (@bad_chg == @$changes) ? "The" : "Some of the";
+        my $tsfx = (keys(%bad_br) == 1) ? "a different branch" : "different branches";
+        report_fixed($reports,
+                     "$tpfx Change(s) were previously pushed only for $tsfx.\n",
+                     "Please move them server-side, push for a matching branch,\n",
+                     "or use --force-branch to continue nonetheless.\n");
+        fail_formatted($reports);
+    }
+}
+
 use constant {
     NEW => 'NEW',
     MODIFIED => 'MODIFIED',
@@ -507,14 +556,13 @@ sub execute_pushing()
     my $group = get_changes();
     my $pushed_changes = $$group{changes};
     if ($online) {
-        my @queries;
-        foreach my $change (@$pushed_changes) {
-            my $commit = $$change{pushed};
-            push @queries, "commit:".$commit if (defined($commit));
-        }
+        my @queries = map { "change:".$$_{id} } @$pushed_changes;
         query_gerrit(\@queries);
     }
     determine_remote_branch($group);
+    if ($online) {
+        map_remote_changes($group);
+    }
     classify_changes_offline($group);
     if ($list_only) {
         show_changes($group);
