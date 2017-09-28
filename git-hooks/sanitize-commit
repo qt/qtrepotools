@@ -820,13 +820,13 @@ while (<DIFF>) {
                 # set*id; git discards it - but asking for it is misguided.
                 complain("Adding file with set*id permissions", "permissions", 1);
             } elsif ($perm & 0111) {
-                if ($qmake || ($clike && $file !~ /\.pl$/) || $file =~ /\.(ps|pdf|png|qdoc(cconf)?|json)$/) {
+                if ($file =~ /\.(py|pl|sh|bash|php|cgi|js)$/
+                    # i.e. known script suffix; or no suffix at all:
+                    || $file !~ m,[^/.]\.[^/.]+$,) {
+                    $need_hash_bang = 1;
+                } elsif ($file !~ /\.(exe|bat|cmd|ps1)$/) {
                     # Should not be executable.
                     complain("Adding implausibly executable file", "permissions");
-                } elsif ($file =~ /\.(py|pm|pl|sh|bash|php)$/
-                         # i.e. known script suffix; or no suffix at all:
-                         || $file !~ m,[^/.]\.[^/.]+$,) {
-                    $need_hash_bang = 1;
                 }
             }
         }
