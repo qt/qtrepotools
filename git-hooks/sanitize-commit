@@ -154,6 +154,10 @@ sub check_spelling()
         next if $seen{$word};
         $seen{$word} = 1;
         if (my $correction = $MISTAKES{$word}) {
+            if ($word eq 'nam') {
+                # Ignore if in a fragments commonly used in "Lorem ipsum" texts:
+                next if (/\bNam eget dui\b/ || /\bNam quam nunc\b/);
+            }
             my $sfx = "";
             if (!$MISTAKES_BASE{$word}) {
                 $sfx = ' [*]';
