@@ -240,6 +240,45 @@ sub process_commit($$$$$)
   $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref.")\n";
 }
 
+sub do_move($$$)
+{
+  my ($chg, $author, $target) = @_;
+  my $branch = $$chg{'branch'};
+  if ($target eq $branch) {
+    return "The change already targets $branch";
+  }
+  my $project = $$chg{'project'};
+  my $id = $$chg{'id'};
+  # First, check there's no such review on that branch already
+  my $query = "project:$project change:$id branch:$target";
+  open(my $status, "-|", @gerrit, "query", "--format", "JSON", $query) or die "cannot run ssh: ".$!;
+  while (<$status>) {
+    my $review = decode_json($_);
+    defined($review) or die "cannot decode JSON string '".chomp($_)."'\n";
+    if (my $url = $$review{'url'}) {
+      return "Cannot move: Conflicting change $url - please ask a Gerrit admin for help.";
+    }
+  }
+  close $status;
+  # Only allow the change owner to execute move
+  if ($$author{'username'} ne $$chg{'owner'}{'username'}) {
+    return "Only the owner is allowed to move a change";
+  }
+  my $number = $$chg{'number'};
+  open(my $retarget, "gerrit_retarget_changes x $target $number 2>&1 |")
+    or die "Cannot run gerrit_retarget_changes: ".$!;
+  my @output = <$retarget>;
+  return "Moved" if (close($retarget));
+  return ($! ? "Failed to move ($!)\n" : "Move rejected ($?)\n") . join(' ', @output);
+}
+
+sub process_move($$$) {
+  my ($chg, $author, $target) = @_;
+  my $number = $$chg{'number'};
+  $gerrit_rest->POST("/changes/$number/revisions/current/review",
+                     { message => do_move($chg, $author, $target) });
+}
+
 $| = 1; # make STDOUT autoflush
 
 open UPDATES, "-|", @gerrit, "stream-events" or die "cannot run ssh: ".$!;
@@ -292,6 +331,11 @@ while (<UPDATES>) {
     } elsif ($type eq 'ref-updated') {
       my $rup = $$update{'refUpdate'};
       delete $skipfetch{$$rup{'project'}};
+    } elsif ($type eq 'comment-added') {
+      my $cmd = $$update{'comment'};
+      if ($cmd =~ /^(?:gerrit-)?bot:\h*(?:please\h+)?move\h+(?:back\h+)?to\h+(?:branch\h+)?([\w.]*\w)\b/im) {
+        process_move($$update{'change'}, $$update{'author'}, $1);
+      }
     }
   }
 }
