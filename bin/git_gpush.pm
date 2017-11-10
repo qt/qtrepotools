@@ -16,6 +16,8 @@ $SIG{__WARN__} = \&Carp::cluck;
 
 use File::Spec;
 use IPC::Open3 qw(open3);
+use Term::ReadKey;
+use Text::Wrap;
 
 our @_imported;
 BEGIN {
@@ -31,6 +33,36 @@ our $debug = 0;
 our $verbose = 0;
 our $quiet = 0;
 our $dry_run = 0;
+
+##################
+# message output #
+##################
+
+my ($tty_width, undef, undef, undef) = (-t STDOUT) ? GetTerminalSize() : (80);
+
+# This is for messages which even after wrapping will rarely/barely
+# exceed a single line, so it does not matter that the output possibly
+# violates the "no more than 80 columns for flowed text" guideline.
+sub _wrap_wide($)
+{
+    $Text::Wrap::columns = $tty_width + 1;
+    return wrap("", "", $_[0]);
+}
+
+sub wout($)
+{
+    print _wrap_wide($_[0]);
+}
+
+sub werr($)
+{
+    print STDERR _wrap_wide($_[0]);
+}
+
+sub wfail($)
+{
+    die(_wrap_wide($_[0]));
+}
 
 #######################
 # subprocess handling #
@@ -89,9 +121,9 @@ sub open_process($@)
         $err = \'>&NUL';
     }
     print "+ $cmd\n" if ($debug);
-    open(NUL, '>'.File::Spec->devnull()) or die("Failed to open bitbucket: $!\n");
+    open(NUL, '>'.File::Spec->devnull()) or wfail("Failed to open bitbucket: $!\n");
     eval { $process{pid} = open3($$in, $$out, $$err, @cmd); };
-    die("Failed to run \"$cmd[0]\": $!\n") if ($@);
+    wfail("Failed to run \"$cmd[0]\": $!\n") if ($@);
     close(NUL);
     return \%process;
 }
@@ -106,11 +138,11 @@ sub close_process($)
     }
     my $cmd = $$process{cmd};
     if ($$process{stdout}) {
-        close($$process{stdout}) or die("Failed to close read pipe of '$cmd': $!\n");
+        close($$process{stdout}) or wfail("Failed to close read pipe of '$cmd': $!\n");
     }
-    waitpid($$process{pid}, 0) or die("Failed to wait for '$cmd': $!\n");
+    waitpid($$process{pid}, 0) or wfail("Failed to wait for '$cmd': $!\n");
     if ($? & 128) {
-        die("'$cmd' crashed with signal ".($? & 127).".\n") if ($? != 141); # allow SIGPIPE
+        wfail("'$cmd' crashed with signal ".($? & 127).".\n") if ($? != 141); # allow SIGPIPE
         $? = 0;
     } elsif ($? && !($$process{flags} & SOFT_FAIL)) {
         exit($? >> 8);
@@ -135,7 +167,7 @@ sub write_process($@)
         print "> $_" if ($debug && !$silent);
         print $stdin $_ if (!$dry);
     }
-    $dry or close($stdin) or die("Failed to close write pipe of '$$process{cmd}': $!\n");
+    $dry or close($stdin) or wfail("Failed to close write pipe of '$$process{cmd}': $!\n");
 }
 
 # Read a line from the process' stdout.
