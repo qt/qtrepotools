@@ -122,8 +122,6 @@ my %aliases;
 my @reviewers;
 my @CCs;
 
-my @arguments;
-
 my %gitconfig;
 
 sub format_cmd(@)
@@ -434,17 +432,6 @@ sub lookup_alias($)
     return $user;
 }
 
-sub add_reviewers()
-{
-    if (@reviewers || @CCs) {
-        my @dudes;
-        push @dudes, "--receive-pack=git receive-pack";
-        push @dudes, map { " --reviewer=$_" } @reviewers;
-        push @dudes, map { " --cc=$_" } @CCs;
-        push @arguments, join('', @dudes); # Single argument to git push
-    }
-}
-
 sub goto_gitdir()
 {
     my $cdup = read_cmd_line(0, 'git', 'rev-parse', '--show-cdup');
@@ -523,11 +510,16 @@ sub push_patches()
 
     print "Pushing $ref_from for $ref_to on $remote ...\n" if (!$quiet);
 
+    my @git_recv_args;
+    push @git_recv_args, map { "--reviewer=$_" } @reviewers;
+    push @git_recv_args, map { "--cc=$_" } @CCs;
+
     my @gitcmd = ("git", "push");
     push @gitcmd, '-v' if ($verbose);
     push @gitcmd, '-q' if ($quiet);
     push @gitcmd, '-n' if ($dry_run);
-    push @gitcmd, @arguments;
+    push @gitcmd, join(' ', "--receive-pack=git receive-pack", @git_recv_args)
+        if (@git_recv_args);
     push @gitcmd, $remote, "$ref_from:refs/".($draft > 0 ? 'drafts' : 'for')."/$ref_to";
 
     run_process(FWD_OUTPUT, @gitcmd);
@@ -535,7 +527,6 @@ sub push_patches()
 
 load_config();
 parse_arguments(@ARGV);
-add_reviewers();
 goto_gitdir();
 determine_target();
 push_patches();
