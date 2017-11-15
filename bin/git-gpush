@@ -127,10 +127,10 @@ sub parse_arguments(@)
         } elsif ($arg eq "-n" || $arg eq "--dry-run") {
             $dry_run = 1;
         } elsif ($arg eq "-r" || $arg eq "--remote") {
-            die("--remote needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
+            fail("--remote needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $remote = shift @_;
         } elsif ($arg eq "-b" || $arg eq "--branch") {
-            die("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
+            fail("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $ref_to = shift @_;
         } elsif ($arg eq "--aliases") {
             foreach my $key (sort(keys %aliases)) {
@@ -160,11 +160,11 @@ sub parse_arguments(@)
                 $ref_from = $arg;
             }
         } else {
-            die("Unrecognized option '$arg'.\n");
+            fail("Unrecognized option '$arg'.\n");
         }
     }
 
-    die("--quiet and --verbose/--debug are mutually exclusive.\n")
+    fail("--quiet and --verbose/--debug are mutually exclusive.\n")
         if ($quiet && $verbose);
 }
 
@@ -243,10 +243,10 @@ sub determine_target()
         if ($?) {
             # Next, try to deduce a branch from the commit.
             $ref = determine_branch($ref_from);
-            die("Cannot deduce source branch for $ref_from.\n") if (!defined($ref));
+            fail("Cannot deduce source branch for $ref_from.\n") if (!defined($ref));
         }
         $ref_to = git_config("branch.$ref.merge");
-        die("$ref has no upstream branch.\n") if (!defined($ref_to));
+        fail("$ref has no upstream branch.\n") if (!defined($ref_to));
         $ref_to =~ s,^refs/heads/,,;
     }
 }

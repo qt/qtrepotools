@@ -13,6 +13,7 @@ no warnings qw(io);
 
 use Carp;
 $SIG{__WARN__} = \&Carp::cluck;
+$SIG{__DIE__} = \&Carp::confess;
 
 use File::Spec;
 use IPC::Open3 qw(open3);
@@ -63,7 +64,14 @@ sub werr($)
 
 sub wfail($)
 {
-    die(_wrap_wide($_[0]));
+    werr($_[0]);
+    exit(1);
+}
+
+sub fail($)
+{
+    print STDERR $_[0];
+    exit(1);
 }
 
 #######################
@@ -233,7 +241,7 @@ our $gitdir;  # $GIT_DIR
 sub goto_gitdir()
 {
     my $cdup = read_cmd_line(0, 'git', 'rev-parse', '--show-cdup');
-    die("fatal: This operation must be run in a work tree\n") if (!defined($cdup));
+    fail("fatal: This operation must be run in a work tree\n") if (!defined($cdup));
     chdir($cdup) unless ($cdup eq "");
     $gitdir = read_cmd_line(0, 'git', 'rev-parse', '--git-dir');
 }
@@ -299,7 +307,7 @@ sub load_config()
             } elsif ($1 eq "config") {
                 $in_aliases = 0;
             } else {
-                die("Unrecognized section '$1' in alias file.\n");
+                fail("Unrecognized section '$1' in alias file.\n");
             }
         } elsif ($line =~ /^\s*([^ =]+)\s*=\s*(.*?)\s*$/) {  # Capture the value
             if ($in_aliases) {
