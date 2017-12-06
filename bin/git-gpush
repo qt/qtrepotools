@@ -65,6 +65,10 @@ Options:
         Report all Changes that would be pushed, then quit.
         This is a purely off-line operation.
 
+    -ll, --list-online
+        Report all Changes that would be pushed, then quit.
+        The Changes are annotated with state information from Gerrit.
+
     --aliases
         Report all registered aliases and quit.
 
@@ -129,6 +133,7 @@ my $ref_from;
 my $ref_to;
 my $force_branch = 0;
 my $list_only = 0;
+my $list_online = 0;
 
 my @reviewers;
 my @CCs;
@@ -157,6 +162,9 @@ sub parse_arguments(@)
             $force_branch = 1;
         } elsif ($arg eq "-l" || $arg eq "--list") {
             $list_only = 1;
+        } elsif ($arg eq "-ll" || $arg eq "--list-online") {
+            $list_only = 1;
+            $list_online = 1;
         } elsif ($arg eq "--aliases") {
             foreach my $key (sort(keys %aliases)) {
                 print "$key = $aliases{$key}\n";
@@ -203,9 +211,9 @@ sub parse_arguments(@)
             || defined($remote) || defined($ref_to);
 
     if ($list_only) {
-        fail("--list is incompatible with --quiet/--verbose.\n")
+        fail("--list/--list-online is incompatible with --quiet/--verbose.\n")
             if ($quiet || ($verbose && !$debug));
-        fail("--list is incompatible with push-modifying options.\n")
+        fail("--list/--list-online is incompatible with push-modifying options.\n")
             if ($push_specific);
     }
 }
@@ -243,7 +251,8 @@ sub caption_group($)
     my $to = $$group{branch};
     my $tos = defined($to) ? " for $to" : "";
     my ($pfx, $rmt) = $list_only
-                          ? ("Series of", "")
+                          ? ("Series of",
+                             ($list_online && length($tos)) ? " on '$remote'" : "")
                           : ("Pushing", " to '$remote'");
     return (sprintf("%s %d Change(s)%s%s:",
                     $pfx, int(@$changes), $tos, $rmt),
@@ -616,7 +625,7 @@ sub update_state($)
 
 sub execute_pushing()
 {
-    my $online = !$list_only;
+    my $online = !$list_only || $list_online;
     my $group = get_changes();
     my $pushed_changes = $$group{changes};
     if ($online) {
