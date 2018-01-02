@@ -239,7 +239,7 @@ sub check_email($$$$)
     # - contain no spaces
     # - have words starting with lowercase (except for common Nobiliary particles)
     # - have single letters not followed by a dot or apostrophe
-    if (!defined($good_names{$real}) && ($real !~ / / || $real =~ /\b(?!da|de|d'|la|van|von)\p{Ll}|\b\pL([^.'\pL]|$)/)) {
+    if (!defined($good_names{$real}) && ($real !~ / / || $real =~ /\b(?!da|de|du|d'|la|van|von)\p{Ll}|\b\pL([^.'\pL]|$)/)) {
         if ($gerrit_rest) {
             do_complain($line, "Suspicious real name", "email");
         } else {
