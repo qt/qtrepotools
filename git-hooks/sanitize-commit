@@ -812,7 +812,7 @@ while (<DIFF>) {
             }
             next;
         }
-        if (/^new file mode (\d+)$/) {
+        if (/^new(?: file)? mode (\d+)$/) {
             my $text = $1;
             if ($text eq "160000" || $text eq "120000") {
                 $is_special = 1;
