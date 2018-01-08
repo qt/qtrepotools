@@ -247,19 +247,22 @@ sub do_move($$$)
   if ($target eq $branch) {
     return "The change already targets $branch";
   }
+  my %allowed_status = ('NEW' => 1, 'DEFERRED' => 1, 'DRAFT' => 1, 'ABANDONED' => 1);
+  my $status = $$chg{'status'};
+  return "$status changes cannot be moved" if (!$allowed_status[$status]);
   my $project = $$chg{'project'};
   my $id = $$chg{'id'};
   # First, check there's no such review on that branch already
   my $query = "project:$project change:$id branch:$target";
-  open(my $status, "-|", @gerrit, "query", "--format", "JSON", $query) or die "cannot run ssh: ".$!;
-  while (<$status>) {
+  open(my $qry, "-|", @gerrit, "query", "--format", "JSON", $query) or die "cannot run ssh: ".$!;
+  while (<$qry>) {
     my $review = decode_json($_);
     defined($review) or die "cannot decode JSON string '".chomp($_)."'\n";
     if (my $url = $$review{'url'}) {
       return "Cannot move: Conflicting change $url - please ask a Gerrit admin for help.";
     }
   }
-  close $status;
+  close $qry;
   # Only allow the change owner to execute move
   if ($$author{'username'} ne $$chg{'owner'}{'username'}) {
     return "Only the owner is allowed to move a change";
