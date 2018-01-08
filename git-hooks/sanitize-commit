@@ -296,11 +296,11 @@ sub check_apple_terminology()
 }
 
 # The hard-coded fallback could be avoided by init-repository setting it up.
-my $LTS = $config{'lts-branch'} || "5.6";
+my @LTS = split(/\s+/, $config{'lts-branch'} || "5.6");
 
 my @allHeads = ();
-my @stableHeads = ();
-my @ltsHeads = ();
+my %nonDevHeads = ();
+my $foundLts = 0;
 my $foundDev = 0;
 my $seenOrigin = 0;
 open HEADS, '-|', 'git', 'for-each-ref',
@@ -311,7 +311,7 @@ while (<HEADS>) {
     my ($rev, $name) = ($1, $2);
     if ($name =~ m,^remotes/,) {
         if (!$seenOrigin) {
-            ($foundDev, @allHeads, @stableHeads, @ltsHeads) = (0);
+            ($foundDev, $foundLts, @allHeads, %nonDevHeads) = (0, 0);
             $seenOrigin = 1;
         }
     } elsif ($seenOrigin) {
@@ -321,10 +321,16 @@ while (<HEADS>) {
         $foundDev = 1;
     } elsif ($name =~ m,/(\d+(?:\.\d+)+)$,) {
         my $branch = $1;
-        if ($branch =~ /^$LTS(?:\.|$)/) {
-            push(@ltsHeads, $rev);
-        } else {
-            push(@stableHeads, $rev);
+        ONCE: while (1) {
+            foreach my $lts (@LTS) {
+                if ($branch =~ /^\Q$lts\E(?:\.|$)/) {
+                    $foundLts = 1;
+                    push(@{$nonDevHeads{$lts}}, $rev);
+                    last ONCE;
+                }
+            }
+            push(@{$nonDevHeads{''}}, $rev);
+            last;
         }
     } elsif ($name !~ m,/master$,) {
         next;
@@ -334,25 +340,37 @@ while (<HEADS>) {
 close HEADS;
 printerr;
 
-my $sha1OnLts = -1;
-if ($foundDev && @ltsHeads) {
+my $handleLts = 0;
+my $ltsForSha1 = '';
+if ($foundDev && $foundLts) {
+    $handleLts = 1;
     my $refPfx = ($seenOrigin ? "refs/remotes/origin" : "refs/heads");
-    my $diverge = $config{'cached-lts-fork'};
-    if (!$diverge || ($config{'cached-lts-branch'} || "") ne $LTS) {
-        chomp($diverge = `git merge-base $refPfx/dev $refPfx/$LTS`);
-        system("git config sanity.${instance}.cached-lts-fork $diverge && ".
-               "git config sanity.${instance}.cached-lts-branch $LTS");
-    }
     chomp(my $sha1Base = `git merge-base $sha1 $refPfx/dev`);
-    $sha1OnLts = ($sha1Base eq $diverge);
+    foreach my $lts (@LTS) {
+        next if (!defined($nonDevHeads{$lts}));
+        my $key = "cached-lts-$lts-fork";
+        $key =~ s/\./-/g;  # so the dot in $lts isn't a section name boundary in the key
+        my $diverge = $config{$key};
+        if (!$diverge) {
+            chomp($diverge = `git merge-base $refPfx/dev $refPfx/$lts`);
+            system("git config sanity.$instance.$key $diverge");
+        }
+        if ($sha1Base eq $diverge) {
+            $ltsForSha1 = $lts;
+            last;
+        }
+    }
 }
 
 sub check_cherry_pick($)
 {
     my ($orig) = @_;
 
-    if ($sha1OnLts >= 0) {
-        my @sources = ($sha1OnLts ? @stableHeads : @ltsHeads);
+    if ($handleLts) {
+        my @sources;
+        foreach my $br (keys %nonDevHeads) {
+            push @sources, @{$nonDevHeads{$br}} if ($br ne $ltsForSha1);
+        }
         if (@sources) {  # Expected to be always true ...
             # git creates a hypothetical merge between the sources, so
             # valid commits will lie in the ancestry of this merge,
@@ -370,8 +388,8 @@ sub check_cherry_pick($)
     if ($origBase ne $orig) {
         # Most likely not integrated yet, but may also be a wip/ branch.
         complain_ln("Cherry-pick's source is not an upstream commit", "cherry", 1);
-    } elsif ($sha1OnLts >= 0) {
-        complain("Cherry-pick is not between stable and LTS branch", "cherry");
+    } elsif ($handleLts) {
+        complain("Cherry-pick will be subsequently merged with its source branch", "cherry");
     }
 }
 
@@ -515,7 +533,7 @@ if ($badrev && !defined($cfg{revby})) {
 if ($badsign) {
     do_complain($badsign, "Unnecessary Signed-off-by footer", "", -1);
 }
-if (!$havecherry && $sha1OnLts > 0) {
+if (!$havecherry && length($ltsForSha1)) {
     complain("Commit on LTS branch is not a cherry-pick", "cherry");
 }
 
