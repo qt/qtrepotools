@@ -249,7 +249,7 @@ sub do_move($$$)
   }
   my %allowed_status = ('NEW' => 1, 'DEFERRED' => 1, 'DRAFT' => 1, 'ABANDONED' => 1);
   my $status = $$chg{'status'};
-  return "$status changes cannot be moved" if (!$allowed_status[$status]);
+  return "$status changes cannot be moved" if (!$allowed_status{$status});
   my $project = $$chg{'project'};
   my $id = $$chg{'id'};
   # First, check there's no such review on that branch already
