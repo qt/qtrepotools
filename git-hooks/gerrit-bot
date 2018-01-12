@@ -336,7 +336,7 @@ while (<UPDATES>) {
       delete $skipfetch{$$rup{'project'}};
     } elsif ($type eq 'comment-added') {
       my $cmd = $$update{'comment'};
-      if ($cmd =~ /^(?:gerrit-)?bot:\h*(?:please\h+)?move\h+(?:back\h+)?to\h+(?:branch\h+)?([\w.]*\w)\b/im) {
+      if ($cmd =~ /^(?:gerrit-)?bot:\h*(?:please\h+)?move\h+(?:back\h+)?to\h+(?:branch\h+)?([\w.\/]*\w)\b/im) {
         process_move($$update{'change'}, $$update{'author'}, $1);
       }
     }
