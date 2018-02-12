@@ -296,7 +296,7 @@ sub check_apple_terminology()
 }
 
 # The hard-coded fallback could be avoided by init-repository setting it up.
-my @LTS = split(/\s+/, $config{'lts-branch'} || "5.6");
+my @LTS = split(/\s+/, $config{'lts-branch'} || "5.6 5.9");
 
 my @allHeads = ();
 my %nonDevHeads = ();
