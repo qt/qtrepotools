@@ -272,7 +272,7 @@ sub do_move($$$)
   open(my $retarget, "gerrit_retarget_changes x $target $number 2>&1 |")
     or die "Cannot run gerrit_retarget_changes: ".$!;
   my @output = <$retarget>;
-  return "Moved" if (close($retarget));
+  return "Moved from $branch" if (close($retarget));
   return ($! ? "Failed to move ($!)\n" : "Move rejected ($?)\n") . join(' ', @output);
 }
 
