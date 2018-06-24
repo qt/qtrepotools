@@ -1,0 +1,29 @@
+#! /bin/sh
+# Copyright (C) 2018 The Qt Company Ltd.
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+# Usage: in every repository you want to have checked:
+#    cd .git/hooks
+#    ln -s /path/to/git_pre_commit_hook pre-commit
+#
+
+CLANG_FORMAT=`which git-clang-format`
+if test -n "$CLANG_FORMAT"
+    echo "Please install clang-format and make sure git-clang-format is in the path."
+    exit 0
+fi
+
+CLANG_FORMAT_DIFF=`git clang-format -q --diff`
+if test -n "$CLANG_FORMAT_DIFF"; then
+    echo "clang-format output:"
+    echo "$CLANG_FORMAT_DIFF"
+    echo "clang-format detected change in format, please run:"
+    echo "  git clang-format"
+    echo "and amend the change."
+    exit 1
+fi
+
