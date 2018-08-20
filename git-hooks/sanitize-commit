@@ -764,10 +764,8 @@ while (<DIFF>) {
             $in_plus = 0;
             next;
         }
-        if ($eof_check && !$is_special && /^\\ No newline/) {
-            if ($in_plus) {
-                complain("No newline at end of file", "fileend") if (!defined($cfg{fileend}));
-            }
+        if ($eof_check && !$is_special && $in_plus && /^\\ No newline/) {
+            complain("No newline at end of file", "fileend");
             next;
         }
         if ($merge ? /^\@\@\@ -\S+ -\S+ \+(\d+)/ : /^\@\@ -\S+ \+(\d+)/) {
@@ -803,7 +801,8 @@ while (<DIFF>) {
                 && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(pbxproj|plist(\.[^.\/]+)?|def|mk|spec|changes|[xn]ib|storyboardc?|go|svg|ui[ap])(?:\.in)?$)/);
             $allow_2spaces = $ws_check && ($file =~ /\.md$/);
             $ctlkw_check = $tabs_check && $clike;
-            $eof_check = !$foreign && ($file !~ /(\.plist(\.[^.\/]+)?|\.xcassets\/.*\.json)$/); # Xcode consistently forgets the trailing newline
+            $eof_check = !defined($cfg{fileend}) && !$foreign
+                && ($file !~ /(\.plist(\.[^.\/]+)?|\.xcassets\/.*\.json)$/); # Xcode consistently forgets the trailing newline
             # .ts files usually contain languages other than English
             $spell_check = !defined($cfg{spell}) && !$foreign && ($file !~ /\.ts$/i);
             $apple_check = !$foreign && ($file !~ /\.ts$/i);
