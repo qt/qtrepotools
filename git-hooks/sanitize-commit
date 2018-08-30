@@ -471,6 +471,9 @@ while (<MSG>) {
             } elsif (/^Task-number: *(.*)/i) {
                 complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
                 complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
+            } elsif (/^Fixes: *(.*)/i) {
+                complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
+                complain_ln("Capitalization of \"Fixes\" is wrong", "") if (!/^Fixes:/);
             }
             my $ftr = 0;
             if (/^\((?:partial(?:ly)? )?(?:cherry[- ]pick|(?:back-?)?port)(?:ed)?(?: from| of)?(?: commit)? (\w+\/)?([[:xdigit:]]{7,40})/) {
@@ -484,7 +487,7 @@ while (<MSG>) {
                 $badsign = 0;
                 # cherry-pick lines count as footers as well.
                 $ftr = 1;
-            } elsif (/^[A-Z][A-Za-z]+(-[A-Za-z][a-z]+)+: /) {
+            } elsif (/^[A-Z][A-Za-z]+(-[A-Za-z][a-z]+)*: /) {
                 $ftr = 1;
             } elsif (/^(\[change-?log\]|change-?log: )/i && !defined($cfg{changelog})) {
                 $inchangelog = 1;
