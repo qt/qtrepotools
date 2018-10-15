@@ -106,7 +106,7 @@ EOM
 }
 
 my $remote = "gerrit";
-my $ref_from = "HEAD";
+my $ref_from;
 my $ref_to;
 
 my @reviewers;
@@ -145,6 +145,8 @@ sub parse_arguments(@)
         } elsif ($arg =~ /^\=(.+)/) {
             push @CCs, split(/,/, lookup_alias($1));
         } elsif ($arg !~ /^\-/) {
+            fail("Specifying multiple sources is currently not supported.\n")
+                if (defined($ref_from));
             if ($arg =~ /(.*):(.*)/) {
                 if (length($1)) {
                     $ref_from = $1;
@@ -166,6 +168,10 @@ sub parse_arguments(@)
 
     fail("--quiet and --verbose/--debug are mutually exclusive.\n")
         if ($quiet && $verbose);
+
+    if (!defined($ref_from)) {
+        $ref_from = "HEAD";
+    }
 }
 
 sub process_config()
