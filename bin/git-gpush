@@ -72,7 +72,8 @@ Description:
     sufficient to specify any commit which is part of the series. Loose
     Changes in the middle of the series will be automatically captured
     by it; to append loose Changes to the series right in front of them,
-    use --extend.
+    use --extend; to capture loose Changes right in front of the series,
+    use --capture.
     It is possible to regroup series any time by specifying new exact
     ranges.
 
@@ -82,6 +83,9 @@ Description:
 Options:
     -e, --extend
         Append new Changes to the series right in front of them.
+
+    -c, --capture
+        Make the series capture loose Changes right in front of it.
 
     -m, --minimal
         Try to avoid creating new PatchSets for unmodified Changes even
@@ -236,6 +240,7 @@ my $commit_count = 0;
 my $addbase;  # default set by process_config()
 my $minimal;  # default set by process_config()
 my $extend = 0;
+my $capture = 0;
 my $ref_base;
 my $ref_base_ok = 1;
 my $ref_to;
@@ -266,6 +271,8 @@ sub parse_arguments(@)
             $dry_run = 1;
         } elsif ($arg eq "-e" || $arg eq "--extend") {
             $extend = 1;
+        } elsif ($arg eq "-c" || $arg eq "--capture") {
+            $capture = 1;
         } elsif ($arg eq "-m" || $arg eq "--minimal") {
             $minimal = 1;
             $minimal_override = 1;
@@ -352,7 +359,7 @@ sub parse_arguments(@)
     }
 
     my $series_specific =
-            $commit_count || $from_base || $extend
+            $commit_count || $from_base || $extend || $capture
             || defined($ref_to) || defined($topic);
     my $push_specific =
             @reviewers || @CCs || $force || $force_branch
@@ -694,7 +701,7 @@ sub determine_series($)
     my ($pivot_id) = @_;
 
     my $pivot = $commit_by_id{$pivot_id}{change};
-    my ($changes, $gid, $echange) = do_determine_series($pivot, $extend);
+    my ($changes, $gid, $echange, $prospects) = do_determine_series($pivot, $extend, $capture);
     if (!$gid && @$changes && !$list_only) {
         my @reports;
         report_fixed(\@reports, "Attempted to push ".int(@$changes)." loose Change(s):\n");
@@ -703,6 +710,15 @@ sub determine_series($)
         report_local_changes(\@reports, $changes);
         report_fixed(\@reports, "Please ".($echange ? "use --extend or " : "")
                                 ."specify exact ranges.\n");
+        fail_formatted(\@reports);
+    }
+    if (@$prospects && !$list_only) {
+        my @reports;
+        report_fixed(\@reports, "Encountered ".int(@$prospects)." leading loose Change(s):\n");
+        report_local_changes(\@reports, $prospects);
+        report_fixed(\@reports, "While attempting to push ".int(@$changes)." Change(s):\n");
+        report_local_changes(\@reports, $changes);
+        report_fixed(\@reports, "Please use --capture or specify exact ranges.\n");
         fail_formatted(\@reports);
     }
     # The group key is preserved even when the series gains new Changes.

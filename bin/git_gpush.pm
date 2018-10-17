@@ -1393,9 +1393,9 @@ sub assign_series($)
 
 # Deduce a series from a single commit.
 # Merges are treated in --first-parent mode.
-sub do_determine_series($;$)
+sub do_determine_series($;$$)
 {
-    my ($change, $extend) = @_;
+    my ($change, $extend, $capture) = @_;
 
     print "Deducing series from $$change{id}\n" if ($debug);
     my (@prospects, @changes);
@@ -1404,8 +1404,13 @@ sub do_determine_series($;$)
     while (1) {
         my $gid = $$change{grp};
         if (!defined($gid)) {
-            print "Prospectively capturing loose $$change{id}\n" if ($debug);
-            unshift @prospects, $change;
+            if ($capture && @changes) {
+                print "Capturing loose $$change{id}\n" if ($debug);
+                unshift @changes, $change;
+            } else {
+                print "Prospectively capturing loose $$change{id}\n" if ($debug);
+                unshift @prospects, $change;
+            }
         } else {
             if (@changes) {
                 # We already have a proto-series.
@@ -1442,7 +1447,7 @@ sub do_determine_series($;$)
     # But we don't reverse-traverse if the specified Change is loose (and we're
     # not extending), based on the assumption that it was meant to be the tip
     # - otherwise, the semantics get really unintuitive.
-    return (\@prospects, undef, $change) if (!defined($group_key));
+    return (\@prospects, undef, $change, []) if (!defined($group_key));
     my @rprospects;
     while (1) {
         $rchange = $$rchange{child};
@@ -1464,7 +1469,7 @@ sub do_determine_series($;$)
             @rprospects = ();
         }
     }
-    return (\@changes, $group_key, undef);
+    return (\@changes, $group_key, undef, \@prospects);
 }
 
 ###################

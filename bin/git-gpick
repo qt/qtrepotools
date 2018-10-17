@@ -730,7 +730,7 @@ sub resolve_specs($)
         } else {
             my $gid;
             my $pivot = $commit_by_id{$tip}{change};
-            ($range, $gid, undef) = do_determine_series($pivot);
+            ($range, $gid, undef, undef) = do_determine_series($pivot);
             wfail("Spec $$spec{orig} points at loose Change(s)."
                     ." Please specify an exact range.\n")
                 if (!defined($gid));
