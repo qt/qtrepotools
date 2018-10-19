@@ -1119,6 +1119,7 @@ sub parse_local_rev($$)
 {
     my ($rev, $scope) = @_;
 
+    $rev = "HEAD".$rev if ($rev =~ /^[~^]/);
     my ($sout, $done) = _parse_local_rev_sym($rev, $scope);
     return $sout if ($done);
     my $out = read_cmd_line(SOFT_FAIL, 'git', 'rev-parse', '--verify', '-q', $rev);

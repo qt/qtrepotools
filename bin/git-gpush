@@ -48,7 +48,8 @@ Description:
     branch's upstream remote.
 
     'From' may be specified as either a ref, a SHA1, or a Gerrit Change-Id,
-    possibly abbreviated. Git rev-spec suffixes like '~2' are allowed.
+    possibly abbreviated. Git rev-spec suffixes like '~2' are allowed; if
+    only a suffix is specified, it is understood to be relative to 'HEAD'.
     If 'from' is not specified, 'HEAD' is used.
 
     Note that this program can be used in the middle of an interactive
@@ -452,6 +453,7 @@ sub initialize_get_changes()
     } else {
         # We did not need to visit the current branch to find the tip,
         # so determine the branch from the tip now.
+        $from = "HEAD".$from if ($from =~ /^[~^]/);
         determine_local_branch($from);
         # Get the pool of Changes to push from.
         analyze_local_branch($from) or
