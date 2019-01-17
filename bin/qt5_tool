@@ -334,30 +334,31 @@ sub runGitAllModules
     return $runRC;
 }
 
-# ---- Read a value from a configuration file of the form key=value.
+# ---- Read a value from a configuration file of the form key=value
+#      and return an anonymous hash.
 
 sub readConfigFile
 {
-    my ($fileName, $key) = @_;
-
-    my $configLine = '';
-    my $configFile = new IO::File('<' . $fileName) or return $configLine;
-    while (my $line = <$configFile>) {
+    my ($fileName) = @_;
+    my $f = new IO::File('<' . $fileName) or die ('Cannot open ' . $fileName . ': ' . $1);
+    my $result = {};
+    while (my $line = <$f>) {
         chomp($line);
-        if ($line =~ /^\s*$key\s*=\s*(.*)$/) {
-           $configLine .= $1;
-           while (index($configLine, '\\') == length($configLine) - 1) { # continuation lines "a=b\", "continued..."
-               chop($configLine);
-               my $line = <$configFile>;
-               die('Trailing continuation line "' . $configLine . '"') unless defined $line;
+        if ($line =~ /^\s*([A-Za-z0-9_\-\.]+)\s*=\s*(.*)$/) {
+           my $key = $1;
+           my $value = $2;
+           while (rindex($value, '\\') == length($value) - 1) { # continuation lines "a=b\", "continued..."
+               chop($value);
+               my $line = <$f>;
+               die('Trailing continuation line "' . $value . '"') unless defined $line;
                chomp($line);
-               $configLine .= $line;
+               $value .= $line;
            }
-           last;
+           $$result{$key} = $value;
         }
     }
-    $configFile->close();
-    return $configLine;
+    $f->close();
+    return $result;
 }
 
 # ---- Read a value from a git config line.
@@ -365,7 +366,10 @@ sub readConfigFile
 sub readGitConfig
 {
     my ($module, $key) = @_;
-    return readConfigFile(File::Spec->catfile($rootDir, $module, '.git', 'config'), $key);
+    my $gitConfigFile = File::Spec->catfile($rootDir, $module, '.git', 'config');
+    my $hashRef = readConfigFile($gitConfigFile);
+    my $value = $$hashRef{$key};
+    return defined($value) ? $value : '';
 }
 
 # ---- MinGW: Remove git from path (prevent sh.exe from throwing off mingw32-make).
@@ -427,13 +431,16 @@ sub ls
 #      check for the repo-specific value 'key-qt5' and then for the general
 #      'key'.
 
+my $configHashRef;
+
 sub readQt5ToolConfig
 {
     my ($key) = @_;
+    $configHashRef = readConfigFile($configFile) unless defined($configHashRef);
     my $repoKey = $key . '-' . $baseDir;
-    my $repoValue = readConfigFile($configFile, $repoKey);
-    return $repoValue if $repoValue ne '';
-    return readConfigFile($configFile, $key);
+    my $value = $$configHashRef{$key . '-' . $baseDir};
+    $value = $$configHashRef{$key} unless defined($value);
+    return defined($value) ? $value : '';
 }
 
 sub readQt5ToolConfigBool
