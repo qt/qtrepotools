@@ -74,13 +74,24 @@ QString signature(const QString &line, int pos)
     return QString();
 }
 
+bool isValidIdentifierChar(const QChar c)
+{
+    return c == QLatin1Char('_') || c.isLetterOrNumber();
+}
+
 bool checkSignature(const QString &fileName, QString &line, const char *sig)
 {
     static QStringList fileList;
 
+    const int siglen = strlen(sig);
     int idx = -1;
     bool found = false;
     while ((idx = line.indexOf(sig, ++idx)) != -1) {
+        if (idx > 0 && isValidIdentifierChar(line.at(idx - 1)))
+            continue;
+        int endIdx = idx + siglen;
+        if (endIdx < line.length() && isValidIdentifierChar(line.at(endIdx)))
+            continue;
         const QByteArray sl(signature(line, idx).toLocal8Bit());
         QByteArray nsl(QMetaObject::normalizedSignature(sl.constData()));
         if (sl != nsl) {
