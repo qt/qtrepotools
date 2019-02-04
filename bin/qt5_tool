@@ -99,6 +99,12 @@ specifies that for a checkout in '/home/user/qt-5', shadow builds are to be
 done in '/home/user/qt-5-build'. It is overridden by a value for the checkout
 '/home/user/qt-5special', which would result in '/home/user/qt-5-special-build'
 Continuation lines are indicated by a trailing backslash (\\).
+
+Arbitrary keys can be defined and referenced by \$(name):
+
+skipDefault=qtcanvas3d qtcharts...
+skip=\$(skipDefault)
+skip-qt-minimalbuild=\$(skipDefault) qtdatavis3d...
 EOF
 
 # --------------- Detect OS
@@ -334,6 +340,22 @@ sub runGitAllModules
     return $runRC;
 }
 
+# ---- Expand references to other keys in config files "$(name)" by value.
+
+sub expandReferences
+{
+    my ($hashRef, $line) = @_;
+    while ($line =~ /\$\([^)]+\)/) {
+       my $matchStart = $-[0];
+       my $matchEnd = $+[0];
+       my $varName = substr($line, $matchStart + 2, $matchEnd - $matchStart - 3);
+       my $value = $$hashRef{$varName};
+       die ('Undefined variable ' . $varName . ' while expanding: ' . $line) unless defined($value);
+       substr($line, $matchStart, $matchEnd - $matchStart, $value);
+    }
+    return $line;
+}
+
 # ---- Read a value from a configuration file of the form key=value
 #      and return an anonymous hash.
 
@@ -354,7 +376,7 @@ sub readConfigFile
                chomp($line);
                $value .= $line;
            }
-           $$result{$key} = $value;
+           $$result{$key} = expandReferences($result, $value);
         }
     }
     $f->close();
