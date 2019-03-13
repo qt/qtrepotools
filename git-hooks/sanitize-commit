@@ -289,7 +289,7 @@ sub check_apple_terminology()
         }
     }
 
-    if (/\bMacOS\b/ or /\bOS[\s]*X\b/ or /\bmac(([\s_-]*os)([\s_-]*x))?\b/i or /\bmacintosh\b/i) {
+    if (/\bMacOS\b/ or /\bOS[\s]*X\b/ or /\bmacintosh\b/i) {
         complain_ln("Possible incorrect use of Apple-related terminology; " .
                     "the correct name of Apple's desktop operating system is 'macOS'", "", -1);
     }
