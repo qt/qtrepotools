@@ -90,6 +90,8 @@ branch:             'dev', 'stable', 'release' or other
 configureArguments: Arguments to configure
 skip:               List of Qt modules to exclude from building
 shadowBuildPostfix: Postfix to use for shadow build directory.
+incredibuild:       Use Incredibuild (true/false)
+jobs:               Number of jobs to be run simultaneously
 
 Example:
 shadowBuildPostfix=-build
@@ -156,6 +158,8 @@ my $minGW = 0;
 
 sub checkMake
 {
+    my $useIncredibuild = readQt5ToolConfigBool('incredibuild') || defined($optIncredibuild);
+    my $jobs = readQt5ToolConfigInt('jobs', -1);
     if ($os == $OS_WINDOWS) {
         if (which('g++')) {
             $make = 'mingw32-make';
@@ -163,10 +167,11 @@ sub checkMake
             @makeArgs = ('/s', '/l');
             $makeForceArg = '/k';
             my $jom;
-            $jom = which('ibjom') if defined($optIncredibuild);
+            $jom = which('ibjom') if $useIncredibuild;
             $jom = which('jom') unless defined($jom);
             if (defined $jom) {
                 $make = $jom;
+                unshift(@makeArgs, '/J', $jobs) if $jobs > 0;
             } else {
                 $make = 'nmake';
                 # Switch cl compiler to multicore
@@ -178,11 +183,14 @@ sub checkMake
                 }
             } # jom
         } # !MinGW
-    } elsif (defined($optIncredibuild)) {
-        my $ib_console = '/opt/incredibuild/bin/ib_console';
-        if (-x $ib_console && system($ib_console, 'echo', 'Testing') == 0) {
-            unshift(@makeArgs, $make, '-j', '40');
-            $make = $ib_console;
+    } else {
+        unshift(@makeArgs, '-j', $jobs) if $jobs > 0;
+        if ($useIncredibuild) {
+            my $ib_console = '/opt/incredibuild/bin/ib_console';
+            if (-x $ib_console) {
+                unshift(@makeArgs, $make);
+                $make = $ib_console;
+            }
         }
    }
 } # sub checkMake
@@ -470,6 +478,13 @@ sub readQt5ToolConfigBool
    my ($key) = @_;
    my $value = readQt5ToolConfig($key);
    return (length($value) > 0 && ($value eq '1' || $value =~ /true/i)) ? 1 : 0;
+}
+
+sub readQt5ToolConfigInt
+{
+   my ($key, $default) = @_;
+   my $value = readQt5ToolConfig($key);
+   return length($value) > 0 ? int($value) : $default;
 }
 
 sub shadowBuildFolder
