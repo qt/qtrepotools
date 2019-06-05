@@ -519,16 +519,15 @@ sub push_patches()
 
     print "Pushing $ref_from for $ref_to on $remote ...\n" if (!$quiet);
 
-    my @git_recv_args;
-    push @git_recv_args, map { "--reviewer=$_" } @reviewers;
-    push @git_recv_args, map { "--cc=$_" } @CCs;
+    my @push_options;
+    push @push_options, map { "r=$_" } @reviewers;
+    push @push_options, map { "cc=$_" } @CCs;
 
     my @gitcmd = ("git", "push");
     push @gitcmd, '-v' if ($verbose);
     push @gitcmd, '-q' if ($quiet);
     push @gitcmd, '-n' if ($dry_run);
-    push @gitcmd, join(' ', "--receive-pack=git receive-pack", @git_recv_args)
-        if (@git_recv_args);
+    push @gitcmd, map { ("-o", "$_") } @push_options;
     push @gitcmd, $remote, "$ref_from:refs/".($draft > 0 ? 'drafts' : 'for')."/$ref_to";
 
     run_process(FWD_OUTPUT, @gitcmd);
