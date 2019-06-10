@@ -226,7 +226,7 @@ sub process_commit($$$$$)
       $$verdict{notify} = "NONE";
   }
   if (@invite) {
-    if (system(@gerrit_actor, "set-reviewers", (map { ('-a', $_) } @invite), '--', $rev)) {
+    if (system(@gerrit_actor, "set-reviewers", (map { ('-a', $_) } @invite), '-p', $project, '--', $rev)) {
       print "===== ".strftime("%c", localtime(time()))." ===== invitation FAILED\n";
       printerr("Inviting reviewers to ".$rev." (".$project."/".$ref.") failed");
     } else {
