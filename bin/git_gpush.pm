@@ -474,6 +474,30 @@ sub changes_from_commits($)
     return [ map { $$_{change} } @$commits ];
 }
 
+sub get_1st_parent($)
+{
+    my ($commit) = @_;
+
+    my $parents = $$commit{parents};
+    return @$parents ? $$parents[0] : 'ROOT';
+}
+
+# Enumerate commits from the specified tip down to the merge base
+# with upstream. Merges are handled in --first-parent mode.
+sub get_commits_free($)
+{
+    my ($tip) = @_;
+
+    my @commits;
+    while (1) {
+        my $commit = $commit_by_id{$tip};
+        last if (!$commit);
+        unshift @commits, $commit;
+        $tip = get_1st_parent($commit);
+    }
+    return \@commits;
+}
+
 ########################
 # gerrit query results #
 ########################
@@ -944,11 +968,12 @@ sub analyze_local_branch($)
 
     # Get the revs ...
     print "Enumerating local Changes ...\n" if ($debug);
-    my $commits = visit_local_commits([ $tip ]);
+    my $raw_commits = visit_local_commits([ $tip ]);
+    return [] if (!@$raw_commits);
 
     # ... then sanity-check a bit ...
     my %seen;
-    foreach my $commit (@$commits) {
+    foreach my $commit (@$raw_commits) {
         my $subject = $$commit{subject};
         fail("Commit on ".($local_branch // "<detached HEAD>")." was meant to be squashed:\n  "
                 .format_subject($$commit{id}, $subject, -2)."\n")
@@ -961,6 +986,10 @@ sub analyze_local_branch($)
             if (defined($excommit));
         $seen{$changeid} = $commit;
     }
+
+    my $local_tip = $$raw_commits[-1]{id};
+
+    my $commits = get_commits_free($local_tip);
 
     # ... and then add them to the set of local Changes.
     foreach my $commit (@$commits) {
