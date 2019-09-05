@@ -667,7 +667,9 @@ my $tsv_check;
 my $eof_check;
 my $ctlkw_check;
 my $apple_check;
-open DIFF, "git diff-tree --patience --no-commit-id --diff-filter=ACMR --ignore-submodules --src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -C -l1000 --root ".$sha1." |" or die "cannot run git: $!";
+open DIFF, "git diff-tree --minimal --no-commit-id --diff-filter=ACMR --ignore-submodules " .
+    "--src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -C -l1000 " .
+    "--root ".$sha1." |" or die "cannot run git: $!";
 while (<DIFF>) {
     if (/^-/) {
         if ($mixws_check) {
