@@ -1343,6 +1343,29 @@ sub apply_diff($$$)
     return ($curr_tree, undef);
 }
 
+# Create a commit object from the specified metadata.
+sub create_commit($$$$$)
+{
+    my ($parents, $tree, $commit_msg, $author, $committer) = @_;
+
+    ($ENV{GIT_AUTHOR_NAME}, $ENV{GIT_AUTHOR_EMAIL}, $ENV{GIT_AUTHOR_DATE}) = @$author;
+    ($ENV{GIT_COMMITTER_NAME}, $ENV{GIT_COMMITTER_EMAIL}, $ENV{GIT_COMMITTER_DATE}) = @$committer;
+    my @pargs = map { ('-p', $_) } @$parents;
+    my $proc = open_process(USE_STDIN | SILENT_STDIN | USE_STDOUT | FWD_STDERR,
+                            'git', 'commit-tree', $tree, @pargs);
+    write_process($proc, $commit_msg);
+    my $sha1 = read_process($proc);
+    close_process($proc);
+
+    my $commit = {
+        id => $sha1,
+        parents => $parents,
+        tree => $tree
+    };
+    init_commit($commit);
+    return $commit;
+}
+
 ###################
 # branch tracking #
 ###################
