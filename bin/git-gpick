@@ -91,6 +91,16 @@ Options:
         warning. For Changes that were locally modified since the previous
         push, this option can be considered complementary to --force.
 
+    --author, --auth
+    --message, --msg
+    --diff
+        Pick only the named part(s) of the specified commits. This is
+        applicable only to Changes which are already present locally.
+        Note that remote modifications to the omitted parts are forgotten
+        about, as if the --ignore option was supplied.
+        Note also that use of --author and/or --message without --diff
+        disables all actions that modify the structure of a series.
+
     -r, --remote
         Specify the remote used to determine the Gerrit server to fetch
         PatchSets from. The fallback behavior matches git-gpush.
@@ -129,7 +139,8 @@ Console Output:
     PS<n>, while <conflicts> indicate divergent concurrent modifications;
     convergent concurrent modifications are completely omitted for brevity.
     When <n> is unknown, it is shown as 'x' and all differences are shown
-    as conflicts.
+    as conflicts. Modifications of commit parts which are excluded on the
+    command line are shown in parentheses.
 
 Examples:
     git gpick ~1
@@ -167,6 +178,7 @@ use constant {
     ALL_PARTS => 15
 };
 
+my $pick_parts;
 my $branch;
 my $upstream_branch;
 my $merge = 0;
@@ -200,6 +212,12 @@ sub parse_arguments(@)
             $force = 1;
         } elsif ($arg eq "-i" || $arg eq "--ignore") {
             $ignore = 1;
+        } elsif ($arg eq "--author" || $arg eq "--auth") {
+            $pick_parts |= AUTHOR_PART;
+        } elsif ($arg eq "--message" || $arg eq "--msg") {
+            $pick_parts |= MESSAGE_PART;
+        } elsif ($arg eq "--diff") {
+            $pick_parts |= DIFF_PART;
         } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
             usage();
             exit 0;
@@ -215,6 +233,8 @@ sub parse_arguments(@)
 
     fail("--merge/--force and --ignore are mutually exclusive.\n")
         if (($merge || $force) && $ignore);
+
+    $pick_parts = ALL_PARTS if (!$pick_parts);
 }
 
 sub determine_local_branch()
@@ -390,10 +410,14 @@ sub parse_specs($)
             $spec{orig} = $cs;
             my $action;
             if ($cs =~ s,^\+,,) {
+                fail("Cannot specify an addition when omitting diffs.\n")
+                    if (!($pick_parts & DIFF_PART));
                 fail("Missing specification of remote Change.\n") if (!length($cs));
                 $action = INSERT;
             } else {
                 if ($cs =~ s,^/,,) {
+                    fail("Cannot specify a removal when omitting diffs.\n")
+                        if (!($pick_parts & DIFF_PART));
                     wfail("Cannot specify a removal (/$cs) with a parent.\n")
                         if (defined($parent));
                     $action = DELETE;
@@ -1028,9 +1052,9 @@ sub apply_specs($$)
     return \@pairs;
 }
 
-sub format_parts($)
+sub format_parts($;$)
 {
-    my ($parts) = @_;
+    my ($parts, $masked) = @_;
 
     return "-" if (!$parts);
     my @out;
@@ -1038,6 +1062,7 @@ sub format_parts($)
         my $b = 1 << $i;
         next if (!($parts & $b));
         my $p = ('auth', 'msg', 'diff', 'merge')[$i];
+        $p = '('.$p.')' if (($masked // 0) & $b);
         push @out, $p;
     }
     return join(",", @out);
@@ -1201,6 +1226,7 @@ sub verify_update($$$$$$$$)
         $pfx = "Keep      " if (!$quiet);
         return (UPD_PUSHED | UPD_META | UPD_INFO, NO_PARTS, $pfx, $annot);
     }
+    my $eff_parts = $parts & $pick_parts;
     if ($pushed_commit) {
         # Do a primitive 3-way diff with the previously pushed commit.
         # Note that we mask away modifications which are identical on
@@ -1224,15 +1250,26 @@ sub verify_update($$$$$$$$)
             # INFO, as the source is "applied" even if the update is ignored.
             return (UPD_PUSHED | UPD_INFO, NO_PARTS, $pfx, $annot);
         }
+        my $eff_rmt_parts = $rmt_parts & $pick_parts;
         my $lcl_parts = verify_local_commit($lcl_commit, $pushed_commit, $pushed_ps, $parts);
-        my $fl = $lcl_parts & ~$rmt_parts;
-        my $fc = $lcl_parts & $rmt_parts;
-        my $fr = ~$lcl_parts & $rmt_parts;
+        my $fl = $lcl_parts & ~$eff_rmt_parts;
+        my $fc = $lcl_parts & $eff_rmt_parts;
+        my $fr = ~($lcl_parts & $pick_parts) & $rmt_parts;
         $annot =
              ($fl ? format_parts($fl)." " : "")
             ."PS".$pushed_ps
             .($fc ? ":".uc(format_parts($fc)) : "")
-            .($fr ? " ".format_parts($fr) : "");
+            .($fr ? " ".format_parts($fr, ~$pick_parts) : "");
+        if (!$eff_rmt_parts) {
+            # The remote modifications are masked out.
+            $pfx = "Keep      " if (!$quiet);
+            # Forget about the modifications, as per documentation. The
+            # alternative of requiring an explicit --ignore (possibly in
+            # a separate run) is conceivable, but does not appear to add
+            # value - what else would one want to do after a partial pick?
+            my $upd = ($pick_parts & DIFF_PART) ? UPD_META : 0;
+            return (UPD_PUSHED | UPD_INFO | $upd, NO_PARTS, $pfx, $annot);
+        }
         if ($lcl_parts) {
             # The current local commit differs from the previously pushed one,
             # and we already know that the current remote commit also differs.
@@ -1242,7 +1279,7 @@ sub verify_update($$$$$$$$)
                 # We do not merge without being asked to, as the modifications
                 # might still conflict logically.
                 $pfx = "Merge     " if (!$quiet);
-                return (UPD_PUSHED | UPD_META | UPD_INFO, $rmt_parts, $pfx, $annot);
+                return (UPD_PUSHED | UPD_META | UPD_INFO, $eff_rmt_parts, $pfx, $annot);
             }
             if (!$force) {
                 my $pfx;
@@ -1263,7 +1300,7 @@ sub verify_update($$$$$$$$)
             if ($fl && $merge) {
                 # Retain the non-conflicting local modifications.
                 $pfx = "MERGE     " if (!$quiet);
-                return (UPD_PUSHED | UPD_META | UPD_INFO, $rmt_parts, $pfx, $annot);
+                return (UPD_PUSHED | UPD_META | UPD_INFO, $eff_rmt_parts, $pfx, $annot);
             }
             $forcing = 1;
         } elsif ($pushed_ps eq "?") {
@@ -1278,13 +1315,24 @@ sub verify_update($$$$$$$$)
                 if (!$quiet);
             return (UPD_PUSHED | UPD_INFO, NO_PARTS, $pfx, $annot);
         }
-        $annot = "PSx:".format_parts($parts);
+        $annot = "PSx:".format_parts($parts, ~$pick_parts);
+        if (!$eff_parts) {
+            # The differing parts are masked out.
+            $pfx = "Keep      " if (!$quiet);
+            my $upd = ($pick_parts & DIFF_PART) ? UPD_META : 0;
+            return (UPD_PUSHED | UPD_INFO | $upd, NO_PARTS, $pfx, $annot);
+        }
         $forcing = 1;
     }
     if ($forcing && !$force) {
         $$need_force_repl = 1;
         $pfx = "(REPLACE) ";
         return (UPD_INFO, NO_PARTS, $pfx, $annot);
+    }
+    if ($parts & ~$pick_parts) {
+        # The commits differ also in parts which are not being picked.
+        $pfx = $forcing ? "P. REPL.  " : "P. Repl.  " if (!$quiet);
+        return (UPD_PUSHED | UPD_META | UPD_INFO, $eff_parts, $pfx, $annot);
     }
     $pfx = $forcing ? "REPLACE   " : "Replace   " if (!$quiet);
     return (UPD_PUSHED | UPD_META | UPD_INFO, ALL_PARTS, $pfx, $annot);
