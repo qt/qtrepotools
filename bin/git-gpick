@@ -200,18 +200,54 @@ sub get_changes()
     return [];
 }
 
-# Report the chosen source for a Change.
-sub report_source($$$$$)
+sub is_closed_status($)
 {
-    my ($reports, $prefix, $annot, $id, $subject) = @_;
+    my ($sts) = @_;
 
+    return ($sts eq "MERGED" || $sts eq "DEFERRED" || $sts eq "ABANDONED");
+}
+
+# Report alternative sources for a Change.
+sub report_extra($$$)
+{
+    my ($reports, $title, $extra) = @_;
+
+    return if (!@$extra);
+    my @osrc;
+    foreach my $oth (@$extra) {
+        my $oann = $$oth{branch};
+        my $osts = $$oth{status};
+        $oann .= '/'.$osts if (is_closed_status($osts));
+        push @osrc, $oann;
+    }
+    report_flowed($reports, "  $title sources: ".join(' ', @osrc));
+}
+
+# Report the chosen source for a Change, plus possible alternatives.
+sub report_source($$$$$$)
+{
+    my ($reports, $prefix, $annot, $ginfo, $id, $subject) = @_;
+
+    my @extra;
+    my $suffix = "";
+    if ($ginfo) {
+        my ($br, $sts, $better, $other) =
+            ($$ginfo{branch}, $$ginfo{status}, $$ginfo{better} // [], $$ginfo{other} // []);
+        my @tags;
+        push @tags, $br if (@$better || @$other || ($br ne ($upstream_branch // "")));
+        push @tags, $sts if (is_closed_status($sts));
+        $suffix = '  # '.join('/', @tags) if (@tags);
+        report_extra(\@extra, "Possibly better", $better);
+        report_extra(\@extra, "Other", $other);
+    }
     push @$reports, {
         type => "change",
         id => $id,
         subject => $subject,
         prefix => $prefix,
+        suffix => $suffix,
         annotation => length($annot) ? "  [$annot]" : ""
-    };
+    }, @extra;
 }
 
 # Report source using the remote Change's metadata for identification.
@@ -219,17 +255,27 @@ sub report_remote($$$$)
 {
     my ($reports, $prefix, $annot, $ginfo) = @_;
 
-    report_source($reports, $prefix, $annot,
+    report_source($reports, $prefix, $annot, $ginfo,
                   $$ginfo{id}, $$ginfo{subject});
 }
 
 # Report source using the local commit's metadata for identification.
+# Alternatives are still provided by the remote Change.
+sub report_update($$$$$)
+{
+    my ($reports, $prefix, $annot, $commit, $ginfo) = @_;
+
+    report_source($reports, $prefix, $annot, $ginfo,
+                  $$commit{changeid}, $$commit{subject});
+}
+
+# Report source using the local commit's metadata for identification.
+# No alternatives are listed.
 sub report_local($$$$)
 {
     my ($reports, $prefix, $annot, $commit) = @_;
 
-    report_source($reports, $prefix, $annot,
-                  $$commit{changeid}, $$commit{subject});
+    report_update($reports, $prefix, $annot, $commit, undef);
 }
 
 use constant {
@@ -337,6 +383,216 @@ sub select_patchset($)
     return $revidx;
 }
 
+use constant {
+    MAP_SUCCESS => 0,
+    MAP_MISSING => 1,
+    MAP_AMBIGUOUS => 2
+};
+
+# Choose the correct Gerrit Change object from a set of options,
+# trying to resolve ambiguity.
+sub map_remote_change($$$$)
+{
+    my ($changeid, $br, $ginfos, $fetches) = @_;
+
+    # If a specific branch is requested (or implied by the
+    # Change's already set target branch), insist on that.
+    # As we track remote branch changes, this effectively
+    # pins a local Change to the correct remote one even
+    # though we do not insist on matching SHA1s here. As a
+    # consequence, we let it slip when the original remote
+    # Change gets nuked, but a new one with the same id pops
+    # up in its place - which seems desirable.
+    my ($pref_br, $br_reqd) = ($branch // $br, 1);
+    # Otherwise, the possibly present upstream is a preference.
+    ($pref_br, $br_reqd) = ($upstream_branch // "", 0)
+        if (!defined($pref_br));
+    my $match;
+    my @other;
+    foreach my $gi (@$ginfos) {
+        my ($br, $sts) = ($$gi{branch}, $$gi{status});
+        if ($br eq $pref_br) {
+            $match = $gi;
+        } else {
+            push @other, $gi;
+        }
+        $$gi{closedness} = ($sts eq "ABANDONED") ? 2 :
+                           ($sts eq "DEFERRED" || $sts eq "MERGED") ? 1 : 0;
+    }
+    @other = sort { $$a{closedness} <=> $$b{closedness}
+                    || $$a{branch} cmp $$b{branch}} @other;
+    my $fallback;
+    if (!$match) {
+        # This implies that Changes on other branches were found,
+        # as otherwise we wouldn't call the function to start with.
+        if ($br_reqd) {
+            # The request cannot be complied with.
+            return (MAP_MISSING, { id => $changeid, other => \@other, missing => $pref_br });
+        }
+        $match = shift @other;
+        $fallback = 1;
+    }
+    my (@better, @equal, @worse);
+    my $closedness = $$match{closedness};
+    foreach my $gi (@other) {
+        my $cmp = $$gi{closedness} <=> $closedness;
+        if ($cmp < 0) {
+            push @better, $gi;
+        } elsif ($cmp > 0) {
+            push @worse, $gi;
+        } else {
+            push @equal, $gi;
+        }
+    }
+    if ($br_reqd) {
+        # The request was complied with.
+        # Still, inform the user about better alternatives if the
+        # branch comes from the Change, in case something happened
+        # on the server since the source was initially determined.
+        # If the branch was given explicitly, we presume the user
+        # already knows the alternatives (they most probably reacted
+        # to a previous error).
+        $$match{better} = \@better if (!defined($branch));
+    } else {
+        if (!$fallback) {
+            # We have a match for the upstream branch, so prefer it.
+            if (@better) {
+                # Changes which are on the "wrong" branch but are more
+                # open are equally good candidates, so report ambiguity.
+                return (MAP_AMBIGUOUS, { id => $changeid, other => [ $match, @other ] });
+            }
+        } else {
+            # No upstream or no matching Change found.
+            # @better is empty, as the fallback is the best option.
+            if (@equal) {
+                # Equally open Changes are equally good candidates,
+                # so report ambiguity.
+                return (MAP_AMBIGUOUS, { id => $changeid, other => [ $match, @other ] });
+            }
+        }
+        # Use the upstream branch; inform about all alternatives.
+        $$match{other} = \@other;
+    }
+
+    $$match{cross_branch} =
+            !defined($br) && defined($upstream_branch) && ($$match{branch} ne $upstream_branch);
+    $$match{pick_idx} = select_patchset($match);
+    push @$fetches, $match;
+    return (MAP_SUCCESS, { match => $match });
+}
+
+# Print error message about failure to resolve a source specification,
+# including all available context.
+sub print_failure($@)
+{
+    my ($spec, @results) = @_;
+
+    my @reports;
+    report_flowed(\@reports, "Resolving $$spec{orig} against '$remote' failed:");
+    my $any_ambiguous;
+    foreach my $result (@results) {
+        my $ginfo = $$result{match};
+        if ($ginfo) {
+            report_remote(\@reports, "  Using ", "", $ginfo);
+            next;
+        }
+
+        my $other = $$result{other};
+        if (!$other) {
+            # This can happen only for local Changes, as otherwise we would
+            # have already errored out.
+            report_local(\@reports, "  Missing ", "", $$result{local});
+            next;
+        }
+
+        my $miss = $$result{missing};
+        if (defined($miss)) {
+            report_flowed(\@reports,
+                          "  Change $$result{id} is not on '$miss'. Possible sources:");
+        } else {
+            report_flowed(\@reports,
+                          "  Changes $$result{id} have unclear precedence:");
+            $any_ambiguous = 1;
+        }
+        foreach my $oth (@$other) {
+            my $oann = $$oth{branch};
+            my $osts = $$oth{status};
+            $oann .= '/'.$osts if (is_closed_status($osts));
+            push @reports, {
+                type => "change",
+                subject => $$oth{subject},
+                prefix => "    ",
+                suffix => "  # $oann"
+            };
+        }
+    }
+    report_flowed(\@reports, "  Please use --branch to specify the source.")
+        if ($any_ambiguous);
+    print STDERR format_reports(\@reports);
+}
+
+sub map_insertion_spec($$$)
+{
+    my ($spec, $fetches, $fails) = @_;
+
+    # We could support partial Change-Ids here, but that seems
+    # pointless: Ids will be almost inevitably copy-and-pasted
+    # directly from Gerrit, and thus complete. Similarly,
+    # rev-spec suffixes like ~2 are not supported, as we expect
+    # the user to do any necessary traversal on Gerrit anyway.
+    my $tip = $$spec{tip};
+    my $gis = $gerrit_infos_by_id{$tip};
+    if (!$gis) {
+        werr("Change $tip was not found on '$remote'.\n");
+        $$fails = 1;
+        return;
+    }
+    my ($ret, $rslt) = map_remote_change($tip, undef, $gis, $fetches);
+    if ($ret != MAP_SUCCESS) {
+        print_failure($spec, $rslt);
+        $$fails = 1;
+        return;
+    }
+    my $change = change_for_id($tip, CREATE);
+    $$change{gerrit} = $$rslt{match};
+    $$spec{new_range} = [ $change ];
+}
+
+sub map_update_spec($$$)
+{
+    my ($spec, $fetches, $fails) = @_;
+
+    my @results;
+    my ($found, $ambiguous) = (0, 0);
+    foreach my $change (@{$$spec{range}}) {
+        my $gis = $gerrit_infos_by_id{$$change{id}};
+        if (!$gis) {
+            print "No results for $$change{id}.\n" if ($debug);
+            push @results, { local => $$change{local} };
+        } else {
+            my ($ret, $rslt) = map_remote_change(
+                    $$change{id}, $$change{tgt}, $gis, $fetches);
+            if ($ret != MAP_MISSING) {
+                $found++;
+                if ($ret == MAP_AMBIGUOUS) {
+                    # This can happen only for Changes which were not
+                    # previously mapped to remote ones.
+                    $ambiguous++;
+                } else {
+                    $$change{gerrit} = $$rslt{match};
+                }
+            }
+            push @results, $rslt;
+        }
+    }
+    # We permit some Changes being missing, as otherwise refreshing
+    # a series which has new local Changes would be rather annoying.
+    if (!$found || $ambiguous) {
+        print_failure($spec, @results);
+        $$fails = 1;
+    }
+}
+
 # Fetch the latest PatchSets for the specified Changes.
 # We don't re-fetch PatchSets which we already have.
 sub fetch_patchsets($)
@@ -390,49 +646,24 @@ sub complete_spec_heads($)
         } else {
             foreach my $change (@{$$spec{range}}) {
                 my $changeid = $$change{id};
-                $picks{$changeid} = $change if ($action != DELETE);
+                $picks{$changeid} = undef if ($action != DELETE);
             }
         }
     }
     return if (!%picks);
 
-    if (defined($branch)) {
-        # If a branch is specified, it overrides everything.
-        query_gerrit([ map { "change:".$_ } keys %picks ], [ "branch:$branch" ]);
-    } else {
-        query_gerrit([
-            map {
-                my $c = $picks{$_};
-                my $p = $c && $$c{pushed};
-                if ($p) {
-                    # If we have a previous push, identify the Change by SHA1.
-                    # We cannot use the Change-Id with the target branch, as
-                    # the branch tracking kicks in only after the query.
-                    "commit:$p"
-                } else {
-                    my $b = $c && $$c{tgt} || $upstream_branch;
-                    wfail("Branch for Change $_ unknown;"
-                            ." please use --branch to specify the source.\n")
-                        if (!defined($b));
-                    "\\(change:$_ branch:$b\\)"
-                }
-            } keys %picks
-        ]);
-    }
+    query_gerrit([ map { "change:".$_ } keys %picks ]);
 
-    my @fetches;
-    foreach my $id (keys %picks) {
-        my $gis = $gerrit_infos_by_id{$id};
-        if (!$gis) {
-            print "No results for $id.\n" if (!$quiet);
-        } else {
-            my $ginfo = $$gis[0];
-            $$ginfo{pick_idx} = select_patchset($ginfo);
-            my $change = change_for_id($id, CREATE);
-            $$change{gerrit} = $ginfo;
-            push @fetches, $ginfo;
+    my (@fetches, $any_errors);
+    foreach my $spec (@$specs) {
+        my $action = $$spec{action};
+        if ($action == INSERT) {
+            map_insertion_spec($spec, \@fetches, \$any_errors);
+        } elsif ($action == UPDATE) {
+            map_update_spec($spec, \@fetches, \$any_errors);
         }
     }
+    exit(1) if ($any_errors);
 
     fetch_patchsets(\@fetches) if (@fetches);
 }
@@ -445,11 +676,7 @@ sub check_specs($)
     foreach my $spec (@$specs) {
         my $action = $$spec{action};
         if ($action == INSERT) {
-            my $nchange = change_for_id($$spec{tip});
-            wfail("No Change found on Gerrit for spec $$spec{orig}.\n")
-                if (!$nchange);
-            my $new_range = [ $nchange ];
-            $$spec{new_range} = $new_range;
+            my $new_range = $$spec{new_range};
 
             foreach my $change (@$new_range) {
                 if (defined($$change{local})) {
@@ -603,7 +830,7 @@ sub adjust_changes($)
 
     print "Adjusting Changes ...\n" if ($debug);
 
-    my ($any_missing, $any_merged);
+    my ($any_missing, $any_crossed, $any_merged);
     my (@commits, @reports);
     foreach my $pair (@$pairs) {
         my ($action, $change) = @$pair;
@@ -654,6 +881,7 @@ sub adjust_changes($)
                 if (($upd & UPD_META) || ($ginfo && !defined($$change{tgt})));
         }
         if ($upd & UPD_INFO) {
+            $any_crossed = 1 if ($$ginfo{cross_branch});
             $any_merged = 1 if ($$ginfo{status} eq "MERGED");
         }
     }
@@ -676,6 +904,12 @@ sub adjust_changes($)
         # branch is forward-merged into the current one. We would have to
         # inspect the upstream branch to know, and that seems like overkill.
         wout("\nNotice: Applying MERGED Changes. Using git gpull might rebase them out.\n");
+        $any_msg = 1;
+    }
+
+    if ($any_crossed && !$quiet) {
+        nwout("\nNotice: Applying Changes which are targeting a different branch"
+                ." than the current branch's upstream ($upstream_branch).\n");
         $any_msg = 1;
     }
 

@@ -73,6 +73,29 @@ sub wfail($)
     exit(1);
 }
 
+# This is for bigger amounts of text.
+sub _wrap_narrow($)
+{
+    $Text::Wrap::columns = min($tty_width, 80) + 1;
+    return wrap("", "", $_[0]);
+}
+
+sub nwout($)
+{
+    print _wrap_narrow($_[0]);
+}
+
+sub nwerr($)
+{
+    print STDERR _wrap_narrow($_[0]);
+}
+
+sub nwfail($)
+{
+    nwerr($_[0]);
+    exit(1);
+}
+
 sub fail($)
 {
     print STDERR $_[0];
