@@ -12,7 +12,7 @@
 #
 
 CLANG_FORMAT=`which git-clang-format`
-if test -n "$CLANG_FORMAT"
+if test -n "$CLANG_FORMAT"; then
     echo "Please install clang-format and make sure git-clang-format is in the path."
     exit 0
 fi
