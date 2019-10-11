@@ -12,12 +12,15 @@
 #
 
 CLANG_FORMAT=`which git-clang-format`
-if test -n "$CLANG_FORMAT"; then
+if test -z "$CLANG_FORMAT"; then
     echo "Please install clang-format and make sure git-clang-format is in the path."
     exit 0
 fi
 
 CLANG_FORMAT_DIFF=`git clang-format -q --diff`
+if [ "$CLANG_FORMAT_DIFF" = "no modified files to format" ]; then
+    exit 0
+fi
 if test -n "$CLANG_FORMAT_DIFF"; then
     echo "clang-format output:"
     echo "$CLANG_FORMAT_DIFF"
