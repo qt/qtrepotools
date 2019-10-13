@@ -82,6 +82,10 @@ Description:
     rebase, to push out the amended commits instantly.
 
 Options:
+    -a, --all
+        Push all series reachable from 'from'. Error out if any
+        free-standing loose commits are encountered.
+
     -e, --extend
         Append new Changes to the series right in front of them.
 
@@ -138,10 +142,12 @@ Options:
     -l, --list
         Report all Changes that would be pushed, then quit.
         This is a purely off-line operation.
+        Implies --all unless 'from' is specified.
 
     -ll, --list-online
         Report all Changes that would be pushed, then quit.
         The Changes are annotated with state information from Gerrit.
+        Implies --all unless 'from' is specified.
 
     --aliases
         Report all registered aliases and quit.
@@ -256,6 +262,7 @@ my $ref_to;
 my $force_branch = 0;
 my $topic;
 my $force = 0;
+my $push_all = 0;
 my $group_only = 0;
 my $list_only = 0;
 my $list_online = 0;
@@ -309,6 +316,8 @@ sub parse_arguments(@)
             $ref_base = shift @_;
         } elsif ($arg eq "--rebase") {
             $rebase = 1;
+        } elsif ($arg eq "-a" || $arg eq "--all") {
+            $push_all = 1;
         } elsif ($arg eq "-l" || $arg eq "--list") {
             $list_only = 1;
         } elsif ($arg eq "-ll" || $arg eq "--list-online") {
@@ -362,7 +371,10 @@ sub parse_arguments(@)
 
     if (!defined($from)) {
         $from = "HEAD";
+        $push_all = 1 if ($list_only);
     } else {
+        fail("--all is incompatible with specifying commits.\n")
+            if ($push_all);
         if ($from =~ /^(.*)\.\.(.*)$/) {
             fail("Specifying a commit count and a range base are mutually exclusive.\n")
                 if ($commit_count);
@@ -380,6 +392,8 @@ sub parse_arguments(@)
     if ($group_only) {
         fail("--group and --list are mutually exclusive.\n")
             if ($list_only);
+        fail("--group and --all are mutually exclusive.\n")
+            if ($push_all);
         fail("--group is incompatible with push-modifying options.\n")
             if ($push_specific || $minimal_override);
     } elsif ($list_only) {
@@ -391,6 +405,11 @@ sub parse_arguments(@)
             if ($push_specific || (!$list_online && $minimal_override));
         fail("--list/--list-online is incompatible with base-modifying options.\n")
             if (defined($ref_base));
+    } elsif ($push_all) {
+        fail("--all is incompatible with series-specific options.\n")
+            if ($series_specific);
+        # Push options are perfectly legit with --all, even if some are
+        # probably not too useful (e.g., --base).
     }
 }
 
@@ -437,6 +456,14 @@ sub lookup_alias($)
     return $user;
 }
 
+sub format_group_id($)
+{
+    my ($group) = @_;
+
+    my $changes = $$group{changes};
+    return format_id($$changes[-1]{id}).":".int(@$changes);
+}
+
 sub set_group_error($$$)
 {
     my ($group, $style, $error) = @_;
@@ -479,12 +506,14 @@ sub report_pushed_group($$)
     report_text($reports, $$group{error_style}, $error) if (defined($error));
 }
 
-sub report_pushed_changes($)
+sub report_pushed_changes(@)
 {
-    my ($group) = @_;
+    my (@groups) = @_;
 
     my @reports;
-    report_pushed_group(\@reports, $group);
+    foreach my $group (@groups) {
+        report_pushed_group(\@reports, $group);
+    }
     return \@reports;
 }
 
@@ -513,7 +542,8 @@ sub aggregate_property($$$$)
     }
     if (@props) {
         my $p = $props[0];
-        print "Re-using $prop_name '$p'.\n" if ($debug);
+        printf("Series %s re-using %s '%s'.\n", format_group_id($group), $prop_name, $p)
+            if ($debug);
         return $p;
     }
     return undef;
@@ -653,13 +683,15 @@ sub scan_pushed_group($$)
 }
 
 # Retrieve metadata for commits corresponding with previous pushes
-# of one ordered series of Changes.
+# of ordered series of Changes.
 sub visit_pushed_changes($)
 {
-    my ($group) = @_;
+    my ($groups) = @_;
 
     my @commits;
-    scan_pushed_group($group, \@commits);
+    foreach my $group (@$groups) {
+        scan_pushed_group($group, \@commits);
+    }
     print "Visiting pushed commits ...\n" if ($debug);
     visit_local_commits(\@commits);
 }
@@ -768,6 +800,24 @@ sub get_changes()
     return $group;
 }
 
+# Get the list of local commits to push when pushing all series.
+sub get_all_changes()
+{
+    my $tip = initialize_get_changes();
+    my @groups;
+    my $have_loose = 0;
+    my $change = $commit_by_id{$tip}{change};
+    while (1) {
+        my ($changes, $gid);
+        ($changes, $gid, $change, undef) = do_determine_series($change, 0, 0, 1);
+        my $group = finalize_get_changes($changes, $gid);
+        unshift @groups, $group;
+        $have_loose++ if (!$gid);
+        last if (!$change);
+    }
+    return ($have_loose, \@groups);
+}
+
 sub check_merge($$);
 
 sub check_merge($$)
@@ -837,9 +887,9 @@ sub check_merges($)
 
 # Assign each local Change to a matching remote Change if possible,
 # on the way complaining about creating duplicates.
-sub map_remote_changes($)
+sub map_remote_group($$$$)
 {
-    my ($group) = @_;
+    my ($group, $bad_groups, $some, $multi) = @_;
 
     my $changes = $$group{changes};
     my $br = $$group{branch};
@@ -871,9 +921,24 @@ sub map_remote_changes($)
         }
     }
     if (@bad_chg) {
-        my $reports = report_pushed_changes($group);
-        my $tpfx = (@bad_chg == @$changes) ? "The" : "Some of the";
-        my $tsfx = (keys(%bad_br) == 1) ? "a different branch" : "different branches";
+        push @$bad_groups, $group;
+        $$some = 1 if (@bad_chg != @$changes);
+        $$multi = 1 if (keys(%bad_br) > 1);
+    }
+}
+
+sub map_remote_changes($)
+{
+    my ($groups) = @_;
+
+    my (@bad_groups, $some, $multi);
+    foreach my $group (@$groups) {
+        map_remote_group($group, \@bad_groups, \$some, \$multi);
+    }
+    if (@bad_groups) {
+        my $reports = report_pushed_changes(@bad_groups);
+        my $tpfx = $some ? "Some of the" : "The";
+        my $tsfx = $multi ? "different branches" : "a different branch";
         report_fixed($reports,
                      "$tpfx Change(s) were previously pushed only for $tsfx.\n",
                      "Please move them server-side, push for a matching branch,\n",
@@ -964,7 +1029,8 @@ sub determine_base($)
     }
     if (!length($base)) {
         $base = $local_base;
-        print "Basing series on local branch's base.\n" if ($verbose);
+        printf("Basing series %s on local branch's base.\n", format_group_id($group))
+            if ($verbose);
     }
     $$group{base} = $base;
 }
@@ -1229,7 +1295,7 @@ sub do_rebase_changes($$)
     my ($group, $upstreamed_changes) = @_;
     my ($base, $changes) = ($$group{base}, $$group{changes});
 
-    printf("Rebasing %d commit(s) to %s.\n", int(@$changes), format_id($base))
+    printf("Rebasing %s to %s.\n", format_group_id($group), format_id($base))
         if ($verbose);
 
     # Preparation for advance_base(). We "pull down" the parent commits from
@@ -1399,6 +1465,7 @@ sub classify_changes_online($)
 {
     my ($group) = @_;
 
+    my $any_modified = 0;
     foreach my $change (@{$$group{changes}}) {
         my $commit = $$change{final};
         next if (!$commit);  # Rebase failure
@@ -1452,8 +1519,12 @@ sub classify_changes_online($)
                     $$change{freshness} = NEW;
                 }
             }
-            $have_modified++;
+            $any_modified++;
         }
+    }
+    if ($any_modified) {
+        $$group{have_modified} = 1;
+        $have_modified = 1;
     }
 }
 
@@ -1463,10 +1534,10 @@ sub annotate_changes($)
 
     foreach my $change (@{$$group{changes}}) {
         my @attribs;
-        # Changes can be loose only when listing, as
+        # Changes can be loose only when pushing all or listing, as
         # otherwise they are currently being assigned, and showing
         # them as still loose would be weird.
-        my $loose = $list_only && !defined($$change{grp});
+        my $loose = ($push_all || $list_only) && !defined($$change{grp});
         push @attribs, 'LOOSE' if ($loose);
         # Changes in the 'modified' state (that is, the ones for which pushing
         # actually has an effect) are annotated, while 'unmodified' ones are not.
@@ -1494,38 +1565,41 @@ sub annotate_changes($)
 
 sub make_listing($)
 {
-    my ($group) = @_;
+    my ($groups) = @_;
 
-    annotate_changes($group);
-    return report_pushed_changes($group);
+    foreach my $group (@$groups) {
+        annotate_changes($group);
+    }
+    return report_pushed_changes(@$groups);
 }
 
 sub show_changes($)
 {
-    my ($group) = @_;
+    my ($groups) = @_;
 
-    print format_reports(make_listing($group));
+    print format_reports(make_listing($groups));
 }
 
 sub fail_push($@)
 {
-    my ($group, @msgs) = @_;
+    my ($groups, @msgs) = @_;
 
-    my $reports = make_listing($group);
+    my $reports = make_listing($groups);
     report_fixed($reports, @msgs);
     fail_formatted($reports);
 }
 
 sub print_errors($)
 {
-    my ($group) = @_;
+    my ($groups) = @_;
 
-    fail_push($group, "Please use --rebase or specify a different base.\n")
+    fail_push($groups, "Please use --rebase or specify "
+                      .($have_conflicts > 1 ? "different bases.\n" : "a different base.\n"))
         if ($have_conflicts);
-    fail_push($group, "Giving up - push is going to be rejected.\n")
+    fail_push($groups, "Giving up - push is going to be rejected.\n")
         if ($have_rejected);
-    fail_push($group, "Local state is out of sync with Gerrit.\n",
-                      "Please use git gpick, or specify --force to push nonetheless.\n")
+    fail_push($groups, "Local state is out of sync with Gerrit.\n",
+                       "Please use git gpick, or specify --force to push nonetheless.\n")
         if ($need_force && !$force);
 }
 
@@ -1655,7 +1729,11 @@ sub update_unpushed($)
 
     my $invite_list = $$group{invite_list};
     if (@$invite_list) {
-        print "Inviting reviewers/CCs to unmodified commit(s) ...\n";
+        state $printed;
+        print "Inviting reviewers/CCs to unmodified commit(s) ...\n"
+            if (!$quiet && !$printed);
+        $printed = 1;
+
         my ($rvrs, $ccs) = ($$group{add_rvrs} // [], $$group{add_ccs} // []);
         my @rlist;
         foreach my $rvr (@$rvrs) {
@@ -1675,7 +1753,10 @@ sub update_unpushed($)
     my $topic_list = $$group{topic_list};
     if (@$topic_list) {
         # TODO: This can be done with the REST API.
-        print "Warning: Cannot set topic on unmodified commits.\n";
+        state $printed;
+        print "Warning: Cannot set topic on unmodified commits.\n"
+            if (!$printed);
+        $printed = 1;
     }
 }
 
@@ -1745,7 +1826,7 @@ sub execute_grouping()
     # branch tracking is not necessary here, either.
     if (!$quiet) {
         classify_changes_offline($group);
-        show_changes($group);
+        show_changes([ $group ]);
     }
     print "Not pushing - group mode.\n" if ($debug);
     update_state_grouping($group);
@@ -1754,8 +1835,20 @@ sub execute_grouping()
 sub execute_pushing()
 {
     my $online = !$list_only || $list_online;
-    my $group = get_changes();
-    my $pushed_changes = $$group{changes};
+    my $groups;
+    if ($push_all) {
+        my $have_loose;
+        ($have_loose, $groups) = get_all_changes();
+        if ($have_loose && !$list_only) {
+            foreach my $group (@$groups) {
+                classify_changes_offline($group);
+            }
+            fail_push($groups, "Cannot push all with any free-standing loose Changes.\n");
+        }
+    } else {
+        $groups = $all_groups = [ get_changes() ];
+    }
+    my $pushed_changes = [ map { @{$$_{changes}} } @$groups ];
     if ($online) {
         my @queries = map { "change:".$$_{id} } @$pushed_changes;
         push @queries,
@@ -1770,38 +1863,68 @@ sub execute_pushing()
         push @args, "--all-reviewers" if (@reviewers || @CCs);
         query_gerrit(\@queries, \@args);
     }
-    determine_remote_branch($group);
-    if ($online) {
-        check_merges($group);
-        map_remote_changes($group);
+    foreach my $group (@$groups) {
+        determine_remote_branch($group);
     }
-    determine_topic($group);
     if ($online) {
-        determine_base($group);
-        visit_pushed_changes($group);
+        foreach my $group (@$groups) {
+            check_merges($group);
+        }
+        map_remote_changes($groups);
+    }
+    foreach my $group (@$groups) {
+        determine_topic($group);
+    }
+    if ($online) {
+        # Rebasing may take a while, so make sure all base determination
+        # errors are reported before we start.
+        foreach my $group (@$groups) {
+            if (defined($$group{gid})) {
+                determine_base($group);
+            }
+        }
+        visit_pushed_changes($groups);
         my $upstreamed_changes = get_upstreamed_changes($pushed_changes);
-        rebase_changes($group, $upstreamed_changes);
-        classify_changes_online($group);
+        foreach my $group (@$groups) {
+            if (defined($$group{gid})) {
+                rebase_changes($group, $upstreamed_changes);
+                classify_changes_online($group);
+            } else {
+                # We don't rebase sets of loose Changes, as this will often
+                # create garbage or fail. We can get here only in --list mode.
+                classify_changes_offline($group);
+            }
+        }
     } elsif (!$quiet) {
-        classify_changes_offline($group);
+        foreach my $group (@$groups) {
+            classify_changes_offline($group);
+        }
     }
     if ($list_only) {
-        show_changes($group);
+        show_changes($groups);
         print "Not pushing - list mode.\n" if ($debug);
     } else {
-        print_errors($group);
-        show_changes($group) if (!$quiet);
-        prepare_meta($group);
+        print_errors($groups);
+        show_changes($groups) if (!$quiet);
+        foreach my $group (@$groups) {
+            prepare_meta($group);
+        }
         if ($have_modified) {
-            push_changes($group);
+            foreach my $group (@$groups) {
+                push_changes($group) if ($$group{have_modified});
+            }
         } else {
             print "No modified commits - nothing to push.\n" if (!$quiet);
         }
-        update_unpushed($group);
+        foreach my $group (@$groups) {
+            update_unpushed($group);
+        }
 
         # This makes sense even if no modified commits are pushed
         # (e.g., syncing state after a dumb push).
-        update_state($group);
+        foreach my $group (@$groups) {
+            update_state($group);
+        }
     }
 }
 

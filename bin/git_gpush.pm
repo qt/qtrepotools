@@ -1399,9 +1399,9 @@ sub assign_series($)
 
 # Deduce a series from a single commit.
 # Merges are treated in --first-parent mode.
-sub do_determine_series($;$$)
+sub do_determine_series($;$$$)
 {
-    my ($change, $extend, $capture) = @_;
+    my ($change, $extend, $capture, $forward_only) = @_;
 
     print "Deducing series from $$change{id}\n" if ($debug);
     my (@prospects, @changes);
@@ -1454,6 +1454,8 @@ sub do_determine_series($;$$)
     # not extending), based on the assumption that it was meant to be the tip
     # - otherwise, the semantics get really unintuitive.
     return (\@prospects, undef, $change, []) if (!defined($group_key));
+    return (\@changes, $group_key, @prospects ? $prospects[-1] : $change, [])
+        if ($forward_only);
     my @rprospects;
     while (1) {
         $rchange = $$rchange{child};
