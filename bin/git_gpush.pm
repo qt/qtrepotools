@@ -502,6 +502,12 @@ sub get_commits_free($)
 # gerrit query results #
 ########################
 
+use constant {
+    RVRTYPE_NONE => 0,
+    RVRTYPE_REV => 1,
+    RVRTYPE_CC => 1  # Because Gerrit won't tell.
+};
+
 our %gerrit_info_by_key;
 our %gerrit_info_by_sha1;
 our %gerrit_infos_by_id;
@@ -1125,6 +1131,19 @@ sub query_gerrit($;$)
         $$ginfo{branch} = $branch;
         $$ginfo{revs} = [ grep { $_ } @revs ];  # Drop deleted ones.
         $$ginfo{rev_by_id} = \%rev_map;
+        my $rvrs = $$review{'allReviewers'};
+        if ($rvrs) {
+            # Note: This does not differentiate between reviewers and CCs.
+            # Reported upstream as https://crbug.com/gerrit/11709
+            my %reviewers;
+            foreach my $rvr (@$rvrs) {
+                foreach my $ky ('name', 'email', 'username') {
+                    my $val = $$rvr{$ky};
+                    $reviewers{$val} = RVRTYPE_REV if (defined($val));
+                }
+            }
+            $$ginfo{reviewers} = \%reviewers;
+        }
         push @ginfos, $ginfo;
     }
     close_process($info);

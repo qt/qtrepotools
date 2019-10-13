@@ -685,6 +685,31 @@ sub print_errors($)
         if ($need_force && !$force);
 }
 
+sub prepare_meta($)
+{
+    my ($group) = @_;
+
+    my (%invite_rvrs, %invite_ccs);
+    if (@reviewers || @CCs) {
+        foreach my $change (@{$$group{changes}}) {
+            my $ginfo = $$change{gerrit};
+            my $rvrs = $ginfo ? $$ginfo{reviewers} : {};
+            foreach my $rvr (@reviewers) {
+                if (($$rvrs{$rvr} // RVRTYPE_NONE) != RVRTYPE_REV) {
+                    $invite_rvrs{$rvr} = 1;
+                }
+            }
+            foreach my $cc (@CCs) {
+                if (($$rvrs{$cc} // RVRTYPE_NONE) != RVRTYPE_CC) {
+                    $invite_ccs{$cc} = 1;
+                }
+            }
+        }
+    }
+    $$group{add_rvrs} = [ keys %invite_rvrs ];
+    $$group{add_ccs} = [ keys %invite_ccs ];
+}
+
 sub push_changes($)
 {
     my ($group) = @_;
@@ -692,10 +717,11 @@ sub push_changes($)
     my $from = $$group{changes}[-1];
     my $tip = $$from{local}{id};
     my $to = $$group{branch};
+    my ($rvrs, $ccs) = ($$group{add_rvrs} // [], $$group{add_ccs} // []);
 
     my @push_options;
-    push @push_options, map { "r=$_" } @reviewers;
-    push @push_options, map { "cc=$_" } @CCs;
+    push @push_options, map { "r=$_" } @$rvrs;
+    push @push_options, map { "cc=$_" } @$ccs;
 
     my @gitcmd = ("git", "push");
     push @gitcmd, '-v' if ($verbose);
@@ -733,7 +759,9 @@ sub execute_pushing()
                 # Only 2nd+ parents of local commits.
                 map { @$_ > 1 ? @$_[1 .. $#$_] : () }
                 map { $$_{local}{parents} } @$pushed_changes;
-        query_gerrit(\@queries);
+        my @args;
+        push @args, "--all-reviewers" if (@reviewers || @CCs);
+        query_gerrit(\@queries, \@args);
     }
     determine_remote_branch($group);
     if ($online) {
@@ -749,6 +777,7 @@ sub execute_pushing()
     } else {
         print_errors($group);
         show_changes($group) if (!$quiet);
+        prepare_meta($group);
         if ($have_modified) {
             push_changes($group);
         } else {
