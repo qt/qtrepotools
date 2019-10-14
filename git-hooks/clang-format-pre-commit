@@ -8,7 +8,8 @@
 
 # Usage: in every repository you want to have checked:
 #    cd .git/hooks
-#    ln -s /path/to/git_pre_commit_hook pre-commit
+#    ln -s ../../../qtrepotools/git-hooks/clang-format-pre-commit pre-commit
+#    mklink pre-commit ..\..\..\qtrepotools\git-hooks\clang-format-pre-commit
 #
 
 CLANG_FORMAT=`which git-clang-format`
