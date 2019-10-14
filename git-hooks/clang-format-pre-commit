@@ -12,7 +12,12 @@
 #    mklink pre-commit ..\..\..\qtrepotools\git-hooks\clang-format-pre-commit
 #
 
-CLANG_FORMAT=`which git-clang-format`
+CLANG_FORMAT=$(which git-clang-format)
+if [ -z "$CLANG_FORMAT" -a -d "$LLVM_INSTALL_DIR" ]; then
+    export PATH=$PATH:$LLVM_INSTALL_DIR/bin
+    CLANG_FORMAT=$(which git-clang-format)
+fi
+
 if test -z "$CLANG_FORMAT"; then
     echo "Please install clang-format and make sure git-clang-format is in the path."
     exit 0
