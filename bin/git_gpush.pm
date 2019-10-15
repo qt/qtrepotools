@@ -479,6 +479,7 @@ sub changes_from_commits($)
 ########################
 
 our %gerrit_info_by_key;
+our %gerrit_info_by_sha1;
 our %gerrit_infos_by_id;
 
 ##################
@@ -1088,6 +1089,7 @@ sub query_gerrit($;$)
             );
             $revs[$number] = \%rev;
             $rev_map{$revision} = \%rev;
+            $gerrit_info_by_sha1{$revision} = $ginfo;
         }
         $$ginfo{id} = $changeid;
         $$ginfo{status} = $status;

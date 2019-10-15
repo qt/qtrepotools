@@ -446,6 +446,23 @@ sub check_merge($$)
     return $good;
 }
 
+# Ensure that we don't implicitly create new PatchSets for non-1st
+# parents of merges, as these would most likely target the wrong branch.
+# TODO: this could be handled more nicely by doing recursive pushes
+# instead of bailing out.
+sub parents_pushed($$)
+{
+    my ($parents, $failed) = @_;
+
+    foreach my $parentid (@$parents[1 .. $#$parents]) {
+        next if (defined($gerrit_info_by_sha1{$parentid}));  # Gerrit knows it
+        my $parent = $commit_by_id{$parentid};
+        next if (!$parent);  # Already upstream
+        push @$failed, $parent;
+    }
+    return !@$failed;
+}
+
 sub check_merges($)
 {
     my ($group) = @_;
@@ -459,6 +476,9 @@ sub check_merges($)
                 $header = ",----- Merge of non-upstream commit(s) -----\n";
                 set_group_error($group, 'fixed',
                                 "Maybe you forgot to use git pull's --rebase option?\n");
+            } elsif (!parents_pushed($parents, \@failed)) {
+                $header = ",----- Parent merge(s) not pushed yet ------\n";
+                set_group_error($group, 'fixed', "Please push the parent(s) first.\n");
             } else {
                 next;
             }
@@ -706,6 +726,13 @@ sub execute_pushing()
     my $pushed_changes = $$group{changes};
     if ($online) {
         my @queries = map { "change:".$$_{id} } @$pushed_changes;
+        push @queries,
+                map { "commit:".$_ }
+                # Only ones that are not upstream yet.
+                grep { $commit_by_id{$_} }
+                # Only 2nd+ parents of local commits.
+                map { @$_ > 1 ? @$_[1 .. $#$_] : () }
+                map { $$_{local}{parents} } @$pushed_changes;
         query_gerrit(\@queries);
     }
     determine_remote_branch($group);
