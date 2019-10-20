@@ -1,4 +1,5 @@
 # Copyright (C) 2017 The Qt Company Ltd.
+# Copyright (C) 2019 Oswald Buddenhagen
 # Contact: http://www.qt.io/licensing/
 #
 # You may use this file under the terms of the 3-clause BSD license.
@@ -734,6 +735,24 @@ sub format_subject($$;$)
     $subject =~ s/^(.{$max}).{6,}$/$1\[...]/;
     return $subject if (!defined($id));
     return format_id($id)." ($subject)";
+}
+
+sub format_commit($;$)
+{
+    my ($commit, $max) = @_;
+    return format_subject($$commit{changeid}, $$commit{subject}, $max);
+}
+
+sub format_commits($;$)
+{
+    my ($commits, $prefix) = @_;
+
+    $prefix = "  " if (!defined($prefix));
+    my $output = "";
+    foreach my $commit (@$commits) {
+        $output .= $prefix.format_commit($commit, -length($prefix))."\n";
+    }
+    return $output;
 }
 
 sub _unpack_report($@)

@@ -1,5 +1,6 @@
 #!/usr/bin/perl
 # Copyright (C) 2017 The Qt Company Ltd.
+# Copyright (C) 2019 Oswald Buddenhagen
 # Contact: http://www.qt.io/licensing/
 #
 # You may use this file under the terms of the 3-clause BSD license.
@@ -125,6 +126,7 @@ Configuration:
 
 Copyright:
     Copyright (C) 2017 The Qt Company Ltd.
+    Copyright (C) 2019 Oswald Buddenhagen
     Contact: http://www.qt.io/licensing/
 
 License:
@@ -422,6 +424,53 @@ sub get_changes()
     return $group;
 }
 
+sub check_merge($$);
+
+sub check_merge($$)
+{
+    my ($parents, $failed) = @_;
+
+    my $good = 1;
+    foreach my $parentid (@$parents) {
+        my $parent = $commit_by_id{$parentid};
+        # If the parent is upstream, the merge is good.
+        next if (!$parent);
+
+        my $rparents = $$parent{parents};
+        # Merges of (good) merges are also good.
+        next if (@$rparents > 1 && check_merge($rparents, $failed));
+
+        push @$failed, $parent;
+        $good = 0;
+    }
+    return $good;
+}
+
+sub check_merges($)
+{
+    my ($group) = @_;
+
+    foreach my $change (@{$$group{changes}}) {
+        my $commit = $$change{local};
+        my $parents = $$commit{parents};
+        if (@$parents > 1) {
+            my (@failed, $header);
+            if (!check_merge($parents, \@failed)) {
+                $header = ",----- Merge of non-upstream commit(s) -----\n";
+                set_group_error($group, 'fixed',
+                                "Maybe you forgot to use git pull's --rebase option?\n");
+            } else {
+                next;
+            }
+            $$change{annotation} = '  [FAIL]';
+            set_change_error($change, 'fixed',
+                             $header.format_commits(\@failed, "| ")
+                             ."`-------------------------------------------\n");
+            fail_formatted(report_pushed_changes($group));
+        }
+    }
+}
+
 # Assign each local Change to a matching remote Change if possible,
 # on the way complaining about creating duplicates.
 sub map_remote_changes($)
@@ -661,6 +710,7 @@ sub execute_pushing()
     }
     determine_remote_branch($group);
     if ($online) {
+        check_merges($group);
         map_remote_changes($group);
         classify_changes_online($group);
     } elsif (!$quiet) {
