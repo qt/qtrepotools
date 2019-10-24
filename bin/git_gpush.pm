@@ -38,6 +38,8 @@ our $dry_run = 0;
 # message output #
 ##################
 
+$| = 1;  # OUTPUT_AUTOFLUSH; in case we're redirecting debug output.
+
 my ($tty_width, undef, undef, undef) = (-t STDOUT) ? GetTerminalSize() : (80);
 
 # This is for messages which even after wrapping will rarely/barely
