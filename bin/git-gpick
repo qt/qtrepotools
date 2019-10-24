@@ -32,12 +32,13 @@ sub usage
 {
     print << "EOM";
 Usage:
-    git gpick [options] {[\@parent] [+]Changes[\@] | /Changes[\@]}...
+    git gpick [options] {[\@parent] [+]Changes[{date}][\@] |
+                         /Changes[\@]}...
 
-    Updates local commits with the newest PatchSets from Gerrit.
+    Updates local commits with the specified PatchSets from Gerrit.
 
 Description:
-    This program fetches the current PatchSets of the specified Changes
+    This program fetches the specified PatchSets of the specified Changes
     from Gerrit, and updates the local commits with them.
 
     Commits are updated in place, unless a parent to rebase them onto
@@ -56,6 +57,13 @@ Description:
     means the merge base with the upstream branch; this also works in the
     parent specification. Note that within a range, the local order of the
     commits will be preserved even if the series was re-ordered remotely.
+
+    This program uses the most recent PatchSets which are not newer than
+    the reference date, which defaults to 'now'. See the git-rev-parse
+    documentation for supported date formats.
+    Specifying PatchSet numbers directly is not supported, as these are
+    meaningless for ranges with multiple Changes. An exception to that
+    is the 1st PatchSet, which may be specified with a literal 1.
 
     Local commits may be dropped by prefixing them with a slash.
 
@@ -92,6 +100,9 @@ Examples:
 
     git gpick +I21f8ef385d1793757149dfa5cc69e4e907cb1c04
         Add a Change from Gerrit on top of the local branch.
+
+    git gpick +Idc2d0ac4f7d95a5f3bad24e82114e23ada79a542{yesterday}
+        The same, using the most recent PatchSet as of one day ago.
 
     git gpick /HEAD \@ ~1:2\@ +I1ad95db7c99018e92d2b2556e4789951b51b2fff
         Drop the top commit, move the next two commits to the start of the
@@ -278,6 +289,19 @@ sub report_local($$$$)
     report_update($reports, $prefix, $annot, $commit, undef);
 }
 
+sub parse_date($)
+{
+    my ($stamp) = @_;
+
+    # PS1 may be specified directly. It's the same as specifying
+    # a really old date.
+    return 0 if ($stamp eq "1");
+
+    # Unfortunately, Git for Windows doesn't ship Time::ParseDate.
+    my $parsed = read_cmd_line(0, 'git', 'rev-parse', '--before='.$stamp);
+    return int($parsed =~ s/^.*=//r);
+}
+
 use constant {
     HOLD => 0,
     INSERT => 1,
@@ -306,6 +330,9 @@ sub parse_specs($)
             my %spec;
             $spec{parent} = $parent;
             my $isparent = ($cs =~ s,\@$,,);
+            if ($cs =~ s,\{(.*)\}$,,) {
+                $spec{stamp} = parse_date($1);
+            }
             $spec{orig} = $cs;
             my $action;
             if ($cs =~ s,^\+,,) {
@@ -374,12 +401,18 @@ sub resolve_specs($)
     }
 }
 
-sub select_patchset($)
+sub select_patchset($$)
 {
-    my ($ginfo) = @_;
+    my ($ginfo, $stamp) = @_;
 
     my $revs = $$ginfo{revs};
     my $revidx = $#$revs;
+    if (defined($stamp)) {
+        while ($revidx > 0 && $$revs[$revidx]{ts} > $stamp) {
+            $revidx--;
+        }
+        print "Chose revision $revidx/$#$revs for $$ginfo{id}.\n" if ($debug);
+    }
     return $revidx;
 }
 
@@ -391,9 +424,9 @@ use constant {
 
 # Choose the correct Gerrit Change object from a set of options,
 # trying to resolve ambiguity.
-sub map_remote_change($$$$)
+sub map_remote_change($$$$$)
 {
-    my ($changeid, $br, $ginfos, $fetches) = @_;
+    my ($changeid, $br, $ginfos, $spec, $fetches) = @_;
 
     # If a specific branch is requested (or implied by the
     # Change's already set target branch), insist on that.
@@ -476,7 +509,7 @@ sub map_remote_change($$$$)
 
     $$match{cross_branch} =
             !defined($br) && defined($upstream_branch) && ($$match{branch} ne $upstream_branch);
-    $$match{pick_idx} = select_patchset($match);
+    $$match{pick_idx} = select_patchset($match, $$spec{stamp});
     push @$fetches, $match;
     return (MAP_SUCCESS, { match => $match });
 }
@@ -547,7 +580,7 @@ sub map_insertion_spec($$$)
         $$fails = 1;
         return;
     }
-    my ($ret, $rslt) = map_remote_change($tip, undef, $gis, $fetches);
+    my ($ret, $rslt) = map_remote_change($tip, undef, $gis, $spec, $fetches);
     if ($ret != MAP_SUCCESS) {
         print_failure($spec, $rslt);
         $$fails = 1;
@@ -571,7 +604,7 @@ sub map_update_spec($$$)
             push @results, { local => $$change{local} };
         } else {
             my ($ret, $rslt) = map_remote_change(
-                    $$change{id}, $$change{tgt}, $gis, $fetches);
+                    $$change{id}, $$change{tgt}, $gis, $spec, $fetches);
             if ($ret != MAP_MISSING) {
                 $found++;
                 if ($ret == MAP_AMBIGUOUS) {
