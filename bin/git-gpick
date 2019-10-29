@@ -77,6 +77,9 @@ Description:
     follow the usual instructions on screen.
 
 Options:
+    -a, --all
+        Update all commits on the local branch.
+
     -c, --check
         Rather than replacing any commits, only show what would be done.
         A side effect is that the state information is synchronized with
@@ -196,7 +199,7 @@ Examples:
         another Change right on top of them. The other commits in the local
         branch are rebased on top of these three commits.
 
-    git gpick --check ..
+    git gpick --check --all
         Bootstrap git-gpush before using it the first time with pre-existing
         pending Changes.
 
@@ -223,6 +226,7 @@ use constant {
     ALL_PARTS => 15
 };
 
+my $pick_all = 0;
 my $pick_parts;
 my $branch;
 my $upstream_branch;
@@ -256,6 +260,8 @@ sub parse_arguments(@)
         } elsif ($arg eq "-b" || $arg eq "--branch") {
             fail("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $branch = shift @_;
+        } elsif ($arg eq "-a" || $arg eq "--all") {
+            $pick_all = 1;
         } elsif ($arg eq "-c" || $arg eq "--check") {
             $check = 1;
         } elsif ($arg eq "-m" || $arg eq "--merge") {
@@ -299,6 +305,9 @@ sub parse_arguments(@)
                 ." are mutually exclusive.\n")
             if ($merge || $force || $force_merged || $force_closed || $ignore);
     }
+
+    fail("--all is mutually exclusive with specifying ranges.\n")
+        if ($pick_all && @commit_specs);
 
     fail("--merge/--force and --ignore are mutually exclusive.\n")
         if (($merge || $force) && $ignore);
@@ -407,9 +416,9 @@ use constant {
     DSC_RMT_END => 0x50
 };
 
-sub deduce_series($)
+sub deduce_series($;$)
 {
-    my ($changes) = @_;
+    my ($changes, $all) = @_;
 
     my %groups;  # { group-id => [ change, ... ] }
     my $state = DSS_DEFAULT;
@@ -439,8 +448,8 @@ sub deduce_series($)
             $curr_lcl_grp = $$change{grp} // 0;
             my $ginfo = $$change{gerrit};
             # Ungrouped Changes which also are not being picked are
-            # completely ignored.
-            next if (!$curr_lcl_grp && !$ginfo);
+            # completely ignored, unless forced.
+            next if (!$all && !$curr_lcl_grp && !$ginfo);
             $curr_rmt_grp = $$ginfo{pick_commit}{pgrp} if ($ginfo);
         } else {
             # When we run out of Changes, we still synthetize a pair of
@@ -2154,6 +2163,51 @@ sub prepare_specs($)
     return $specs;
 }
 
+sub generate_specs($)
+{
+    my ($change) = @_;
+
+    print "Generating specs ...\n" if ($debug);
+
+    my @specs;
+    while (1) {
+        my $range;
+        ($range, undef, $change, undef) = do_determine_series($change, 0, 0, 1);
+        my $cs = $$range[-1]{id}.":".int(@$range);
+        print "Got $cs.\n" if ($debug);
+        push @specs, {
+            orig => $cs,
+            action => UPDATE,
+            range => $range,
+            new_range => $ignore_struct ? $range : undef
+        };
+        last if (!$change);
+    }
+    return \@specs;
+}
+
+sub prepare_specs_all($)
+{
+    my ($raw_changes) = @_;
+
+    # Before we can iterate the local series, we need to make sure that
+    # they are actually assigned. For this to work we first resolve a
+    # fake spec which causes the corresponding remote series for all
+    # local ones to be assembled.
+    my $fake_specs = parse_specs([ '..' ]);
+    resolve_specs($fake_specs);
+    complete_spec_heads($fake_specs);
+    complete_spec_tails($fake_specs);
+
+    deduce_series($raw_changes, 1);
+
+    my $specs = generate_specs($$raw_changes[-1]);
+    # The fake spec already did the "heads" for us.
+    complete_spec_tails($specs);
+    finalize_specs($specs);
+    return $specs;
+}
+
 # Return a list of actions that construct the second range of Changes
 # with elements from the first one as naturally as possible.
 sub transmogrify_series($$$)
@@ -3043,7 +3097,8 @@ load_state(1);
 determine_local_branch();
 my $raw_commits = get_changes();
 my $raw_changes = changes_from_commits($raw_commits);
-my $specs = prepare_specs($raw_changes);
+my $specs = $pick_all ? prepare_specs_all($raw_changes)
+                      : prepare_specs($raw_changes);
 my $pairs = apply_specs($specs, $raw_changes);
 my $commits = adjust_changes($pairs);
 rewrite_changes($raw_commits, $commits) if (!$check);
