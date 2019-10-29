@@ -698,7 +698,7 @@ while (<DIFF>) {
             if ($file =~ /(~|\.(old|bak))$/i) {
                 complain("Adding backup file", "backup") if ($new_file && !defined($cfg{backup}));
                 $ws_check = 0;
-            } elsif ($file =~ m,^tests/.*/testdata/,) {
+            } elsif ($file =~ m,^tests/.*/(test)?data/,) {
                 $ws_check = 0;
             } elsif ($file =~ /\.(prl|la|pc|ilk)$/i) {
                 complain("Adding build artifact", "generated") if ($new_file && !defined($cfg{generated}));
