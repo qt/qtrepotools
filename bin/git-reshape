@@ -1,0 +1,13 @@
+#! /bin/sh
+# Copyright (C) 2019 Oswald Buddenhagen
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+
+# This script provides a convenient way to reshape the local branch
+# without accidentally rebasing it even if the remote was fetched
+# meanwhile.
+
+b=$(git merge-base @{u} HEAD) || exit
+exec git rebase -i $b "$@"
