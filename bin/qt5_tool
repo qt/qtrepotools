@@ -158,8 +158,12 @@ my $minGW = 0;
 
 sub checkMake
 {
-    my $useIncredibuild = readQt5ToolConfigBool('incredibuild') || defined($optIncredibuild);
-    my $jobs = readQt5ToolConfigInt('jobs', -1);
+    my $useIncredibuild = undef;
+    my $jobs = -1;
+    if (defined($configFile) && -f $configFile) {
+        $useIncredibuild = readQt5ToolConfigBool('incredibuild') || defined($optIncredibuild);
+        $jobs = readQt5ToolConfigInt('jobs', -1);
+    }
     if ($os == $OS_WINDOWS) {
         if (which('g++')) {
             $make = 'mingw32-make';
