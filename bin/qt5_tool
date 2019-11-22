@@ -574,13 +574,20 @@ sub checkoutBranch
     # Does the local branch exist?
     my $rc = 0;
     if (!grep(/^  $desiredBranch$/, @branches)) {
-        my $remoteBranchName = 'origin/' . $desiredBranch;
         # Does the remote branch exist?
+        my $remoteBranchPattern = '^\s*(origin/.*' . $desiredBranch . ')$';
         $rc = execute($git, ('fetch', 'origin'));
         die 'fetch of ' . $mod . ' failed'  if ($rc);
         my @availableRemoteBranches = split("\n", `"$git" branch -r`);
-        if (!grep(/^  $remoteBranchName$/, @availableRemoteBranches)) {
-            print $mod, ' does not have the remote branch of "', $remoteBranchName, "\" set up, skipping.\n";
+        my $remoteBranchName = undef;
+        for my $remoteBranch (@availableRemoteBranches) {
+            if ($remoteBranch =~ /$remoteBranchPattern/) {
+                $remoteBranchName = $1;
+                last;
+            }
+        }
+        if (!$remoteBranchName) {
+            print $mod, ' does not have the remote branch of "', $desiredBranch, "\" set up, skipping.\n";
             return 0;
         }
         $rc = execute($git, ('branch', '--track', $desiredBranch, $remoteBranchName));
