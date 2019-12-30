@@ -452,10 +452,11 @@ sub map_remote_changes($)
 use constant {
     NEW => 'NEW',
     MODIFIED => 'MODIFIED',
-    UNMODIFIED  => 'UNMODIFIED'
+    UNMODIFIED  => 'UNMODIFIED',
+    OUTDATED => 'OUTDATED',
+    MERGED => 'MERGED',
+    REJECTED => 'REJECTED'
 };
-
-my $have_modified = 0;
 
 sub classify_changes_offline($)
 {
@@ -469,10 +470,54 @@ sub classify_changes_offline($)
                 $$change{freshness} = UNMODIFIED;
             } else {
                 $$change{freshness} = MODIFIED;
-                $have_modified++;
             }
         } else {
             $$change{freshness} = NEW;
+        }
+    }
+}
+
+my $have_rejected = 0;
+my $have_modified = 0;
+
+sub classify_changes_online($)
+{
+    my ($group) = @_;
+
+    foreach my $change (@{$$group{changes}}) {
+        my $commit = $$change{local};
+        my $sha1 = $$commit{id};
+        my $ginfo = $$change{gerrit};
+        my $status = $ginfo && $$ginfo{status};
+        my $curr_sha1 = $ginfo && $$ginfo{revs}[-1]{id};
+        my $chg_revs = $ginfo && $$ginfo{rev_by_id};
+        my $this_rev = $chg_revs && $$chg_revs{$sha1};
+        if ($this_rev) {
+            $$change{patchset} = $$this_rev{ps};
+            $$change{freshness} =
+                ($status eq 'MERGED') ? MERGED :
+                ($sha1 eq $curr_sha1) ? UNMODIFIED : OUTDATED;
+        } elsif ($ginfo && ($status ne 'NEW')) {
+            # We are attempting a push which Gerrit will reject anyway.
+            my $err;
+            if ($status eq 'MERGED') {
+                $err = "Change is already MERGED; please pull/rebase.";
+            } elsif ($status eq 'STAGED' || $status eq 'INTEGRATING') {
+                $err = "Change is currently $status; cannot proceed.";
+            } elsif ($status eq 'DEFERRED' || $status eq 'ABANDONED') {
+                $err = "Change is $status; please restore it first.";
+            } else {
+                $err = "Change is in unknown state '$status'. I'm stumped. :}";
+            }
+            set_change_error($change, 'oneline', $err);
+            $$change{freshness} = REJECTED;
+            $have_rejected++;
+        } else {
+            if ($ginfo) {
+                $$change{freshness} = MODIFIED;
+            } else {
+                $$change{freshness} = NEW;
+            }
             $have_modified++;
         }
     }
@@ -494,6 +539,8 @@ sub annotate_changes($)
         # most Changes are usually not modified) seems most sensible.
         my $freshness = $$change{freshness};
         if ($freshness ne UNMODIFIED) {
+            $freshness = "PS$$change{patchset}/$freshness"
+                if ($freshness eq OUTDATED);
             push @attribs, $freshness;
         }
         $$change{annotation} = '  ['.join('; ', @attribs).']'
@@ -514,6 +561,23 @@ sub show_changes($)
     my ($group) = @_;
 
     print format_reports(make_listing($group));
+}
+
+sub fail_push($@)
+{
+    my ($group, @msgs) = @_;
+
+    my $reports = make_listing($group);
+    report_fixed($reports, @msgs);
+    fail_formatted($reports);
+}
+
+sub print_errors($)
+{
+    my ($group) = @_;
+
+    fail_push($group, "Giving up - push is going to be rejected.\n")
+        if ($have_rejected);
 }
 
 sub push_changes($)
@@ -562,12 +626,15 @@ sub execute_pushing()
     determine_remote_branch($group);
     if ($online) {
         map_remote_changes($group);
+        classify_changes_online($group);
+    } elsif (!$quiet) {
+        classify_changes_offline($group);
     }
-    classify_changes_offline($group);
     if ($list_only) {
         show_changes($group);
         print "Not pushing - list mode.\n" if ($debug);
     } else {
+        print_errors($group);
         show_changes($group) if (!$quiet);
         if ($have_modified) {
             push_changes($group);

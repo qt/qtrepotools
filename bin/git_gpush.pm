@@ -815,6 +815,13 @@ sub report_fixed($@)
     };
 }
 
+sub set_change_error($$$)
+{
+    my ($change, $style, $error) = @_;
+
+    ($$change{error_style}, $$change{error}) = ($style, $error);
+}
+
 sub report_local_changes($$)
 {
     my ($reports, $changes) = @_;
@@ -828,6 +835,12 @@ sub report_local_changes($$)
             prefix => "  ",
             annotation => $$change{annotation}
         };
+        my $error = $$change{error};
+        if (defined($error)) {
+            $error = (" " x (3 + _ID_WIDTH)).$error."\n"
+                if (($$change{error_style} // 'oneline') eq 'oneline');
+            report_fixed($reports, $error);
+        }
     }
 }
 
@@ -1045,20 +1058,23 @@ sub query_gerrit($;$)
         defined($branch) or fail("Huh?! $changeid has no branch?\n");
         my $pss = $$review{'patchSets'};
         defined($pss) or fail("Huh?! $changeid has no PatchSets?\n");
-        my @revs;
+        my (@revs, %rev_map);
         foreach my $cps (@{$pss}) {
             my ($number, $revision) = ($$cps{'number'}, $$cps{'revision'});
             defined($number) or fail("Huh?! PatchSet in $changeid has no number?\n");
             defined($revision) or fail("Huh?! PatchSet $number in $changeid has no commit?\n");
             my %rev = (
-                id => $revision
+                id => $revision,
+                ps => $number
             );
             $revs[$number] = \%rev;
+            $rev_map{$revision} = \%rev;
         }
         $$ginfo{id} = $changeid;
         $$ginfo{status} = $status;
         $$ginfo{branch} = $branch;
         $$ginfo{revs} = [ grep { $_ } @revs ];  # Drop deleted ones.
+        $$ginfo{rev_by_id} = \%rev_map;
         push @ginfos, $ginfo;
     }
     close_process($info);
