@@ -1,0 +1,828 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+
+#############################################################################
+##
+## Copyright (C) 2020 The Qt Company Ltd.
+## Contact: https://www.qt.io/licensing/
+##
+## This file is part of the build tools of Qt.
+##
+## $QT_BEGIN_LICENSE:LGPL$
+## Commercial License Usage
+## Licensees holding valid commercial Qt licenses may use this file in
+## accordance with the commercial license agreement provided with the
+## Software or, alternatively, in accordance with the terms contained in
+## a written agreement between you and The Qt Company. For licensing terms
+## and conditions see https://www.qt.io/terms-conditions. For further
+## information use the contact form at https://www.qt.io/contact-us.
+##
+## GNU Lesser General Public License Usage
+## Alternatively, this file may be used under the terms of the GNU Lesser
+## General Public License version 3 as published by the Free Software
+## Foundation and appearing in the file LICENSE.LGPL3 included in the
+## packaging of this file. Please review the following information to
+## ensure the GNU Lesser General Public License version 3 requirements
+## will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
+##
+## GNU General Public License Usage
+## Alternatively, this file may be used under the terms of the GNU
+## General Public License version 2.0 or (at your option) the GNU General
+## Public license version 3 or any later version approved by the KDE Free
+## Qt Foundation. The licenses are as published by the Free Software
+## Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
+## included in the packaging of this file. Please review the following
+## information to ensure the GNU General Public License requirements will
+## be met: https://www.gnu.org/licenses/gpl-2.0.html and
+## https://www.gnu.org/licenses/gpl-3.0.html.
+##
+## $QT_END_LICENSE$
+##
+#############################################################################
+
+from argparse import ArgumentParser, RawTextHelpFormatter
+from enum import Enum
+import os
+import re
+import subprocess
+import sys
+import shutil
+import time
+import yaml  # pip install pyyaml
+import warnings
+
+DESCRIPTION = """
+Typical Usage:
+
+Create a repository          : qt6_tool -i qt-6
+
+Update and build a repository: qt6_tool -p -b
+
+Build and install directories are siblings to the repository
+named build-<repository> and install-<repository>.
+
+qt6_tool.py can be configured by creating a configuration file
+in the format key=value:
+    "%CONFIGFILE%"
+
+Configuration keys:
+Acceleration     Incredibuild or unset
+BuildType        CMake Build type
+CMake            CMake binary
+DeveloperBuild   (boolean) Developer build
+DisabledFeatures Disabled CMake features
+Features         CMake features
+Examples         (boolean) whether to build examples
+Generator        CMake generator, defaults to Ninja
+Mkspec           Qt make spec (e.g. win32-g++)
+GerritUser       Gerrit user
+InitArguments    ,-separated list of arguments to init-repository
+Jobs             Number of jobs to be run simultaneously
+Modules          ,-separated list of modules to build ("all": all modules,
+                 ("wall": all modules except qtwebengine [default]).
+Static           Build statically
+Tests            (boolean) whether to build tests
+
+It is possible to use repository-specific values by adding a suffix preceded by
+a dash, eg:
+Modules-qt-611=qtbase,qtdeclarative
+The suffix defaults to the repository folder base name unless specified
+on the command line
+Arbitrary keys can be referenced by $(name):
+
+Run pip install pyyaml to install the required modules (Windows: Admin)
+"""
+
+
+class BuildMode(Enum):
+    NONE = 0
+    BUILD = 1
+    RECONFIGURE = 2
+    MAKE = 3
+
+
+class Platform(Enum):
+    UNIX = 0
+    WINDOWS = 1
+    MACOS = 2
+
+
+class Generator(Enum):
+    NINJA = 0
+    MAKE = 1
+    NMAKE = 2
+    JOM = 3
+
+
+class Acceleration(Enum):
+    NONE = 0
+    INCREDIBUILD = 1
+
+
+qt_dir = None
+config_suffix = None
+install_dir = None
+build_dir = None
+build_mode = BuildMode.NONE
+opt_dry_run = False
+
+PLATFORM = Platform.UNIX
+if sys.platform == 'win32':
+    PLATFORM = Platform.WINDOWS
+elif sys.platform == 'darwin':
+    PLATFORM = Platform.MACOS
+
+INCREDIBUILD_CONSOLE = 'BuildConsole' if PLATFORM == Platform.WINDOWS \
+                       else '/opt/incredibuild/bin/ib_console'
+
+config_file = None
+
+DEFAULT_GENERATOR_NAME = 'Ninja'
+GENERATORS = {'Ninja': Generator.NINJA,
+              'Unix Makefiles': Generator.MAKE,
+              'MinGW Makefiles': Generator.MAKE,
+              'NMake Makefiles': Generator.NMAKE,
+              'NMake Makefiles JOM': Generator.JOM}
+GIT_IGNORE_FOR_BRANCHES = ['qtcanvas3d', 'qtrepotools', 'qtqa']
+
+# Config file keys
+ACCELERATION_KEY = 'Acceleration'
+BUILD_EXAMPLES_KEY = 'Examples'
+BUILD_TESTS_KEY = 'Tests'
+BUILD_TYPE_KEY = 'BuildType'
+CMAKE_KEY = 'CMake'
+DEVELOPER_BUILD_KEY = 'DeveloperBuild'
+DISABLED_FEATURES_KEY = 'DisabledFeatures'
+FEATURES_KEY = 'Features'
+GENERATOR_KEY = 'Generator'
+GERRIT_USER_KEY = 'GerritUser'
+INIT_ARGUMENTS_KEY = 'InitArguments'
+JOBS_KEY = 'Jobs'
+MKSPEC_KEY = 'Mkspec'
+MODULES_KEY = 'Modules'
+STATIC_KEY = 'Static'
+
+
+def default_config_file():
+    return (f"{GENERATOR_KEY}={DEFAULT_GENERATOR_NAME}\n"
+            f"{BUILD_TESTS_KEY}=False\n"
+            f"{BUILD_TYPE_KEY}=Debug\n"
+            f"{BUILD_EXAMPLES_KEY}=False\n"
+            f"{INIT_ARGUMENTS_KEY}=--module-subset=default,-qtwebengine\n")
+
+
+def which(needle):
+    """Perform a path search"""
+    needles = [needle]
+    if PLATFORM == Platform.WINDOWS:
+        for ext in ("exe", "bat", "cmd"):
+            needles.append("{}.{}".format(needle, ext))
+
+    for path in os.environ.get("PATH", "").split(os.pathsep):
+        for n in needles:
+            binary = os.path.join(path, n)
+            if os.path.isfile(binary):
+                return binary
+    return None
+
+
+def command_log_string(args, dir):
+    return '[### {}] {}'.format(os.path.basename(dir), ' '.join(args))
+
+
+def execute(args):
+    """Execute a command and print to log"""
+    cur_dir = os.getcwd()
+    log_string = command_log_string(args, cur_dir)
+    print(log_string)
+    if opt_dry_run:
+        return
+    exit_code = subprocess.call(args)
+    if exit_code != 0:
+        raise RuntimeError(f'FAIL({exit_code}): {log_string} in {cur_dir}')
+
+
+def execute_in_dir(args, dir):
+    """Execute a command in a directory and print to log"""
+    if opt_dry_run:
+        print(command_log_string(args, dir))
+        return
+    current_dir = os.getcwd()
+    try:
+        os.chdir(dir)
+        execute(args)
+    finally:
+        os.chdir(current_dir)
+
+
+def run_process_output(args):
+    """Run a process and return its output. Also run in dry_run mode"""
+    std_out = subprocess.Popen(args, universal_newlines=1,
+                               stdout=subprocess.PIPE).stdout
+    result = [line.rstrip() for line in std_out.readlines()]
+    std_out.close()
+    return result
+
+
+def run_process_output_in_dir(args, dir):
+    """Run a process in dir and return its output. Also run in dry_run mode"""
+    current_dir = os.getcwd()
+    result = []
+    try:
+        os.chdir(dir)
+        result = run_process_output(args)
+    finally:
+        os.chdir(current_dir)
+    return result
+
+
+def git_branch(dir):
+    """Returns a tuple of current_branch, branches"""
+    branches = []
+    current_branch = None
+    for line in run_process_output_in_dir([git, 'branch'], dir):
+        branch = line[2:]  # "* dev\n  5.12"
+        if line.startswith('* '):
+            current_branch = branch
+        branches.append(branch)
+    return (current_branch, branches)
+
+
+def git_remote_branches(dir):
+    """Returns remote branches"""
+    branches = []
+    for line in run_process_output_in_dir([git, 'branch', '-r'], dir):
+        if '->' not in line:
+            branches.append(line[2:])
+    return branches
+
+
+def git_checkout_branch(dir, desired_branch):
+    branches = git_branch(dir)
+    # Already on desired branch
+    if branches[0] and branches[0] == desired_branch:
+        return
+    if desired_branch not in branches[1]:
+        # Try to find matching remote branch
+        desired_remote_branch = None
+        needle = f'/{desired_branch}'
+        remote_branches = git_remote_branches(dir)
+        for remote_branch in remote_branches:
+            if remote_branch.endswith(needle):
+                desired_remote_branch = remote_branch
+                break
+        if not desired_remote_branch:
+            base = os.path.basename(dir)
+            available = ', '.join(remote_branches)
+            m = f'[{base}]: Cannot find {desired_branch} in: {available}'
+            warnings.warn(m, RuntimeWarning)
+            return
+        execute_in_dir([git, 'branch', '--track', desired_branch,
+                       desired_remote_branch], dir)
+    execute_in_dir([git, 'checkout', desired_branch], dir)
+
+
+def is_available_module(dir_entry, filter_buildable=False):
+    """Check whether a directory is an available Qt module (under git)"""
+    if dir_entry == 'qtqa':
+        return False;
+    path = os.path.join(qt_dir, dir_entry)
+    git_config = os.path.join(path, '.git')
+    if not os.path.isdir(path) or not os.path.exists(git_config):
+        return False;
+    if filter_buildable:
+        cmake_list = os.path.join(path, 'CMakeLists.txt')
+        if not os.path.isfile(cmake_list):
+            return False;
+    return True
+
+
+def available_modules(filter_buildable=False):
+    """Return available Qt modules (under git)"""
+    result = []
+    for entry in os.listdir(qt_dir):
+        if is_available_module(entry, filter_buildable):
+            result.append(entry)
+    return result
+
+
+def modules_dependencies():
+    """Return a dict modules to their required modules with parameters as
+       obtained by parsing the dependencies.yaml files."""
+    result = {}
+    for module in os.listdir(qt_dir):
+        dependencies = os.path.join(qt_dir, module, 'dependencies.yaml')
+        if os.path.isfile(dependencies):
+            dependencies_dict = {}
+            try:
+                file = open(dependencies, 'r')
+                # Fix the dependent keys having a "../" prefix
+                dep_yaml = yaml.load(file, Loader=yaml.SafeLoader)
+                items = dep_yaml.get('dependencies').items()
+                for dep_module, param_dict in items:
+                    if dep_module.startswith('../'):
+                        dep_module = dep_module[3:]
+                    dependencies_dict[dep_module] = param_dict
+                result[module] = dependencies_dict
+            except Exception as e:
+                print('Error parsing ', dependencies, ': ', str(e))
+            finally:
+                file.close()
+    return result
+
+
+def print_dependency_graph(modules_dependency_dict):
+    """Print a graph showing dependencies for graphviz.
+       modules_dependency_dict is obtained from modules_dependencies(). Pipe
+        the output into | dot -ot.jpg -Tjpg"""
+    print('digraph Dependencies {')
+    for module, dependencies in modules_dependency_dict.items():
+        for dep_module, param_dict in dependencies.items():
+            required = param_dict.get('required')
+            edge_attribute = ' [style=bold]' if required else ''
+            print(f'    {module} -> {dep_module}{edge_attribute}')
+    print('}')
+
+
+def sort_by_dependencies(desired_module_list, modules_dependency_dict):
+    """Sort a list of modules to be built so that the dependencies
+       are built in order. modules_dependency_dict is obtained from
+       modules_dependencies()"""
+    result = []
+    # Transform the dependency dict into a simple dict
+    # of module->list of required modules for the desired list.
+    simple_dependencies = {}
+    for module, dependencies in modules_dependency_dict.items():
+        if module in desired_module_list:
+            required_dependencies = []
+            for dep_module, param_dict in dependencies.items():
+                if (param_dict.get('required') or
+                    (module == 'qtdeclarative' and dep_module == 'qtshadertools')):
+                    required_dependencies.append(dep_module)
+            simple_dependencies[module] = required_dependencies
+    # Brute force: Keep adding modules all of whose requirements are present
+    # to result list until done.
+    while len(result) < len(desired_module_list):
+        found = False
+        for module, dependencies in simple_dependencies.items():
+            if module not in result:
+                if all(dependency in result for dependency in dependencies):
+                    result.append(module)
+                    found = True
+        if not found:
+            message = 'Module dependencies are not satisfied for'
+            for desired_module in desired_module_list:
+                if desired_module not in result:
+                    message += ' ' + desired_module
+            raise ValueError(message)
+    return result
+
+
+def checkout_branch(branch):
+    """Switch repository to a branch"""
+    git_checkout_branch(qt_dir, branch)
+    for module in available_modules():
+        if module not in GIT_IGNORE_FOR_BRANCHES:
+            dir = os.path.join(qt_dir, module)
+            git_checkout_branch(dir, branch)
+
+
+def run_git(args):
+    """Run git in the Qt directory and its submodules"""
+    args.insert(0, git)  # run in repo
+    execute_in_dir(args, qt_dir)  # run for submodules
+    module_args = [git, "submodule", "foreach"]
+    module_args.extend(args)
+    execute_in_dir(module_args, qt_dir)
+
+
+def expand_reference(cache_dict, value):
+    """Expand references to other keys in config files $(name) by value."""
+    pattern = re.compile(r"\$\([^)]+\)")
+    while True:
+        match = pattern.match(value)
+        if not match:
+            break
+        key = match.group(0)[2:-1]
+        value = value[:match.start(0)] + cache_dict[key] + value[match.end(0):]
+    return value
+
+
+# Config file handling, cache and read function
+config_dict = {}
+
+
+def read_config_file(file_name):
+    """Read the config file into config_dict, expanding continuation lines"""
+    global config_dict
+    keyPattern = re.compile(r'^\s*([A-Za-z0-9\_\-]+)\s*=\s*(.*)$')
+    with open(file_name) as f:
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            line = line.rstrip()
+            match = keyPattern.match(line)
+            if match:
+                key = match.group(1)
+                value = match.group(2)
+                while value.endswith('\\'):
+                    value = value.rstrip('\\')
+                    value += f.readline().rstrip()
+                config_dict[key] = expand_reference(config_dict, value)
+
+
+def read_config(key):
+    """Read a value from the configuration file (caching it in a dict). When
+       given a key 'key' for the repository directory '/foo/qt-6', check for
+       the repo-specific value 'key-qt6' and then for the general 'key'."""
+    if not config_dict:
+        read_config_file(config_file)
+    repo_value = config_dict.get(key + '-' + config_suffix)
+    return repo_value if repo_value else config_dict.get(key)
+
+
+def read_bool_config(key):
+    value = read_config(key)
+    return value and value in ['1', 'true', 'True']
+
+
+def read_int_config(key, default=-1):
+    value = read_config(key)
+    return int(value) if value else default
+
+
+def read_list_config(key):
+    value = read_config(key)
+    return value.split(',') if value else []
+
+
+def read_cmake_bool_config(key):
+    return 'ON' if read_bool_config(key) else 'OFF'
+
+
+def read_generator_config():
+    value = read_config(GENERATOR_KEY)
+    return value if value else DEFAULT_GENERATOR_NAME
+
+
+def read_acceleration_config():
+    value = read_config(ACCELERATION_KEY)
+    if value:
+        value = value.lower()
+        if value == 'incredibuild':
+            return Acceleration.INCREDIBUILD
+    return Acceleration.NONE
+
+
+def read_config_modules_argument():
+    value = read_list_config(MODULES_KEY)
+    if len(value) > 1:
+        return value
+    # Special keywords
+    if len(value) == 1 and value[0] == 'all':
+        return available_modules(True)
+    if not value or (len(value) == 1 and value[0] == 'wall'):
+        all_buildable_modules = available_modules(True)
+        if 'qtwebengine' in all_buildable_modules:
+            all_buildable_modules.remove('qtwebengine')
+        return all_buildable_modules
+    return value
+
+
+def cmake():
+    result = read_config(CMAKE_KEY)
+    return result if result else 'cmake'
+
+
+def get_config_file(base_name):
+    """Return configure file path, .config/qt6_tool.config, or equivalent on
+       Windows"""
+    home = os.getenv('HOME')
+    if PLATFORM == Platform.WINDOWS:
+        # Set a HOME variable on Windows such that scp. etc.
+        # feel at home (locating .ssh).
+        if not home:
+            home = os.getenv('HOMEDRIVE') + os.getenv('HOMEPATH')
+            os.environ['HOME'] = home
+        return os.path.join(os.getenv('APPDATA'), base_name)
+    config_dir = os.path.join(home, '.config')
+    if os.path.exists(config_dir):
+        return os.path.join(config_dir, base_name)
+    return os.path.join(home, '.' + base_name)
+
+
+def editor():
+    editor = os.getenv('EDITOR')
+    if not editor:
+        return 'notepad' if PLATFORM == Platform.WINDOWS else 'vi'
+    editor = editor.strip()
+    if PLATFORM == Platform.WINDOWS:
+        # Windows: git requires quotes in the variable
+        if editor.startswith('"') and editor.endswith('"'):
+            editor = editor[1:-1]
+        editor = editor.replace('/', '\\')
+    return editor
+
+
+def edit_config_file():
+    exit_code = -1
+    try:
+        exit_code = subprocess.call([editor(), config_file])
+    except Exception as e:
+        print('Unable to launch: {}: {}'.format(editor(), str(e)))
+    return exit_code
+
+
+def create_argument_parser(desc):
+    parser = ArgumentParser(description=desc,
+                            formatter_class=RawTextHelpFormatter)
+    parser.add_argument('--branch', '-B',
+                        help='Checkout tracking branch')
+    parser.add_argument('--build', '-b', action='store_true',
+                        help='Build (configure + build)')
+    parser.add_argument('--clean', '-c', action='store_true',
+                        help='Git clean')
+    parser.add_argument('--dependencies', '-D', action='store_true',
+                        help='Print a dependency graph for Graphviz')
+    parser.add_argument('--dry-run', '-d', action='store_true',
+                        help='Dry run, print commands')
+    parser.add_argument('--edit', '-e', action='store_true',
+                        help='Edit config file')
+    parser.add_argument('--init', '-i',
+                        help='Init a new repository')
+    parser.add_argument('--make', '-m', action='store_true',
+                        help='Make')
+    parser.add_argument('--pull', '-p', action='store_true',
+                        help='Git pull')
+    parser.add_argument('--reconfigure', '-R', action='store_true',
+                        help='Reconfigure and build')
+    parser.add_argument('--suffix', '-s',
+                        help='Suffix')
+    parser.add_argument('--reset', '-r', action='store_true',
+                        help='Git reset hard to upstream state')
+    parser.add_argument('--test', '-t', action='store_true',
+                        help='Test')
+    parser.add_argument('--version', '-v', action='version',
+                        version='%(prog)s 1.0')
+    parser.add_argument("modules", help="Override modules configuration",
+                        nargs='*', type=str)
+    return parser
+
+
+def ensure_dir(dir):
+    if not os.path.isdir(dir):
+        print(f'Creating {dir}')
+        if not opt_dry_run:
+            os.mkdir(dir)
+
+
+def remove_dir_recursively(dir):
+    if not os.path.exists(dir):
+        return
+    if not os.path.isdir(dir):
+        raise RuntimeError(f'{dir} is not a directory')
+    print(f'Removing {dir} ...')
+    if not opt_dry_run:
+        shutil.rmtree(dir, ignore_errors=True)
+
+
+def configure_arguments():
+    generator = read_generator_config()
+    build_type = read_config(BUILD_TYPE_KEY)
+    build_examples = read_bool_config(BUILD_EXAMPLES_KEY)
+    build_tests = read_bool_config(BUILD_TESTS_KEY)
+    build_statically = read_bool_config(STATIC_KEY)
+    mkspec = read_config(MKSPEC_KEY)
+
+    result = [cmake(), f'-DCMAKE_INSTALL_PREFIX={install_dir}',
+              f'-G{generator}']
+
+    if not build_tests:
+        result.append('-DQT_BUILD_TESTS=OFF')
+    if not build_examples:
+        result.append('-DQT_BUILD_EXAMPLES=OFF')
+    if build_statically:
+        result.append('-DBUILD_SHARED_LIBS=OFF')
+    if mkspec:
+        result.append(f'-DQT_QMAKE_TARGET_MKSPEC={mkspec}')
+
+    features = read_list_config(FEATURES_KEY)
+    if read_bool_config(DEVELOPER_BUILD_KEY):
+        features.append('developer_build')
+    for feature in features:
+        result.append(f'-DFEATURE_{feature}=ON')
+    for disabled_feature in read_list_config(DISABLED_FEATURES_KEY):
+        result.append(f'-DFEATURE_{disabled_feature}=OFF')
+
+    if build_type:
+        result.append(f'-DCMAKE_BUILD_TYPE={build_type}')
+    return result
+
+
+def windows_build_cmd(generator, jobs):
+    """Return Windows build command without acceleration"""
+    if generator == Generator.NINJA:
+        return ['ninja', '-j', str(jobs)]
+    if generator == Generator.MAKE:
+        return ['mingw32-make', '-s', '-j', str(jobs)]
+    if generator == Generator.JOM:
+        return ['jom', '/s', '/j', str(jobs)]
+    return ['nmake', '/s', '/nologo']
+
+
+def windows_incredibuild_cmd(generator, jobs):
+    """Return Windows build command for incredibuild"""
+    cmd = ' '.join(windows_build_cmd(generator, jobs))
+    return [INCREDIBUILD_CONSOLE, f'/command={cmd}']
+
+
+def unix_build_cmd(acceleration, generator, jobs):
+    """UNIX build command"""
+    result = []
+    if acceleration == Acceleration.INCREDIBUILD:
+        result.extend([INCREDIBUILD_CONSOLE, '--avoid'])
+    if generator == Generator.NINJA:
+        result.extend(['ninja', '-j', str(jobs)])
+    else:
+        result.extend(['make', '-s', '-j', str(jobs)])
+    return result
+
+
+def build_cmd():
+    """Determine build command"""
+    jobs = read_int_config(JOBS_KEY, 1)
+    acceleration = read_acceleration_config()
+    if acceleration == Acceleration.NONE and jobs <= 1:
+        return [cmake(), '--build', '.', '--parallel']
+    generator = GENERATORS.get(read_generator_config())
+    if not generator:
+        values = '", "'.join(GENERATORS.keys())
+        raise ValueError(f'Generator must be one of "{values}")')
+
+    if PLATFORM == Platform.WINDOWS:
+        if acceleration == Acceleration.INCREDIBUILD:
+            return windows_incredibuild_cmd(generator, jobs)
+        return windows_build_cmd(generator, jobs)
+    return unix_build_cmd(acceleration, generator, jobs)
+
+
+def build(modules, default_modules):
+    """Run configure and build steps"""
+    start_time = time.time()
+    # Building default: Wipe all directories
+    if build_mode == BuildMode.BUILD and default_modules:
+        remove_dir_recursively(install_dir)
+        remove_dir_recursively(build_dir)
+
+    ensure_dir(install_dir)
+    ensure_dir(build_dir)
+
+    for module in modules:
+        module_build_dir = os.path.join(build_dir, module)
+        if build_mode == BuildMode.BUILD and not default_modules:
+            remove_dir_recursively(module_build_dir)
+        ensure_dir(module_build_dir)
+
+        cmake_cache = os.path.join(module_build_dir, 'CMakeCache.txt')
+        if build_mode == BuildMode.RECONFIGURE:
+            if os.path.isfile(cmake_cache):
+                os.remove(cmake_cache)
+
+        if build_mode != BuildMode.MAKE or not os.path.isfile(cmake_cache):
+            cmake_args = configure_arguments()
+            source = os.path.join(qt_dir, module)
+            cmake_args.append(f'-H{source}')
+            execute_in_dir(cmake_args, module_build_dir)
+
+        execute_in_dir(build_cmd(), module_build_dir)
+
+        install_cmd = [cmake(), '--install', '.']
+        execute_in_dir(install_cmd, module_build_dir)
+
+    elapsed_time = int(time.time() - start_time)
+    print(f'--- Done({elapsed_time}s) ---')
+
+
+def run_tests(modules):
+    """Run tests"""
+    start_time = time.time()
+    result = 0
+    test_cmd = ['ctest', '--progress', '--output-on-failure']
+    for module in modules:
+        module_build_dir = os.path.join(build_dir, module)
+        try:
+            execute_in_dir(test_cmd, module_build_dir)
+        except Exception:
+            result += 1
+    elapsed_time = int(time.time() - start_time)
+    print(f'--- Done({result}, {elapsed_time}s) ---')
+    return result
+
+
+def init_repository(dir):
+    global qt_dir
+    target = os.path.basename(dir)
+    execute_in_dir([git, 'clone', 'git://code.qt.io/qt/qt5.git', target],
+                   os.path.dirname(dir))
+
+    init_cmd = ['perl', 'init-repository'] if PLATFORM == Platform.WINDOWS \
+               else ['./init-repository']
+    init_arguments_value = read_config(INIT_ARGUMENTS_KEY)
+    if init_arguments_value:
+        init_cmd.extend(init_arguments_value.split(' '))
+    user = read_config(GERRIT_USER_KEY)
+    if user:
+        init_cmd.append(f'--codereview-username={user}')
+    execute_in_dir(init_cmd, dir)
+    qt_dir = dir
+    checkout_branch('dev')
+
+
+if __name__ == '__main__':
+    if sys.version_info[0] == 2 or sys.version_info[1] < 6:
+        print('Requires Python 3.6')
+        sys.exit(-1)
+
+    config_file = get_config_file('qt6_tool.conf')
+
+    desc = DESCRIPTION.replace('%CONFIGFILE%', config_file)
+    argument_parser = create_argument_parser(desc)
+    options = argument_parser.parse_args()
+    opt_dry_run = options.dry_run
+
+    # We expect to live in qtrepotools/bin
+    qt_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    if options.dependencies:
+        print_dependency_graph(modules_dependencies())
+        sys.exit(0)
+
+    if not os.path.exists(config_file) and not opt_dry_run:
+        print('Create initial config file ', config_file, " ..")
+        with open(config_file, 'w') as f:
+            f.write(default_config_file())
+
+    if options.edit:
+        sys.exit(edit_config_file())
+
+    if options.build:
+        build_mode = BuildMode.BUILD
+    elif options.make:
+        build_mode = BuildMode.MAKE
+    elif options.reconfigure:
+        build_mode = BuildMode.RECONFIGURE
+
+    if build_mode == BuildMode.NONE and not (options.init or options.branch
+        or options.clean or options.pull or options.test or options.reset):
+        argument_parser.print_help()
+        sys.exit(0)
+
+    config_suffix = options.suffix if options.suffix else os.path.basename(qt_dir)
+    install_dir = os.path.join(os.path.dirname(qt_dir),
+                               f'install-{config_suffix}')
+    build_dir = os.path.join(os.path.dirname(qt_dir),
+                             f'build-{config_suffix}')
+
+    git = which('git')
+    if git is None:
+        print('Unable to find git')
+        sys.exit(-1)
+    # Windows: git submodule foreach cannot handle spaces or backslashes
+    if sys.platform == 'win32':
+        git = 'git.exe'
+
+    if options.branch:
+        checkout_branch(options.branch)
+        sys.exit(0)
+
+    if options.init:
+        init_repository(os.path.abspath(options.init))
+        sys.exit(0)
+
+    if not os.path.isdir(qt_dir):
+        print(f'{qt_dir} is not a valid Qt directory.')
+        sys.exit(-1)
+
+    if options.clean:
+        run_git(['clean', '-dxf'])
+
+    if options.reset:
+        run_git(['reset', '--hard', '@{upstream}'])
+
+    if options.pull:
+        run_git(['pull', '--rebase'])
+
+    sorted_modules = options.modules
+    use_default_modules = not sorted_modules
+    if use_default_modules and (build_mode != BuildMode.NONE or options.test):
+        sorted_modules = sort_by_dependencies(read_config_modules_argument(),
+                                           modules_dependencies())
+
+    if build_mode != BuildMode.NONE:
+        build(sorted_modules, use_default_modules)
+
+    if options.test:
+        sys.exit(run_tests(sorted_modules))
+
+    sys.exit(0)
