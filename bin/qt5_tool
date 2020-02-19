@@ -193,6 +193,7 @@ sub checkMake
             my $ib_console = '/opt/incredibuild/bin/ib_console';
             if (-x $ib_console) {
                 unshift(@makeArgs, $make);
+                unshift(@makeArgs, '--avoid'); # caching, v0.96.74
                 $make = $ib_console;
             }
         }
