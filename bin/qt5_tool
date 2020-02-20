@@ -39,6 +39,8 @@ my $BOOTSTRAP=0;
 my $STATUS=0;
 my $UPDATE=0;
 my $TEST=0;
+my $optDryRun;
+my $optEditConfig;
 my $optGerritModule;
 my $optIncredibuild;
 my $optGitHooks;
@@ -57,6 +59,7 @@ Feel free to extend!
 
 Options:
   -d  Diff (over all modules, relative to root)
+  -e  Edit config file
   -s  Status
   -r  Reset hard to upstream state
   -c  Clean
@@ -70,6 +73,7 @@ Options:
   -q  Quick bootstrap a new checkout under current folder.
   -g <module> Set up gerrit for the module.
   -i  Use incredibuild
+  -D  Dry run, print commands
 
 Example use cases:
   qt5_tool -c -u -b             Clean, update and build for nightly builds
@@ -232,7 +236,7 @@ sub execute
 {
     my @args = @_;
     print '### [',basename(getcwd()),'] ', join(' ', @args),"\n";
-    return system(@args);
+    return $optDryRun ? 0 : system(@args);
 }
 
 sub executeCheck
@@ -240,6 +244,16 @@ sub executeCheck
     my @args = @_;
     my $rc = execute(@args);
     die ($args[0] . ' failed ' . $rc . ':' . $!) if $rc != 0;
+}
+
+sub editor
+{
+   my $editor = $ENV{'EDITOR'};
+   if (defined($editor)) {
+        $editor = substr($editor, 1, length($editor) - 2) if $editor =~ /^".*"$/;
+        return $editor;
+   }
+   return $os == $OS_WINDOWS ? 'notepad' : 'vi';
 }
 
 # --- Prompt for input with a default
@@ -606,15 +620,23 @@ my $startTime = time();
 
 $Getopt::ignoreCase = 0;
 if (!GetOptions('clean' => \$CLEAN,
-     'pull' => \$PULL, 'Branch=s' => \$optDesiredBranch, 'update' => \$UPDATE, 'reset' => \$RESET, 'diff' => \$DIFF, 's' => \$STATUS,
+     'pull' => \$PULL, 'Branch=s' => \$optDesiredBranch,
+     'Dry-run' => \$optDryRun, 'edit' => \$optEditConfig,
+     'update' => \$UPDATE, 'reset' => \$RESET,
+     'diff' => \$DIFF, 's' => \$STATUS,
      'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
      'gerrit=s' => \$optGerritModule, 'hooks' => \$optGitHooks,
      'quick-bootstrap'  => \$BOOTSTRAP,
      'incredibuild' => \$optIncredibuild)
-    || ($CLEAN + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS + $TEST == 0
+    || ($CLEAN + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS + $TEST + $optEditConfig == 0
         && !defined $optGerritModule && !defined $optGitHooks)) {
     print $USAGE;
     exit (1);
+}
+
+if ($optEditConfig) {
+   system((editor(), $configFile));
+   exit(0);
 }
 
 checkMake();
