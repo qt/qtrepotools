@@ -3126,9 +3126,9 @@ if (defined($editor)) {
     }
 }
 
-goto_gitdir();
 parse_arguments(@ARGV);
 load_config();
+goto_gitdir();
 load_state(1);
 determine_local_branch();
 my $raw_commits = get_changes();
