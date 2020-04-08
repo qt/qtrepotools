@@ -78,7 +78,7 @@ if ($gc_interval != 0) {
         # to use gpull instead of rebase with --continue is suboptimal).
         # In the big picture the delay doesn't matter, as the gc interval
         # is likely much bigger than the pull frequency anyway.
-        run_process(DRY_RUN, $script_path."/git-ggc");
+        run_process(FWD_OUTPUT | DRY_RUN, $script_path."/git-ggc");
     } else {
         printf("Next gc date %d not reached yet (now is %d).\n", $next_gc, time())
             if ($debug);
