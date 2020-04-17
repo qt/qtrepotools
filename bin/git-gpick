@@ -2226,6 +2226,11 @@ sub prepare_specs_all($)
 {
     my ($raw_changes) = @_;
 
+    if (!@$raw_changes) {
+        print "No local Changes.\n" if (!$quiet);
+        exit(0);
+    }
+
     # Before we can iterate the local series, we need to make sure that
     # they are actually assigned. For this to work we first resolve a
     # fake spec which causes the corresponding remote series for all
