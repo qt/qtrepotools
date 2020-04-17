@@ -2892,9 +2892,6 @@ sub do_adjust_changes($)
 
     print format_reports(\@reports);
 
-    wfail("\nDropping all Changes is not supported; use git reset --hard \@{u} instead.\n")
-        if (!@commits);
-
     my $any_msg;
 
     if ($any_missing && !$quiet) {
@@ -2969,7 +2966,7 @@ sub determine_base($$)
     my ($raw_commits, $commits) = @_;
 
     my $base = $local_base;
-    while (@$raw_commits) {
+    while (@$raw_commits && @$commits) {
         my $commit = $$raw_commits[0];
         last if ($commit != $$commits[0]);
         $base = $$commit{id};
@@ -3002,6 +2999,10 @@ sub write_rebase_todo($$)
             print "> drop $_\n" if ($debug);
             print TODO "drop $_\n";
         }
+    } elsif (!@$commits) {
+        # An empty rebase-todo would be a signal to abort.
+        print "> noop\n" if ($debug);
+        print TODO "noop\n";
     }
     close(TODO) or wfail("Failed to write $todo: $!\n");
 
@@ -3063,7 +3064,7 @@ sub rewrite_changes($$)
     my ($raw_commits, $commits) = @_;
 
     my $base = determine_base($raw_commits, $commits);
-    if (!@$commits) {
+    if (!@$raw_commits && !@$commits) {
         print "Everything already up-to-date.\n" if (!$quiet);
         return;
     }
