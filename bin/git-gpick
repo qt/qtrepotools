@@ -2575,7 +2575,7 @@ sub verify_delete($$$$$$$)
     # not just the current and the previously pushed one.
     my $parts = verify_local_commit($lcl_commit, $rmt_commit, $rmt_ps);
     if ($parts) {
-        if ($pushed_ps ne "?") {  # The PatchSet must be actually still present.
+        if ($pushed_commit && ($pushed_ps ne "?")) {  # The PatchSet must be actually still present.
             $parts = verify_local_commit($lcl_commit, $pushed_commit, $pushed_ps);
             if ($parts) {
                 $annot = format_parts($parts)." PS$pushed_ps";
