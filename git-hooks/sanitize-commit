@@ -479,10 +479,10 @@ while (<MSG>) {
                 } elsif (/^Signed-off-by:/i) {
                     $badsign = $lineno;
                 } elsif (/^Task-number: *(.*)/i) {
-                    complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
+                    complain_ln("Multiple tasks in one footer", "") if ($1 =~ /[ ,]/);
                     complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
                 } elsif (/^Fixes: *(.*)/i) {
-                    complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
+                    complain_ln("Multiple tasks in one footer", "") if ($1 =~ /[ ,]/);
                     complain_ln("Capitalization of \"Fixes\" is wrong", "") if (!/^Fixes:/);
                 }
             } elsif (/^\[change-?log\]/i) {
