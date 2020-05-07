@@ -45,6 +45,7 @@ use Gerrit::REST;
 #     (note that these entries are NOT namespaced with the instance).
 #     The magic string @SHA1@ is replaced by the commit to be checked;
 #     @PROJ@ by the gerrit project the worker is run for.
+#     @BRANCH@ is the branch the change was submitted to.
 #     It is expected to dump a Gerrit ReviewInput JSON entity to stdout.
 #     The output from all workers is merged.
 #   excluded (optional)
@@ -194,6 +195,7 @@ sub process_commit($$$$$)
       die "workers.$worker not set.\n" if (!defined($worker));
       $worker =~ s/\@PROJ\@/$project/g;
       $worker =~ s/\@SHA1\@/$rev/g;
+      $worker =~ s/\@BRANCH\@/$branch/g;
       my $output;
       open VERDICT, $worker." 2>&1 |" or die "cannot run worker '$w': ".$!;
       {

@@ -13,16 +13,17 @@ use Config;
 use Cwd;
 use Encode;
 use File::Spec qw(path);
-use List::Util qw(first);
+use List::Util qw(first any);
 
-if ($#ARGV < 0 or $#ARGV > 2 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit-rest)$/)) {
-    print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit-rest} [instance]]\n";
+if ($#ARGV < 0 or $#ARGV > 3 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit-rest)$/)) {
+    print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit-rest} [<instance> [<branch>]]]\n";
     exit 2;
 }
 my $sha1 = $ARGV[0];
 my $gerrit_rest = ($#ARGV >= 1 && $ARGV[1] eq "gerrit-rest");
 my $strict = $gerrit_rest || ($#ARGV >= 1 && $ARGV[1] eq "strict");
-my $instance = ($#ARGV == 2) ? $ARGV[2] : "default";
+my $instance = ($#ARGV >= 2) ? $ARGV[2] : "default";
+my $target = $#ARGV == 3 && $ARGV[3];
 
 my $repo = getcwd();
 $repo =~ s,/?\.git$,,;
@@ -336,20 +337,24 @@ my $handleLts = 0;
 my $ltsForSha1 = '';
 if ($foundDev && $foundLts) {
     $handleLts = 1;
-    my $refPfx = ($seenOrigin ? "refs/remotes/origin" : "refs/heads");
-    chomp(my $sha1Base = `git merge-base $sha1 $refPfx/dev`);
-    foreach my $lts (@LTS) {
-        next if (!defined($nonDevHeads{$lts}));
-        my $key = "cached-lts-$lts-fork";
-        $key =~ s/\./-/g;  # so the dot in $lts isn't a section name boundary in the key
-        my $diverge = $config{$key};
-        if (!$diverge) {
-            chomp($diverge = `git merge-base $refPfx/dev $refPfx/$lts`);
-            system("git config sanity.$instance.$key $diverge");
-        }
-        if ($sha1Base eq $diverge) {
-            $ltsForSha1 = $lts;
-            last;
+    if (defined($target)) {
+        $ltsForSha1 = $1 if ($target =~ /^(\d+\.\d+)/ && any { $1 eq $_ } @LTS);
+    } else {
+        my $refPfx = ($seenOrigin ? "refs/remotes/origin" : "refs/heads");
+        chomp(my $sha1Base = `git merge-base $sha1 $refPfx/dev`);
+        foreach my $lts (@LTS) {
+            next if (!defined($nonDevHeads{$lts}));
+            my $key = "cached-lts-$lts-fork";
+            $key =~ s/\./-/g;  # so the dot in $lts isn't a section name boundary in the key
+            my $diverge = $config{$key};
+            if (!$diverge) {
+                chomp($diverge = `git merge-base $refPfx/dev $refPfx/$lts`);
+                system("git config sanity.$instance.$key $diverge");
+            }
+            if ($sha1Base eq $diverge) {
+                $ltsForSha1 = $lts;
+                last;
+            }
         }
     }
 }
