@@ -61,6 +61,11 @@ my $summary;
 my %complaints;
 my %footnotes;
 
+sub parse_bool($)
+{
+    return !($_[0] =~ /^(?:false|no|0)$/i);
+}
+
 sub printerr()
 {
   die "cannot run git: ".$! if ($? < 0);
@@ -288,10 +293,11 @@ sub check_apple_terminology()
     }
 }
 
-# The hard-coded fallback could be avoided by init-repository setting it up.
+# The hard-coded fallbacks could be avoided by init-repository setting things up.
+my $with_pickbot = parse_bool($config{'with-pickbot'} // "false");
 my @LTS = split(/\s+/, $config{'lts-branch'} || "5.6 5.9 5.12");
 
-my @allHeads = ();
+my %allHeads = ();
 my %nonDevHeads = ();
 my $foundLts = 0;
 my $foundDev = 0;
@@ -302,9 +308,9 @@ open HEADS, '-|', 'git', 'for-each-ref',
 while (<HEADS>) {
     last if (!m,^([[:xdigit:]]{40}) refs/(.*),);
     my ($rev, $name) = ($1, $2);
-    if ($name =~ m,^remotes/,) {
+    if ($name =~ s,^remotes/,,) {
         if (!$seenOrigin) {
-            ($foundDev, $foundLts, @allHeads, %nonDevHeads) = (0, 0);
+            ($foundDev, $foundLts, %allHeads, %nonDevHeads) = (0, 0);
             $seenOrigin = 1;
         }
     } elsif ($seenOrigin) {
@@ -328,14 +334,15 @@ while (<HEADS>) {
     } elsif ($name !~ m,/master$,) {
         next;
     }
-    push(@allHeads, $rev);
+    $name =~ s,^[^/]+/,,;  # Strip heads/ or origin/
+    $allHeads{$name} = $rev;
 }
 close HEADS;
 printerr;
 
 my $handleLts = 0;
 my $ltsForSha1 = '';
-if ($foundDev && $foundLts) {
+if (!$with_pickbot && $foundDev && $foundLts) {
     $handleLts = 1;
     if (defined($target)) {
         $ltsForSha1 = $1 if ($target =~ /^(\d+\.\d+)/ && any { $1 eq $_ } @LTS);
@@ -375,13 +382,14 @@ sub check_cherry_pick($)
             chomp(my $origBase = `git merge-base $orig @sources 2> /dev/null`);
             return if ($origBase eq $orig);
         }
-    } else {
+    } elsif (!$with_pickbot) {
         # The general policy when no LTS branch is present.
         # No line, so people are less likely to get stupid ideas.
         complain("Cherry-picks are strongly discouraged", "cherry");
     }
-    return if (!@allHeads);  # Some truly weird repo
-    chomp(my $origBase = `git merge-base $orig @allHeads 2> /dev/null`);
+    return if (!%allHeads);  # Some truly weird repo
+    my @allHds = values %allHeads;
+    chomp(my $origBase = `git merge-base $orig @allHds 2> /dev/null`);
     if ($origBase ne $orig) {
         # Most likely not integrated yet, but may also be a wip/ branch.
         complain_ln("Cherry-pick's source is not an upstream commit", "cherry", 1);
@@ -403,6 +411,7 @@ my $doftr = !defined($cfg{footer});
 my ($footer, $cherry) = (STS_BLANK, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 my $msgline = 0;
+my %picktos = ();
 open MSG, "git cat-file -p ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     last if ($_ eq "\n");
@@ -462,9 +471,11 @@ while (<MSG>) {
             $cherry = 0 if (/\)/);
         } else {
             my $ftr = 0;
-            if (/^\((?:partial(?:ly)? )?(?:cherry[- ]pick|(?:back-?)?port)(?:ed)?(?: from| of)?(?: commit)? (\w+\/)?([[:xdigit:]]{7,40})/) {
+            if (/^\((?:partial(?:ly)? )?(?:cherry[- ]pick|(?:back-?)?port|adapt)(?:ed)?(?: from| of)?(?: commit)? (\w+\/)?([[:xdigit:]]{7,40})/) {
                 if (!$1) {
                     check_cherry_pick($2) if (!defined($cfg{cherry}));
+                    $havecherry = 1;
+                } elsif ($with_pickbot) {
                     $havecherry = 1;
                 }
                 $cherry = 1 if (!/\)/);
@@ -489,6 +500,15 @@ while (<MSG>) {
                 } elsif (/^Fixes: *(.*)/i) {
                     complain_ln("Multiple tasks in one footer", "") if ($1 =~ /[ ,]/);
                     complain_ln("Capitalization of \"Fixes\" is wrong", "") if (!/^Fixes:/);
+                } elsif (/^Pick-to: *(.*)/i) {
+                    for my $pick (split(/\s+/, $1)) {
+                        $picktos{$pick} = 1;
+                        if (!defined($allHeads{$pick})) {
+                            complain_ln("Pick-to entry '$pick' is not a valid branch in $repo",
+                                        "pickto", 1);
+                        }
+                    }
+                    complain_ln("Capitalization of \"Pick-to\" is wrong", "") if (!/^Pick-to:/);
                 }
             } elsif (/^\[change-?log\]/i) {
                 $inchangelog = 1;
@@ -543,7 +563,37 @@ if ($badrev && !defined($cfg{revby})) {
 if ($badsign) {
     do_complain($badsign, "Unnecessary Signed-off-by footer", "", -1);
 }
-if (!$havecherry && length($ltsForSha1)) {
+if ($with_pickbot) {
+    if ($havecherry) {
+        if (%picktos) {
+            complain("Leftover Pick-to footer in commit message of cherry-picked change",
+                     "cherry", 1);
+        }
+    } else {
+        my $onDev;
+        my $masterName = $foundDev ? "dev" : "master";
+        if (defined($target)) {
+            $onDev = ($target eq $masterName);
+        } else {
+            my $masterRev = $allHeads{$masterName};
+            chomp(my $sha1Base = `git merge-base $sha1 $masterRev`);
+            # Catch both ancestor and descendant cases.
+            $onDev = ($sha1Base eq $sha1 || $sha1Base eq $masterRev);
+        }
+        if (!$onDev) {
+            if (%picktos) {
+                if (exists($picktos{$masterName})) {
+                    complain("Picking downward from $masterName is preferred", "", -1);
+                } else {
+                    complain("Omission of $masterName from Pick-to footer might be incorrect",
+                             "", -1);
+                }
+            } else {
+                complain("Omission of Pick-to footer is probably incorrect", "cherry");
+            }
+        }
+    }
+} elsif (!$havecherry && length($ltsForSha1)) {
     complain("Commit on LTS branch is not a cherry-pick", "cherry");
 }
 
