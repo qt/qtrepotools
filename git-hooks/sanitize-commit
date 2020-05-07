@@ -367,7 +367,7 @@ sub check_cherry_pick($)
             # git creates a hypothetical merge between the sources, so
             # valid commits will lie in the ancestry of this merge,
             # making the commit itself the best merge base.
-            chomp(my $origBase = `git merge-base $orig @sources`);
+            chomp(my $origBase = `git merge-base $orig @sources 2> /dev/null`);
             return if ($origBase eq $orig);
         }
     } else {
@@ -376,7 +376,7 @@ sub check_cherry_pick($)
         complain("Cherry-picks are strongly discouraged", "cherry");
     }
     return if (!@allHeads);  # Some truly weird repo
-    chomp(my $origBase = `git merge-base $orig @allHeads`);
+    chomp(my $origBase = `git merge-base $orig @allHeads 2> /dev/null`);
     if ($origBase ne $orig) {
         # Most likely not integrated yet, but may also be a wip/ branch.
         complain_ln("Cherry-pick's source is not an upstream commit", "cherry", 1);
