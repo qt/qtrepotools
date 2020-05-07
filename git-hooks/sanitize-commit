@@ -59,11 +59,6 @@ my $summary;
 # Hash (by file) of hashes (by line) of lists (reports) of lists (msg, extra)
 my %complaints;
 my %footnotes;
-my $stable = defined($cfg{stable_hash});
-
-if ($stable) {
-    require Tie::IxHash;
-}
 
 sub printerr()
 {
@@ -84,9 +79,6 @@ sub do_complain($$$;$@)
         $msg = "Hint: ".$msg;
     }
     my $fn = $line < 0 ? "" : $file;
-    if ($stable && !defined($complaints{$fn})) {
-        tie %{$complaints{$fn}}, 'Tie::IxHash';
-    }
     push @{$complaints{$fn}{$line}}, [ $msg, @extra ];
 }
 
@@ -928,7 +920,7 @@ if ($gerrit_rest) {
         if (length($fn) && ($fn ne "~~~~~")) {
             $file = ($fn eq "!!!!!") ? "/COMMIT_MSG" : $fn;
             my @comments = ();
-            foreach my $ln (keys %{$complaints{$fn}}) {
+            foreach my $ln (sort { $a <=> $b } keys %{$complaints{$fn}}) {
                 my @texts;
                 push @texts, @$_ foreach (@{$complaints{$fn}{$ln}});
                 my %comment;
