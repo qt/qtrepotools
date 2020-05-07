@@ -456,17 +456,6 @@ while (<MSG>) {
         } elsif ($cherry) {
             $cherry = 0 if (/\)/);
         } else {
-            if (/^Reviewed-by:/i) {
-                $badrev = $lineno;
-            } elsif (/^Signed-off-by:/i) {
-                $badsign = $lineno;
-            } elsif (/^Task-number: *(.*)/i) {
-                complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
-                complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
-            } elsif (/^Fixes: *(.*)/i) {
-                complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
-                complain_ln("Capitalization of \"Fixes\" is wrong", "") if (!/^Fixes:/);
-            }
             my $ftr = 0;
             if (/^\((?:partial(?:ly)? )?(?:cherry[- ]pick|(?:back-?)?port)(?:ed)?(?: from| of)?(?: commit)? (\w+\/)?([[:xdigit:]]{7,40})/) {
                 if (!$1) {
@@ -485,6 +474,16 @@ while (<MSG>) {
                 $inchangelog = 0;
                 if (/^Change-?Log:/i) {
                     complain_ln("Use [ChangeLog] tag instead", "changelog") if (!defined($cfg{changelog}));
+                } elsif (/^Reviewed-by:/i) {
+                    $badrev = $lineno;
+                } elsif (/^Signed-off-by:/i) {
+                    $badsign = $lineno;
+                } elsif (/^Task-number: *(.*)/i) {
+                    complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
+                    complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
+                } elsif (/^Fixes: *(.*)/i) {
+                    complain_ln("Multiple tasks in one footer", "") if ($1 =~ /,/);
+                    complain_ln("Capitalization of \"Fixes\" is wrong", "") if (!/^Fixes:/);
                 }
             } elsif (/^\[change-?log\]/i) {
                 $inchangelog = 1;
