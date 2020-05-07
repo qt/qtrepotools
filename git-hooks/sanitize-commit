@@ -479,8 +479,10 @@ while (<MSG>) {
                 $badsign = 0;
                 # cherry-pick lines count as footers as well.
                 $ftr = 1;
+                $inchangelog = 0;
             } elsif (/^(?:[A-Z][A-Za-z]+(?:-[A-Za-z][a-z]+)+|F[Ii][Xx][Ee][Ss]|C[Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg]): /) {
                 $ftr = 1;
+                $inchangelog = 0;
                 if (/^Change-?Log:/i) {
                     complain_ln("Use [ChangeLog] tag instead", "changelog") if (!defined($cfg{changelog}));
                 }
@@ -490,10 +492,12 @@ while (<MSG>) {
                     complain_ln("Bad form of [ChangeLog] tag", "changelog");
                 }
             }
-            if ($inchangelog && !$ftr) {
+            if ($inchangelog) {
                 complain_ln("Missing space between ChangeLog tags and text", "changelog") if (/\][^\s\[]/);
                 complain_ln("JIRA task referenced from ChangeLog", "changelog") if (/\[QT[A-Z]+-\d+\]/);
                 complain_ln("Redundant repository reference in ChangeLog", "", -1) if (/\[\Q$repo\E\]/i);
+                # Note that this is not mutually exclusive with the else-branch below -
+                # a ChangeLog section is just regular text.
             }
             if ($ftr && $doftr) {
                 if ($footer == STS_TEXT) {
