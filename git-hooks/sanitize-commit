@@ -479,11 +479,16 @@ while (<MSG>) {
                 $badsign = 0;
                 # cherry-pick lines count as footers as well.
                 $ftr = 1;
-            } elsif (/^(?:[A-Z][A-Za-z]+(?:-[A-Za-z][a-z]+)+|F[Ii][Xx][Ee][Ss]): /) {
+            } elsif (/^(?:[A-Z][A-Za-z]+(?:-[A-Za-z][a-z]+)+|F[Ii][Xx][Ee][Ss]|C[Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg]): /) {
                 $ftr = 1;
-            } elsif (/^(\[change-?log\]|change-?log: )/i && !defined($cfg{changelog})) {
+                if (/^Change-?Log:/i) {
+                    complain_ln("Use [ChangeLog] tag instead", "changelog") if (!defined($cfg{changelog}));
+                }
+            } elsif (/^\[change-?log\]/i) {
                 $inchangelog = 1;
-                complain_ln("Bad form of [ChangeLog] tag", "changelog") if (!/^\[ChangeLog\]/);
+                if (!/^\[ChangeLog\]/ && !defined($cfg{changelog})) {
+                    complain_ln("Bad form of [ChangeLog] tag", "changelog");
+                }
             }
             if ($inchangelog && !$ftr) {
                 complain_ln("Missing space between ChangeLog tags and text", "changelog") if (/\][^\s\[]/);
