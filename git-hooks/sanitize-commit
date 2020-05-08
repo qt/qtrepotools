@@ -347,15 +347,14 @@ if (!$with_pickbot && $foundDev && $foundLts) {
     if (defined($target)) {
         $ltsForSha1 = $1 if ($target =~ /^(\d+\.\d+)/ && any { $1 eq $_ } @LTS);
     } else {
-        my $refPfx = ($seenOrigin ? "refs/remotes/origin" : "refs/heads");
-        chomp(my $sha1Base = `git merge-base $sha1 $refPfx/dev`);
+        chomp(my $sha1Base = `git merge-base $sha1 $allHeads{dev}`);
         foreach my $lts (@LTS) {
             next if (!defined($nonDevHeads{$lts}));
             my $key = "cached-lts-$lts-fork";
             $key =~ s/\./-/g;  # so the dot in $lts isn't a section name boundary in the key
             my $diverge = $config{$key};
             if (!$diverge) {
-                chomp($diverge = `git merge-base $refPfx/dev $refPfx/$lts`);
+                chomp($diverge = `git merge-base $allHeads{$lts} $allHeads{dev}`);
                 system("git config sanity.$instance.$key $diverge");
             }
             if ($sha1Base eq $diverge) {
