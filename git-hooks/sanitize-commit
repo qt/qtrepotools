@@ -572,7 +572,7 @@ if ($with_pickbot) {
         my $onDev;
         my $masterName = $foundDev ? "dev" : "master";
         if (defined($target)) {
-            $onDev = ($target eq $masterName);
+            $onDev = ($target eq $masterName) || ($target =~ m,^wip/,);
         } else {
             my $masterRev = $allHeads{$masterName};
             chomp(my $sha1Base = `git merge-base $sha1 $masterRev`);
