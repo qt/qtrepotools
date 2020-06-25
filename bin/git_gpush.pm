@@ -2104,7 +2104,8 @@ sub set_gerrit_config($)
 {
     my ($rmt) = @_;
 
-    my $url = git_config('remote.'.$rmt.'.url');
+    my $url = git_config('remote.'.$rmt.'.pushurl');
+    $url = git_config('remote.'.$rmt.'.url') if (!$url);
     fail("Remote '$rmt' does not exist.\n") if (!$url);
     if ($url =~ m,^ssh://([^/:]+)(?::(\d+))?/(.*?)(?:\.git)?/?$,) {
         push @gerrit_ssh, '-p', $2 if (defined($2));
