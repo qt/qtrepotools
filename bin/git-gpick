@@ -1239,11 +1239,11 @@ sub analyze_patchset($$)
         # Series which are pushed on top of other pending Changes have their base
         # stored in an extra field on Gerrit, as otherwise it's indeterminable.
         set_base_imposed($rev_id, $base);
-        print "Have push-base $base for $rev_id.\n" if ($debug);
+        print "Have push-base $base for $rev_id ($cat).\n" if ($debug);
     } else {
         # For the remaining PatchSets, the merge-base with upstream is the base.
         $base = set_base_deduced($rev_id);
-        print "Inferred push-base $base for $rev_id.\n" if ($debug);
+        print "Inferred push-base $base for $rev_id ($cat).\n" if ($debug);
     }
 }
 
