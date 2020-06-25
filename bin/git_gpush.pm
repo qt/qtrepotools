@@ -313,6 +313,9 @@ sub goto_gitdir()
 
 # `git config --list` output, plus contents of .git-gpush-aliases' [config]
 our %gitconfig;  # { key => [ value, ... ] }
+# Pre-processed url.*.insteadOf mappings.
+my @url_rewrites;
+my @url_rewrites_push;
 
 sub _load_git_config()
 {
@@ -321,9 +324,20 @@ sub _load_git_config()
     my $cfg = open_cmd_pipe(0, 'git', 'config', '-l', '-z');
     while (read_fields($cfg, my $entry)) {
         $entry =~ /^([^\n]+)\n(.*)$/;
-        push @{$gitconfig{$1}}, $2;
+        my ($key, $value) = ($1, $2);
+        push @{$gitconfig{$key}}, $value;
+
+        if ($key =~ /^url\.(.*)\.insteadof$/) {
+            push @url_rewrites, [ $value, $1 ];
+        } elsif ($key =~ /^url\.(.*)\.pushinsteadof$/) {
+            push @url_rewrites_push, [ $value, $1 ];
+        }
     }
     close_process($cfg);
+
+    # Sort backwards, so longest match is hit first.
+    @url_rewrites = sort { $$b[0] cmp $$a[0] } @url_rewrites;
+    @url_rewrites_push = sort { $$b[0] cmp $$a[0] } @url_rewrites_push;
 }
 
 sub git_configs($)
@@ -338,6 +352,17 @@ sub git_config($;$)
     my ($key, $dflt) = @_;
     my @cfg = git_configs($key);
     return scalar(@cfg) ? $cfg[-1] : $dflt;
+}
+
+sub _rewrite_git_url($$)
+{
+    my ($url, $push) = @_;
+
+    foreach my $ent ($push ? @url_rewrites_push : @url_rewrites) {
+        my ($pfx, $sub) = @$ent;
+        return $url if ($url =~ s/^\Q$pfx\E/$sub/);
+    }
+    return $url;
 }
 
 our $_indexfile;
@@ -2104,9 +2129,10 @@ sub set_gerrit_config($)
 {
     my ($rmt) = @_;
 
-    my $url = git_config('remote.'.$rmt.'.pushurl');
-    $url = git_config('remote.'.$rmt.'.url') if (!$url);
+    my ($url, $push) = (git_config('remote.'.$rmt.'.pushurl'), 1);
+    ($url, $push) = (git_config('remote.'.$rmt.'.url'), 0) if (!$url);
     fail("Remote '$rmt' does not exist.\n") if (!$url);
+    $url = _rewrite_git_url($url, $push);
     if ($url =~ m,^ssh://([^/:]+)(?::(\d+))?/(.*?)(?:\.git)?/?$,) {
         push @gerrit_ssh, '-p', $2 if (defined($2));
         push @gerrit_ssh, $1;
