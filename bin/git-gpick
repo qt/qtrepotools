@@ -1752,7 +1752,7 @@ sub finalize_remote_series($$$)
     my ($name, $range, $commits) = @_;
 
     my $sorted = sort_series($name, $range, $commits, 1);
-    fail("Series $name is empty after filtering.\n") if (!@$sorted && !$check);
+    fail("Series $name is empty after filtering.\n") if (!@$sorted && !$check && !$pick_all);
     return $sorted;
 }
 
