@@ -418,7 +418,7 @@ while (<MSG>) {
         $parents++ ;
     } elsif (/^author ([^<]*?) *<([^>]+)/) {
         check_email($1, $2, $parents + 1, "author");
-    } elsif (/^commiter ([^<]*?) *<([^>]+)/) {
+    } elsif (/^committer ([^<]*?) *<([^>]+)/) {
         check_email($1, $2, $parents + 3, "committer");
     }
 }
