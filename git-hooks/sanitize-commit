@@ -437,7 +437,7 @@ while (<MSG>) {
         if (/\bQT[A-Z]+-\d+\b/) {
             complain_cln("Bug reference in summary", "log");
         }
-        if (/\.$/) {
+        if (/(?<!etc)\.$/) {
             complain_cln("Summary ends with period", "log");
         }
         # Detect wrong tense, but exclude cases like 'Speed up ...'
