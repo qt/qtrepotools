@@ -49,8 +49,8 @@ use Gerrit::REST;
 #     It is expected to dump a Gerrit ReviewInput JSON entity to stdout.
 #     The output from all workers is merged.
 #   excluded (optional)
-#     Space-separated list of exclusions of the form <project> or
-#     <project>:<branch>.
+#     Space-separated list of exclusions of the form <project>[:<branch>].
+#     To globally exclude a branch, use *:<branch>.
 #   maintainers (optional)
 #     Space-separated list of reviewers to add on "special occasions".
 #   verbose (default 0)
@@ -153,8 +153,10 @@ sub process_commit($$$$$)
   $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
   my $verdict = {};
   my @invite;
-  if (defined($EXCLUDED_PROJECTS{$project}) || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
-    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project."\n";
+  if (defined($EXCLUDED_PROJECTS{$project})
+      || defined($EXCLUDED_PROJECTS{"*:".$branch})
+      || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
+    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project." on branch ".$branch."\n";
     $$verdict{message} = "(skipped)";
     $$verdict{labels}{'Sanity-Review'} = 1;
   } else {
