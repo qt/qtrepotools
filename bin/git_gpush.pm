@@ -182,7 +182,7 @@ sub close_process($)
 
     if ($$process{flags} & DRY_RUN) {
         $? = 0;
-        return 0;
+        return;
     }
     my $cmd = $$process{cmd};
     if ($$process{stdout}) {
@@ -198,7 +198,6 @@ sub close_process($)
     } elsif ($? && !($$process{flags} & SOFT_FAIL)) {
         exit($? >> 8);
     }
-    return 0;
 }
 
 # Write any number of lines to the process' stdin.
