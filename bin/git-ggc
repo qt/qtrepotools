@@ -204,17 +204,15 @@ sub perform_gc()
     my $local_changes = visit_revs_pull('HEAD', (map { 'refs/heads/'.$_ } @local_refs));
 
     print "Collecting locally present Changes ...\n" if ($debug);
-    my %zap_ids;  # { gerrit-id => 1 }
-    foreach my $key (keys %zaps) {
+    my %zap_ids;  # { change-id => 1 }
+    foreach my $key (sort keys %change_by_key) {
         my $change = $change_by_key{$key};
-        if ($change) {
-            my $changeid = $$change{id};
-            if (defined($$local_changes{$changeid})) {
-                print "Keeping $key ($changeid): exists locally.\n"
-                    if ($verbose);
-                delete $zaps{$key};
-                next;
-            }
+        my $changeid = $$change{id};
+        if (defined($$local_changes{$changeid})) {
+            print "Keeping $key ($changeid): exists locally.\n"
+                if ($verbose);
+            delete $zaps{$key};
+        } else {
             $zap_ids{$changeid} = 1;
         }
     }
@@ -225,24 +223,30 @@ sub perform_gc()
         if (%zap_ids || %fzaps);
 
     print "Pruning stale Changes ...\n" if ($debug);
-    foreach my $key (sort keys %zaps) {
+    foreach my $key (sort keys %change_by_key) {
         my $change = $change_by_key{$key};
-        if ($change) {
-            # Even Changes which are absent from the local branch are pruned
-            # only if they are in a terminal state. Otherwise, there is reason
-            # to believe that they might be used again at a later point.
-            my $changeid = $$change{id};
-            if ($change2active{$changeid}) {
-                print "Keeping $key ($changeid): active on Gerrit.\n"
-                    if ($verbose);
-                $$local_changes{$changeid} = 1;
-                delete $zaps{$key};
-                next;
-            }
+        # Even Changes which are absent from the local branch are pruned
+        # only if they are in a terminal state. Otherwise, there is reason
+        # to believe that they might be used again at a later point.
+        my $changeid = $$change{id};
+        if (!defined($zap_ids{$changeid})) {
+            # Exists locally; already handled above.
+        } elsif ($change2active{$changeid}) {
+            print "Keeping $key ($changeid): active on Gerrit.\n"
+                if ($verbose);
+            $$local_changes{$changeid} = 1;
+            delete $zaps{$key};
+        } else {
             print "Pruning $key ($changeid).\n" if ($verbose);
             $$change{garbage} = 1;
-        } else {
-            print "Pruning $key (unrecognized Change).\n" if ($verbose);
+        }
+    }
+    if ($verbose) {
+        foreach my $key (sort keys %zaps) {
+            # This is unlikely to ever trigger, as the regular load_refs()
+            # cleans up anyway.
+            print "Pruning $key (unrecognized Change).\n"
+                if (!$change_by_key{$key});
         }
     }
 
