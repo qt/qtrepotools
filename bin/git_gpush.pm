@@ -1134,9 +1134,11 @@ sub visit_commits_raw($$;$)
     my $log = open_process(USE_STDIN | USE_STDOUT | FWD_STDERR,
                            'git', 'log', _GIT_LOG_ARGS, @$args, '--stdin');
     write_process($log, map { "$_\n" } @$tips);
-    my @author = (undef, undef, undef);
-    my @committer = (undef, undef, undef);
-    while (read_fields($log, my ($id, $parents, $tree, $message), @author, @committer)) {
+    while (1) {
+        my @author = (undef, undef, undef);
+        my @committer = (undef, undef, undef);
+        last if (!read_fields($log, my ($id, $parents, $tree, $message), @author, @committer));
+
         # We truncate the subject anyway, so using just the first line is OK.
         $message =~ /^(.*)$/m;
         my $subject = $1;
@@ -1160,8 +1162,8 @@ sub visit_commits_raw($$;$)
             subject => $subject,
             message => $message,
             tree => $tree,
-            author => [ @author ],  # Force copy, as these are ...
-            committer => [ @committer ]  # ... not loop-local.
+            author => \@author,
+            committer => \@committer
         };
     }
     close_process($log);
