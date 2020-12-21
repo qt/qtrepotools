@@ -217,10 +217,11 @@ sub perform_gc()
         }
     }
 
-    print "Querying Gerrit for prunable Changes ...\n" if ($debug);
-    get_gerrit_config();
-    query_gerrit_pull([ map { "change:".$_ } (keys %zap_ids, keys %fzaps) ])
-        if (%zap_ids || %fzaps);
+    if (%zap_ids || %fzaps) {
+        print "Querying Gerrit for prunable Changes ...\n" if ($debug);
+        get_gerrit_config();
+        query_gerrit_pull([ map { "change:".$_ } (keys %zap_ids, keys %fzaps) ]);
+    }
 
     print "Pruning stale Changes ...\n" if ($debug);
     foreach my $key (sort keys %change_by_key) {
