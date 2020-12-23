@@ -1768,22 +1768,22 @@ sub complete_spec_heads($)
         my $action = $$spec{action};
         if ($action == INSERT) {
             my ($tip, $base) = ($$spec{tip}, $$spec{base});
-            $picks{$tip} = undef;
-            $picks{$base} = undef if (defined($base));
+            $picks{$tip} = 1;
+            $picks{$base} = 1 if (defined($base));
         } else {
             foreach my $change (@{$$spec{range}}) {
                 my $changeid = $$change{id};
                 # We do this for deletions as well, to know which Changes
                 # can be dropped safely.
-                $picks{$changeid} = undef;
+                $picks{$changeid} = 1;
                 my $pushed = $$change{pushed};
                 if (defined($pushed)) {
-                    $visits{$pushed} = undef;
+                    $visits{$pushed} = 1;
                     # To be able to set {did_query} once we have the commits.
                     push @queried, $pushed;
                 }
                 my $orig = $$change{orig};
-                $visits{$orig} = undef if (defined($orig));
+                $visits{$orig} = 1 if (defined($orig));
             }
         }
     }
