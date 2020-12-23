@@ -1050,17 +1050,17 @@ sub fetch_patchsets($$;$)
         add_patchset($ginfo, 'pick', \%idxes);
         add_patchset($ginfo, 'push', \%idxes);
         my $revs = $$ginfo{revs};
-        foreach my $idx (keys %idxes) {
+        foreach my $idx (sort keys %idxes) {
             my $rev = $$revs[$idx];
             my ($rev_id, $rev_ps) = ($$rev{id}, $$rev{ps});
-            if ($commit_by_id{$rev_id}) {
+            if (defined($$ginfo{fetched}{$rev_ps})) {
+                print "Already have PatchSet $rev_ps for $$ginfo{id}.\n" if ($debug);
+                $$visits{$rev_id} = 1;
+            } elsif ($commit_by_id{$rev_id}) {
                 # When we are fetching the dependencies of Changes we already fetched,
                 # it is quite likely that we already have the corresponding commits.
                 print "Already have PatchSet $rev_ps for $$ginfo{id} (aliasing).\n" if ($debug);
                 $$ginfo{fetched}{$rev_ps} = $rev_id;
-            } elsif (defined($$ginfo{fetched}{$rev_ps})) {
-                print "Already have PatchSet $rev_ps for $$ginfo{id}.\n" if ($debug);
-                $$visits{$rev_id} = 1;
             } else {
                 push @refs, "+$$rev{ref}:refs/gpush/g$$ginfo{key}_$rev_ps";
                 $$visits{$rev_id} = 1;
