@@ -2182,7 +2182,7 @@ sub set_gerrit_config($)
     }
 }
 
-sub query_gerrit($;$)
+sub query_gerrit_only($;$)
 {
     my ($ids, $extra) = @_;
 
@@ -2248,8 +2248,14 @@ sub query_gerrit($;$)
         push @ginfos, $ginfo;
     }
     close_process($info);
+    return \@ginfos;
+}
 
-    _update_target_branches(\@ginfos);
+sub query_gerrit($;$)
+{
+    my ($ids, $extra) = @_;
+
+    _update_target_branches(query_gerrit_only($ids, $extra));
 }
 
 #############################

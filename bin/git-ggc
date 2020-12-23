@@ -99,34 +99,6 @@ sub get_gerrit_config()
     set_gerrit_config($remote);
 }
 
-my %gerrit2change;
-my %change2gerrits;
-my %change2active;
-
-sub query_gerrit_pull($)
-{
-    my ($ids) = @_;
-
-    my $status = open_cmd_pipe(0, 'ssh', @gerrit_ssh, 'gerrit',
-                                  'query', '--format', 'JSON', '--no-limit',
-                                  "project:$gerrit_project", '\\('.join(' OR ', @$ids).'\\)');
-    while (read_process($status)) {
-        my $review = decode_json($_);
-        defined($review) or fail("Cannot decode JSON string '".chomp($_)."'\n");
-        my ($key, $changeid) = ($$review{'number'}, $$review{'id'});
-        next if (!defined($key) || !defined($changeid));
-        my ($branch, $status) = ($$review{'branch'}, $$review{'status'});
-        defined($branch) or fail("Huh?! $changeid has no branch?\n");
-        defined($status) or fail("Huh?! $changeid has no status?\n");
-        my $active = (($status ne 'MERGED') && ($status ne 'ABANDONED'));
-        print "$changeid is ".($active ? "" : "NOT ")."active on $branch.\n" if ($debug);
-        $change2active{$changeid} ||= $active;
-        $gerrit2change{$key} = $changeid;
-        push @{$change2gerrits{$changeid}}, $key;
-    }
-    close_process($status);
-}
-
 sub visit_revs_pull(@)
 {
     my %changeids;
@@ -157,9 +129,10 @@ sub visit_revs_pull(@)
 sub perform_gc()
 {
     print "Loading refs ...\n" if ($debug);
+    my %pushed;  # { sequence-number => sha1 }
     my %zaps;  # { sequence-number => [ state-ref, ... ] }
-    my %fzaps;  # { gerrit-number => [ fetched-ref, ... ] }
-    my %fsha1s;  # { gerrit-number => [ fetched-sha1, ... ] }
+    my %fzaps;  # { gerrit-number => [ patchset-number => fetched-ref, ... ] }
+    my @fsha1s;  # [ fetched-sha1, ... ]
     my @local_refs;  # These define which Changes are still active.
     my %remote_refs;  # Used for quickly validating upstreams.
     my $branches = open_cmd_pipe(0, "git", "for-each-ref", "--format=%(objectname) %(refname)",
@@ -171,11 +144,12 @@ sub perform_gc()
             push @local_refs, $_;
         } elsif (s,^(.{40}) refs/gpush/,,) {
             my $sha1 = $1;
-            if (m,^i(\d+)_.*$,) {
+            if (m,^i(\d+)_(.*)$,) {
                 push @{$zaps{$1}}, $_;
-            } elsif (m,^g(\d+)_.*$,) {
-                push @{$fzaps{$1}}, $_;
-                push @{$fsha1s{$1}}, $sha1;
+                $pushed{$1} = $sha1 if ($2 eq "pushed");
+            } elsif (m,^g(\d+)_(\d+)$,) {
+                $fzaps{$1}[$2] = $_;
+                push @fsha1s, $sha1;
             } elsif (!m,^state(-new)?$,) {
                 print "Keeping unrecognized '$_'.\n" if ($debug);
             }
@@ -217,10 +191,18 @@ sub perform_gc()
         }
     }
 
+    my %change2active;
     if (%zap_ids || %fzaps) {
         print "Querying Gerrit for prunable Changes ...\n" if ($debug);
         get_gerrit_config();
-        query_gerrit_pull([ map { "change:".$_ } (keys %zap_ids, keys %fzaps) ]);
+        my $ginfos = query_gerrit_only([ map { "change:".$_ } (keys %zap_ids, keys %fzaps) ]);
+        foreach my $ginfo (@$ginfos) {
+            my ($key, $changeid, $status, $branch) =
+                    ($$ginfo{key}, $$ginfo{id}, $$ginfo{status}, $$ginfo{branch});
+            my $active = (($status ne 'MERGED') && ($status ne 'ABANDONED'));
+            print "$changeid is ".($active ? "" : "NOT ")."active on $branch.\n" if ($debug);
+            $change2active{$changeid} ||= $active;
+        }
     }
 
     print "Pruning stale Changes ...\n" if ($debug);
@@ -252,50 +234,103 @@ sub perform_gc()
     }
 
     print "Visiting fetched PatchSets ...\n" if ($debug);
-    visit_local_commits([ map { @$_ } values %fsha1s ]);
+    visit_local_commits(\@fsha1s);
 
-    # Keep all fetched PatchSets that correspond with kept Changes.
-    my %visit_gs;
+    # Keep fetched PatchSets that correspond with kept Changes, but only the ones
+    # that are not older than the pushed revision of the Change. Older PatchSets
+    # are accessed only when explicitly picking an old state of the series, which
+    # is very rare, so it is not worth keeping these refs cached.
+    my (@visit_sha1s, %seen_sha1s, %chop_gs);
     foreach my $key (sort keys %fzaps) {
-        my $changeid = $gerrit2change{$key};
-        if (!defined($changeid)) {
-            print "Pruning fetched $key (disappeared from Gerrit).\n" if ($verbose);
-        } else {
-            if (defined($$local_changes{$changeid})) {
-                print "Keeping fetched $key ($changeid): corresponds with kept Change.\n"
-                    if ($verbose);
-                delete $fzaps{$key};
-                $visit_gs{$key} = 1;
-                next;
-            }
+        my $ginfo = $gerrit_info_by_key{$key};
+        if (!defined($ginfo)) {
+            $chop_gs{$key} = -1;
+            next;
         }
+
+        my $changeid = $$ginfo{id};
+        if (!defined($$local_changes{$changeid})) {
+            # Might be still referenced recursively.
+            print "Might prune fetched $key ($changeid): corresponds with no kept Change.\n"
+                if ($debug);
+            next;
+        }
+
+        my $chgs = $changes_by_id{$changeid};
+        if (!$chgs) {
+            # Corresponding commits exist locally, but we never assigned them to Changes.
+            print "Might prune fetched $key ($changeid): corresponds with no tracked Change.\n"
+                if ($debug);
+            next;
+        }
+
+        my $revs = $$ginfo{revs};
+        my $mps = $$revs[-1]{ps};
+        # Subsequent sync-up attempts will fetch the current (and previous,
+        # for MERGED Changes) PatchSet, so keep that in every case.
+        my $kps = ($mps > 1 && ($$ginfo{status} eq "MERGED")) ? $mps - 1 : $mps;
+        foreach my $change (@$chgs) {
+            next if ($$change{garbage});
+
+            my $sha1 = $pushed{$$change{key}};
+            # This Change was not gpushed/gpicked, and a possible sync-up failed.
+            next if (!defined($sha1));
+
+            my $rev = $$ginfo{rev_by_id}{$sha1};
+            # A Change on a different branch owns this commit.
+            next if (!$rev);
+
+            my $ps = $$rev{ps};
+            $kps = $ps if ($ps < $kps);
+        }
+
+        # Note that this may include SHA1s that were not fetched.
+        push @visit_sha1s, map { $$_{id} } grep { $$_{ps} >= $kps } @$revs;
+        $chop_gs{$key} = $kps;
     }
     # Keep all fetched PatchSets that are ancestors of other kept
     # PatchSets, recursively.
-    my (%seen_gs, %seen_sha1s);
-    while (%visit_gs) {
-        foreach my $key (sort keys %visit_gs) {
-            delete $visit_gs{$key};
-            $seen_gs{$key} = 1;
-            foreach my $sha1 (@{$fsha1s{$key}}) {
-                while (!defined($seen_sha1s{$sha1})) {
-                    $seen_sha1s{$sha1} = 1;
-                    my $commit = $commit_by_id{$sha1};
-                    last if (!$commit);  # Hit bottom of series.
-                    my $changeid = $$commit{changeid};
-                    my $ngs = $change2gerrits{$changeid};
-                    last if (!$ngs);  # Not queried, probably hit base.
-                    foreach my $nkey (@$ngs) {
-                        next if (defined($seen_gs{$nkey}));
-                        print "Keeping fetched $nkey ($changeid): referenced transitively.\n"
-                            if ($verbose);
-                        delete $fzaps{$nkey};
-                        $visit_gs{$nkey} = 1;
-                    }
-                    $sha1 = get_1st_parent($commit);
-                }
-            }
+    while (my $sha1 = shift @visit_sha1s) {
+        while (!defined($seen_sha1s{$sha1})) {
+            $seen_sha1s{$sha1} = 1;
+
+            my $commit = $commit_by_id{$sha1};
+            last if (!$commit);  # Hit bottom of series, or initial commit was not fetched.
+
+            # If the Change disappeared, then its fetched refs will be nuked anyway,
+            # and ancestors which are not in the initial set won't be accessed anymore.
+            my $ginfo = $gerrit_info_by_sha1{$sha1};
+            last if (!$ginfo);
+
+            # Ancestry traversal may lead us to older PatchSets than those in the
+            # initial set, but assemble_series()' callbacks would upgrade from these
+            # anyway, so we can just stop here.
+            last if (defined($$local_changes{$$ginfo{id}}));
+
+            my $ps = $$ginfo{rev_by_id}{$sha1};
+            last if (!defined($ps));  # Shouldn't happen.
+
+            push @visit_sha1s, map { $$_{id} } grep { $$_{ps} >= $ps } @{$$ginfo{revs}};
+            my $key = $$ginfo{key};
+            my $ops = $chop_gs{$key};
+            $chop_gs{$key} = $ps if (!defined($ops) || $ops > $ps);
+
+            $sha1 = get_1st_parent($commit);
         }
+    }
+    foreach my $key (sort keys %fzaps) {
+        my $fzap = $fzaps{$key};
+        my $kps = $chop_gs{$key};
+        if (!defined($kps)) {
+            print "Pruning fetched $key (unused).\n" if ($verbose);
+        } elsif ($kps < 0) {
+            print "Pruning fetched $key (disappeared from Gerrit).\n" if ($verbose);
+        } else {
+            my $mps = $#$fzap;
+            print "Keeping fetched $key starting at $kps/$mps.\n" if ($verbose);
+            splice @$fzap, $kps;
+        }
+        $fzaps{$key} = [ grep { defined($_) } @$fzap ];
     }
 
     # We completely bypass the regular state handling when it comes
