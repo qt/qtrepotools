@@ -1059,7 +1059,14 @@ sub fetch_patchsets($$;$)
             } elsif ($commit_by_id{$rev_id}) {
                 # When we are fetching the dependencies of Changes we already fetched,
                 # it is quite likely that we already have the corresponding commits.
-                print "Already have PatchSet $rev_ps for $$ginfo{id} (aliasing).\n" if ($debug);
+                print "Already have PatchSet $rev_ps for $$ginfo{id} (aliasing fetched).\n"
+                    if ($debug);
+                $$ginfo{fetched}{$rev_ps} = $rev_id;
+            } elsif (defined($$visits{$rev_id})) {
+                # We obviously already have the PatchSets we have pushed ourselves,
+                # but we might have only scheduled them for visiting at this point.
+                print "Already have PatchSet $rev_ps for $$ginfo{id} (aliasing pushed).\n"
+                    if ($debug);
                 $$ginfo{fetched}{$rev_ps} = $rev_id;
             } else {
                 push @refs, "+$$rev{ref}:refs/gpush/g$$ginfo{key}_$rev_ps";
