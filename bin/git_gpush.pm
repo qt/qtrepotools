@@ -1224,7 +1224,7 @@ our $local_base;
 # SHA1 of the local branch's tip.
 our $local_tip;
 # Mapping of Change-Ids to commits on the local branch.
-my %changeid2local;  # { change-id => SHA1 }
+our %changeid2local;  # { change-id => SHA1 }
 
 sub _source_map_prepare();
 sub source_map_assign($$);

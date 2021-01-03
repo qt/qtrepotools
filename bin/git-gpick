@@ -1663,8 +1663,7 @@ sub sort_series($$$$)
         my $changeid = $$commit{changeid};
 
         if (%selected && !defined($selected{$changeid})) {
-            my $change = $$commit{change};
-            if ($change && $$change{local}) {
+            if (defined($changeid2local{$changeid})) {
                 # Drop locally present Changes which are not part of the
                 # (possibly artificially limited) series. This causes partial
                 # updates being matched with only the corresponding fragments
