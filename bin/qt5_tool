@@ -416,6 +416,8 @@ sub readGitConfig
 {
     my ($module, $key) = @_;
     my $gitConfigFile = File::Spec->catfile($rootDir, $module, '.git', 'config');
+    # Check submodules
+    $gitConfigFile = File::Spec->catfile($rootDir, '.git', 'modules', $module, 'config') unless -f  $gitConfigFile;
     my $hashRef = readConfigFile($gitConfigFile);
     my $value = $$hashRef{$key};
     return defined($value) ? $value : '';
@@ -606,7 +608,10 @@ sub checkoutBranch
             return 0;
         }
         $rc = execute($git, ('branch', '--track', $desiredBranch, $remoteBranchName));
-        die 'Creation of ' . $desiredBranch . ' tracking ', $remoteBranchName, ' failed'  if ($rc);
+        if ($rc) {
+            warn('Creation of ' . $desiredBranch . ' tracking ', $remoteBranchName, ' failed');
+            return 0;
+        }
     }
     print 'switching ',$mod, ' from "', $currentBranch,'" to "',$desiredBranch,"\".\n";
     $rc = execute($git, ('checkout', $desiredBranch));
