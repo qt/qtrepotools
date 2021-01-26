@@ -207,14 +207,10 @@ Options:
         Print debug information.
 
 Configuration:
-    This program uses options from the git configuration. All its keys
-    use the 'gpush.' prefix. Consequently, to configure any option, you
-    can use a command like this:
-        git config --global gpush.<the option> <the value>
-    If you want it to be local to the current repository, just drop the
-    --global option. The following options are supported:
+    This program uses options from the git configuration. The following
+    options are supported:
 
-    alias.<alias>
+    gpush.alias.<alias>
         An alias definition. The value is a comma-separated list of Gerrit
         login names and/or email addresses, so it's possible to map, for
         example, IRC nicknames or entire teams. Note that git config keys
@@ -222,25 +218,31 @@ Configuration:
         to map some IRC nicks via git configuration; see below for an
         alternative.
 
-    minimal
+    gpush.minimal
         Whether to use minimal push mode by default.
         Defaults to true if not configured.
 
-    remote
-        The default git remote to use for pushing to Gerrit.
-        When not configured, 'gerrit' is used if present, otherwise the
-        pushed branch's upstream remote is used.
+    branch.<branch>.gpushremote
+        The git remote to use for pushing to Gerrit for branch <branch>.
+        When not configured, the default remote is used as described below.
 
-    upstream
+    gpush.remote
+        The default git remote to use for pushing to Gerrit.
+        When not configured, 'gerrit' is used if present, falling back to
+        git's branch.<branch>.pushremote and remote.pushdefault configs
+        if present, or the pushed branch's upstream remote as a last resort.
+
+    gpush.upstream
         The git remote to assume to be the upstream if the pushed branch
         does not have a remote-tracking branch configured.
         Defaults to 'origin' or the only present remote if not configured.
 
     In addition to the git configuration (which takes precedence), the file
     .git-gpush-aliases located next to this program is also read. It may
-    contain two sections: 'config' where you can use the options specified
-    above, and 'aliases'. The latter works just like alias definitions via
-    the git configuration, except that:
+    contain two sections: 'config' where you can use the options in the
+    'gpush.' namespace specified above (but without the prefix), as well
+    as 'aliases'. The latter works just like alias definitions via the git
+    configuration, except that:
     - The alias name itself may also be a comma-separated list, thus
       supporting users with multiple handles.
     - Most characters are permitted in the alias names.

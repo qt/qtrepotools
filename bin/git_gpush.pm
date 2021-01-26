@@ -474,6 +474,51 @@ sub update_excludes()
     @upstream_excludes = map { "^$_" } keys %heads;
 }
 
+sub find_gerrit_remote($)
+{
+    my ($remotes) = @_;
+
+    if (defined($local_branch)) {
+        # If a branch-specific Gerrit remote is configured, use exactly that one.
+        $remote = git_config("branch.$local_branch.gpushremote");
+        if (defined($remote)) {
+            fail("Remote '$remote' configured in branch.$local_branch.gpushremote is invalid.\n")
+                if (!defined($$remotes{$remote}));
+            return;
+        }
+    }
+    # Otherwise, if a global Gerrit remote is configured, use exactly that one.
+    $remote = git_config("gpush.remote");
+    if (defined($remote)) {
+        fail("Remote '$remote' configured in gpush.remote is invalid.\n")
+            if (!defined($$remotes{$remote}));
+        return;
+    }
+    # Otherwise use 'gerrit' if present.
+    if (defined($$remotes{'gerrit'})) {
+        $remote = 'gerrit';
+        return;
+    }
+    if (defined($local_branch)) {
+        # Otherwise, if a branch-specific push remote is configured, use that one.
+        $remote = git_config("branch.$local_branch.pushremote");
+        if (defined($remote)) {
+            fail("Remote '$remote' configured in branch.$local_branch.pushremote is invalid.\n")
+                if (!defined($$remotes{$remote}));
+            return;
+        }
+    }
+    # Otherwise, if a global push remote is configured, use that one.
+    $remote = git_config("remote.pushdefault");
+    if (defined($remote)) {
+        fail("Remote '$remote' configured in remote.pushdefault is invalid.\n")
+            if (!defined($$remotes{$remote}));
+        return;
+    }
+    # Otherwise fall back to the upstream remote.
+    $remote = $upstream_remote;
+}
+
 sub setup_remotes($)
 {
     my ($source) = @_;
@@ -512,16 +557,7 @@ sub setup_remotes($)
         fail("Specified Gerrit remote '$remote' is invalid.\n")
             if (!defined($remotes{$remote}));
     } else {
-        $remote = git_config('gpush.remote');
-        # If a remote is configured, use exactly that one.
-        if (defined($remote)) {
-            fail("Remote '$remote' configured in gpush.remote is invalid.\n")
-                if (!defined($remotes{$remote}));
-        } else {
-            # Otherwise try 'gerrit', and fall back to the upstream remote.
-            $remote = 'gerrit';
-            $remote = $upstream_remote if (!defined($remotes{$remote}));
-        }
+        find_gerrit_remote(\%remotes);
     }
     update_excludes();
 }
