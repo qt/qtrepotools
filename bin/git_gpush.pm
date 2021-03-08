@@ -354,11 +354,11 @@ sub git_config($;$)
     return scalar(@cfg) ? $cfg[-1] : $dflt;
 }
 
-sub _rewrite_git_url($$)
+sub _rewrite_git_push_url($)
 {
-    my ($url, $push) = @_;
+    my ($url) = @_;
 
-    foreach my $ent ($push ? @url_rewrites_push : @url_rewrites) {
+    foreach my $ent (@url_rewrites_push, @url_rewrites) {
         my ($pfx, $sub) = @$ent;
         return $url if ($url =~ s/^\Q$pfx\E/$sub/);
     }
@@ -2165,10 +2165,10 @@ sub set_gerrit_config($)
 {
     my ($rmt) = @_;
 
-    my ($url, $push) = (git_config('remote.'.$rmt.'.pushurl'), 1);
-    ($url, $push) = (git_config('remote.'.$rmt.'.url'), 0) if (!$url);
+    my $url = git_config('remote.'.$rmt.'.pushurl');
+    $url = git_config('remote.'.$rmt.'.url') if (!$url);
     fail("Remote '$rmt' does not exist.\n") if (!$url);
-    $url = _rewrite_git_url($url, $push);
+    $url = _rewrite_git_push_url($url);
     if ($url =~ m,^ssh://([^/:]+)(?::(\d+))?/(.*?)(?:\.git)?/?$,) {
         push @gerrit_ssh, '-p', $2 if (defined($2));
         push @gerrit_ssh, $1;
