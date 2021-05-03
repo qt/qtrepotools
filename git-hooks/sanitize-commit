@@ -517,6 +517,8 @@ while (<MSG>) {
                 if (!/^\[ChangeLog\]/ && !defined($cfg{changelog})) {
                     complain_ln("Bad form of [ChangeLog] tag", "changelog");
                 }
+            } elsif (/^\[[A-Z][- \w]+\]/) {
+                complain_ln("Likely change-log entry without [ChangeLog] tag", "", -1);
             }
             if ($inchangelog) {
                 complain_ln("Missing space between ChangeLog tags and text", "changelog") if (/\][^\s\[]/);
