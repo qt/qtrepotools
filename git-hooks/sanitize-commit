@@ -822,7 +822,15 @@ while (<DIFF>) {
             }
         }
         check_spelling() if ($spell_check);
-        check_apple_terminology() if ($apple_check);
+        if ($apple_check) {
+            check_apple_terminology();
+            if ($file =~ /\.(c|cpp)$/i) {
+                if (/\b__OBJC__\b/) {
+                    complain_ln("__OBJC__ will never be defined for non-Objective-C/C++ source files",
+                        "objc");
+                }
+            }
+        }
     } else {
         flushChunk() if ($chunk);
         if (/^ /) {
