@@ -197,7 +197,7 @@ sub styleFail($)
 {
     my $why = shift;
     if ($gerrit_rest) {
-        complain_ln("$why", "style", -1);
+        complain_ln("$why", "", -1);
     } else {
         push @style_fails, "  $lineno: ".$why;
     }
@@ -206,7 +206,7 @@ sub styleFail($)
 sub complain_style()
 {
     if (@style_fails) {
-        do_complain(1e9, "Style issues", "style", -1, @style_fails);
+        do_complain(1e9, "Style issues", "", -1, @style_fails);
         @style_fails = ();
     }
 }
@@ -785,7 +785,7 @@ while (<DIFF>) {
                 $need_hash_bang = 0;
             } else {
                 # Can still be valid if run via the right interpreter, so level -1:
-                complain("Executable file with no initial #! line", "permissions", -1);
+                complain("Executable file with no initial #! line", "", -1);
             }
         }
         $in_plus = 1;
@@ -976,13 +976,13 @@ if ($mixws_check) {
         for (sort keys %ws_lines) {
             $file = $_;
             if ($gerrit_rest) {
-                do_complain($_, "WS-only change", "mixws", -1) foreach (@{$ws_lines{$file}});
+                do_complain($_, "WS-only change", "", -1) foreach (@{$ws_lines{$file}});
             } else {
                 push @extras, "WS-only in ".$file.": ".join(", ", @{$ws_lines{$file}});
             }
         }
         $file = "~~~~~";
-        do_complain(1e9, "Mixing whitespace-only changes with other changes", "mixws", -1, @extras);
+        do_complain(1e9, "Mixing whitespace-only changes with other changes", "", -1, @extras);
     }
 }
 
