@@ -726,6 +726,7 @@ my $tsv_check;
 my $eof_check;
 my $ctlkw_check;
 my $apple_check;
+my $notobjc_check;
 open DIFF, "git diff-tree --minimal --no-commit-id --diff-filter=ACMR --ignore-submodules " .
     "--src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -C -l1000 " .
     "--root ".$sha1." |" or die "cannot run git: $!";
@@ -824,11 +825,8 @@ while (<DIFF>) {
         check_spelling() if ($spell_check);
         if ($apple_check) {
             check_apple_terminology();
-            if ($file =~ /\.(c|cpp)$/i) {
-                if (/\b__OBJC__\b/) {
-                    complain_ln("__OBJC__ will never be defined for non-Objective-C/C++ source files",
-                        "objc");
-                }
+            if ($notobjc_check && /\b__OBJC__\b/) {
+                complain_ln("__OBJC__ will never be defined for non-Objective-C/C++ source files", "objc");
             }
         }
     } else {
@@ -880,6 +878,7 @@ while (<DIFF>) {
             # .ts files usually contain languages other than English
             $spell_check = !defined($cfg{spell}) && !$foreign && ($file !~ /\.ts$/i);
             $apple_check = !$foreign && ($file !~ /\.ts$/i);
+            $notobjc_check = $apple_check && ($file =~ /\.(c|cc|cpp|c\+\+|cxx)$/i);
             $conflict_fail = $is_bin || defined($cfg{conflict});
             $braces = 0;
             $check_gen = 0;
