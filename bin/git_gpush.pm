@@ -2156,6 +2156,8 @@ sub _update_target_branches($)
 # gerrit ssh handling #
 #######################
 
+# URL for pushing/fetching from the Gerrit instance.
+our $gerrit_url;
 # SSH arguments for connecting the Gerrit instance.
 our @gerrit_ssh;
 # Target repository name on the Gerrit instance.
@@ -2170,6 +2172,7 @@ sub set_gerrit_config($)
     $url = git_config('remote.'.$rmt.'.url') if (!$url);
     fail("Remote '$rmt' does not exist.\n") if (!$url);
     $url = _rewrite_git_push_url($url);
+    $gerrit_url = $url;
     if ($url =~ m,^ssh://([^/:]+)(?::(\d+))?/(.*?)(?:\.git)?/?$,) {
         push @gerrit_ssh, '-p', $2 if (defined($2));
         push @gerrit_ssh, $1;

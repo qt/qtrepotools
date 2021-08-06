@@ -1812,7 +1812,7 @@ sub push_fragment($$)
     push @gitcmd, '-q' if ($quiet);
     push @gitcmd, '-n' if ($dry_run);
     push @gitcmd, map { ("-o", "$_") } @push_options;
-    push @gitcmd, $remote, "$tip:refs/for/$to";
+    push @gitcmd, $gerrit_url, "$tip:refs/for/$to";
 
     run_process(FWD_OUTPUT, @gitcmd);
 }

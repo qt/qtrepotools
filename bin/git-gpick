@@ -1085,7 +1085,7 @@ sub fetch_patchsets($$;$)
         my @gitcmd = ("git", "fetch");
         # The git-fetch output is quite noisy and unhelpful here, unless debugging.
         push @gitcmd, '-q' if (!$debug);
-        push @gitcmd, $remote, @refs;
+        push @gitcmd, $gerrit_url, @refs;
         run_process(FWD_OUTPUT, @gitcmd);
         if (!$fetched_upstream) {
             $fetched_upstream = 1;
