@@ -1,0 +1,18 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+urllib3 = "*"
+gitpython = "*"
+url-normalize = "*"
+pyyaml = "*"
+packaging = "*"
+pymsteams = "*"
+python-gerrit-api = {git = "https://github.com/DanSoQt/python-gerrit-api"}
+
+[dev-packages]
+
+[requires]
+python_version = "3.9"
