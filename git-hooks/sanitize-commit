@@ -592,6 +592,14 @@ if ($with_pickbot) {
                     complain("Omission of $masterName from Pick-to footer might be incorrect",
                              "", -1);
                 }
+                if ($target =~ /(\d+\.\d+)\.\d+$/) {
+                    # Verify that the upstream stable branch is in the pick-to if the current
+                    # target is a release branch.
+                    if (!exists($picktos{$1})) {
+                        complain("Omission of $1 from the Pick-to footer is probably incorrect",
+                                 "cherry")
+                    }
+                }
             } else {
                 complain("Omission of Pick-to footer is probably incorrect", "cherry");
             }
