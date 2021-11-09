@@ -837,6 +837,11 @@ while (<DIFF>) {
                 complain_ln("__OBJC__ will never be defined for non-Objective-C/C++ source files", "objc");
             }
         }
+        # Check for Unicode Bi-directional Override exploit characters.
+        # See https://trojansource.codes/
+        if (/[\x{202A}-\x{202E}\x{2066}-\x{2069}]/) {
+            complain_ln("Unicode bi-directional override characters", "bidi", 1)
+        }
     } else {
         flushChunk() if ($chunk);
         if (/^ /) {
