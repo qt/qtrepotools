@@ -839,7 +839,10 @@ while (<DIFF>) {
         }
         # Check for Unicode Bi-directional Override exploit characters.
         # See https://trojansource.codes/
-        if (/[\x{202A}-\x{202E}\x{2066}-\x{2069}]/) {
+        # NB: data has been UTF-8 encoded by the time it gets here,
+        # but retain Unicode form of it for (a) ease of reading (b)
+        # maybe perl will change encoding...
+        if (/\xe2(\x80[\xaa-\xae]|\x81[\xa6-\xa9])/ || /[\x{202A}-\x{202E}\x{2066}-\x{2069}]/) {
             complain_ln("Unicode bi-directional override characters", "bidi", 1)
         }
     } else {
