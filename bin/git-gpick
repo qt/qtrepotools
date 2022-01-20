@@ -367,6 +367,7 @@ sub determine_local_branch()
 
     setup_remotes($local_branch // 'HEAD');
     set_gerrit_config($remote);
+    source_map_validate();
 }
 
 # Get the list of local commits (which can be replaced).

@@ -1226,7 +1226,8 @@ our $local_tip;
 # Mapping of Change-Ids to commits on the local branch.
 our %changeid2local;  # { change-id => SHA1 }
 
-sub _source_map_prepare();
+sub source_map_validate();
+sub _source_map_prepare_local();
 sub source_map_assign($$);
 sub source_map_traverse();
 sub _source_map_finish_initial();
@@ -1267,11 +1268,11 @@ sub analyze_local_branch($)
     $local_base = $$commits[0]{parents}[0];
 
     # This needs to happen early, for parse_local_rev(), which
-    # _source_map_prepare() calls.
+    # _source_map_prepare_local() calls.
     $changeid2local{$$_{changeid}} = $$_{id} foreach (@$commits);
 
     # ... then map them to Change objects ...
-    _source_map_prepare();
+    _source_map_prepare_local();
     while (1) {
         foreach my $commit (@$commits) {
             source_map_assign($commit, undef);
@@ -1731,10 +1732,8 @@ sub parse_source_option($$\@)
     return 1;
 }
 
-# Do final sanity checking on the source branch tracking related commands,
-# expand the supplied ranges into series of commits, and create a reverse
-# mapping of commits to command objects.
-sub _source_map_prepare()
+# Do final sanity checking on the source branch tracking related commands.
+sub source_map_validate()
 {
     my $br = $local_branch // "-";
     foreach my $option (@sm_options) {
@@ -1749,31 +1748,40 @@ sub _source_map_prepare()
         }
 
         my $raw_tip = $$option{tip};
-        if (defined($raw_tip)) {
-            my $commits;
-            my $tip = parse_local_rev($raw_tip, SPEC_TIP);
-            my $raw_base = $$option{base};
-            if (defined($raw_base)) {
-                my $base = parse_local_rev($raw_base, SPEC_BASE);
-                $commits = get_commits_base($base, $tip, $raw_base, $raw_tip);
-            } else {
-                my $count = $$option{count};
-                $commits = get_commits_count($tip, $count, $raw_tip);
-            }
-            foreach my $commit (@$commits) {
-                my $sha1 = $$commit{id};
-                my $old_option = $sm_option_by_id{$sha1};
-                wfail("Range $$option{orig} intersects $$old_option{orig} (at $sha1).\n")
-                    if ($old_option);
-                $sm_option_by_id{$sha1} = $option;
-            }
-            $$option{commits} = $commits;
-            next;
-        }
+        next if (defined($raw_tip));
 
         wfail("Only one of --move, --copy, and --hide may be specified with 'new'.\n")
             if (defined($sm_option_new));
         $sm_option_new = $option;
+    }
+}
+
+# Expand the supplied ranges into series of commits, and create a reverse
+# mapping of commits to command objects.
+sub _source_map_prepare_local()
+{
+    foreach my $option (@sm_options) {
+        my $raw_tip = $$option{tip};
+        next if (!defined($raw_tip));
+
+        my $commits;
+        my $tip = parse_local_rev($raw_tip, SPEC_TIP);
+        my $raw_base = $$option{base};
+        if (defined($raw_base)) {
+            my $base = parse_local_rev($raw_base, SPEC_BASE);
+            $commits = get_commits_base($base, $tip, $raw_base, $raw_tip);
+        } else {
+            my $count = $$option{count};
+            $commits = get_commits_count($tip, $count, $raw_tip);
+        }
+        foreach my $commit (@$commits) {
+            my $sha1 = $$commit{id};
+            my $old_option = $sm_option_by_id{$sha1};
+            wfail("Range $$option{orig} intersects $$old_option{orig} (at $sha1).\n")
+                if ($old_option);
+            $sm_option_by_id{$sha1} = $option;
+        }
+        $$option{commits} = $commits;
     }
 }
 

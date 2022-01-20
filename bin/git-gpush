@@ -711,6 +711,7 @@ sub determine_local_branch($)
     }
     setup_remotes($source);
     set_gerrit_config($remote);
+    source_map_validate();
 }
 
 # Determine the target branch for the given series.
