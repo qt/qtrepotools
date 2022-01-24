@@ -1,0 +1,24 @@
+#!/bin/sh
+
+while [ ! -f cmake/QtSynchronizeRepo.cmake ]
+do
+    cd ..
+    if [ $? -gt 0 ]
+    then
+        >&2 echo "This git command needs to be run within a Qt supermodule clone"
+        exit 1
+    fi
+done
+
+module="$1"
+shift
+revision="$1"
+shift
+
+if [ ! -d $module ]
+then
+    >&2 echo "Can't find worktree for the reference module '$module'"
+    exit 2
+fi
+
+cmake -DSYNC_TO_MODULE="$module" -DSYNC_TO_BRANCH="$revision" "$@" -P cmake/QtSynchronizeRepo.cmake
