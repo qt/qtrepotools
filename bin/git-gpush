@@ -1864,11 +1864,13 @@ sub update_unpushed($)
 
     my $topic_list = $$group{topic_list};
     if (@$topic_list) {
-        # TODO: This can be done with the REST API.
         state $printed;
-        print "Warning: Cannot set topic on unmodified commits.\n"
-            if (!$printed);
+        print "Setting topic on unmodified commit(s) ...\n"
+            if (!$quiet && !$printed);
         $printed = 1;
+        run_process(FWD_OUTPUT | DRY_RUN,
+                    'ssh', @gerrit_ssh, 'gerrit', 'set-topic',
+                    '-t', $$group{topic}, map { $$_{key} } @$topic_list);
     }
 }
 
