@@ -684,7 +684,8 @@ sub get_commits_base($$$$)
 use constant {
     RVRTYPE_NONE => 0,
     RVRTYPE_REV => 1,
-    RVRTYPE_CC => 1  # Because Gerrit won't tell.
+    RVRTYPE_CC => 2,
+    RVRTYPE_ANY => 3  # Because Gerrit won't tell via SSH.
 };
 
 our %gerrit_info_by_key;
@@ -2251,7 +2252,7 @@ sub query_gerrit_only($;$)
             foreach my $rvr (@$rvrs) {
                 foreach my $ky ('name', 'email', 'username') {
                     my $val = $$rvr{$ky};
-                    $reviewers{$val} = RVRTYPE_REV if (defined($val));
+                    $reviewers{$val} = RVRTYPE_ANY if (defined($val));
                 }
             }
             $$ginfo{reviewers} = \%reviewers;

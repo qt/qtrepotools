@@ -1742,13 +1742,15 @@ sub prepare_meta($)
             my $rvrs = $ginfo ? $$ginfo{reviewers} : {};
             my $any;
             foreach my $rvr (@reviewers) {
-                if (($$rvrs{$rvr} // RVRTYPE_NONE) != RVRTYPE_REV) {
+                my $type = $$rvrs{$rvr} // RVRTYPE_NONE;
+                if ($type != RVRTYPE_REV && $type != RVRTYPE_ANY) {
                     $invite_rvrs{$rvr} = 1;
                     $any = 1;
                 }
             }
             foreach my $cc (@CCs) {
-                if (($$rvrs{$cc} // RVRTYPE_NONE) != RVRTYPE_CC) {
+                my $type = $$rvrs{$cc} // RVRTYPE_NONE;
+                if ($type != RVRTYPE_CC && $type != RVRTYPE_ANY) {
                     $invite_ccs{$cc} = 1;
                     $any = 1;
                 }
