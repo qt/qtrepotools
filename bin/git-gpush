@@ -1723,7 +1723,7 @@ sub add_if_unmodified($$)
 
     my $freshness = $$change{freshness};
     if (($freshness eq UNMODIFIED) || ($freshness eq OUTDATED)) {
-        push @$list, $$change{final}{id};
+        push @$list, $$change{gerrit};
     }
 }
 
@@ -1849,19 +1849,17 @@ sub update_unpushed($)
         $printed = 1;
 
         my ($rvrs, $ccs) = ($$group{add_rvrs} // [], $$group{add_ccs} // []);
-        my @rlist;
-        foreach my $rvr (@$rvrs) {
-            push @rlist, { "reviewer" => $rvr, "state" => "REVIEWER" };
+        if (@$rvrs) {
+            run_process(FWD_OUTPUT | DRY_RUN,
+                        'ssh', @gerrit_ssh, 'gerrit', 'set-reviewers',
+                        (map { ('-a', $_) } @$rvrs), '--', (map { $$_{key} } @$invite_list));
         }
-        foreach my $cc (@$ccs) {
-            push @rlist, { "reviewer" => $cc, "state" => "CC" };
+        if (@$ccs) {
+            state $printed_cc;
+            print "Warning: Cannot invite CCs to unmodified commits.\n"
+                if (!$printed_cc);
+            $printed_cc = 1;
         }
-        my $json = { "reviewers" => \@rlist };
-        my $pipe = open_process(USE_STDIN | FWD_OUTPUT | DRY_RUN,
-                                'ssh', @gerrit_ssh, 'gerrit', 'review', '--json',
-                                @$invite_list);
-        write_process($pipe, encode_json($json)."\n");
-        close_process($pipe);
     }
 
     my $topic_list = $$group{topic_list};
