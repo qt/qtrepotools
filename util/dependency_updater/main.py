@@ -322,11 +322,15 @@ def main():
 
     # Determine how to exit
     clear_state = False
-    if not any([r.progress for r in config.state_data.values() if
-                r.progress < Repo.PROGRESS.DONE.value]):
+    if not any(r.progress < Repo.PROGRESS.DONE for r in config.state_data.values()):
         if config.args.simulate:
             print("INFO: Done with this round, but not clearing state because --sim was used.")
-        elif config.args.pause_on_finish_fail and not config.state_data.get("pause_on_finish_fail"):
+        elif (config.args.pause_on_finish_fail  # The args say to pause on failure
+                and not config.state_data.get("pause_on_finish_fail")  # And not already paused
+                # And are there any real failures that should cause us to pause.
+                and any(r.progress == Repo.PROGRESS.DONE_FAILED_BLOCKING for r in
+                        config.state_data.values())):
+            # Set the flag and report the error.
             print(
                 "Done with this round: Running in Pause On Finish Fail mode. Not resetting state.")
             config.state_data["pause_on_finish_fail"] = Repo.Repo(id="pause_on_finish_fail",

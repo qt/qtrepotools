@@ -560,7 +560,7 @@ def get_check_progress(config: Config, repo: Repo) -> (PROGRESS, str, str):
     """Determine the progress status of a submodule update
 
     :returns: progress: PROGRESS, merged_ref: str, gerrit_change_status: str[NEW, MERGED, STAGED, INTEGRATING, ABANDONED]"""
-    if repo.progress >= PROGRESS.DONE:
+    if repo.progress in [PROGRESS.DONE, PROGRESS.DONE_NO_UPDATE, PROGRESS.IGNORE_IS_META]:
         return repo.progress, repo.proposal.merged_ref, "MERGED"
     elif repo.proposal.proposed_yaml and not repo.proposal.change_id:
         if repo.proposal.inconsistent_set:
@@ -568,6 +568,9 @@ def get_check_progress(config: Config, repo: Repo) -> (PROGRESS, str, str):
         else:
             return PROGRESS.READY, "", ""
     elif repo.proposal.change_id:
+        # This condition also catches DONE_FAILED_BLOCKING and DONE_FAILED_NON_BLOCKING
+        # So that if a change was manually merged without the bot's help,
+        # it gets picked up and marked as merged.
         change = config.datasources.gerrit_client.changes.get(repo.proposal.change_id)
         remote_status = change.status
         if remote_status == "NEW" and repo.progress == PROGRESS.IN_PROGRESS and repo.stage_count > 0:
@@ -809,8 +812,9 @@ def push_submodule_update(config: Config, repo: Repo, retry: bool = False) -> Pr
 def do_try_supermodule_updates(config: Config) -> dict[str, Repo]:
     """Push supermodule updates if needed"""
     blocking_repos = [r for r in config.state_data.values() if not r.is_non_blocking]
-    if not any([r for r in blocking_repos if r.id not in ["qt/qt5", "yocto/meta-qt6"]
-                and (r.progress < PROGRESS.DONE or r.progress == PROGRESS.DONE_FAILED_BLOCKING)]):
+    if not any((r.progress < PROGRESS.DONE or r.progress == PROGRESS.DONE_FAILED_BLOCKING)
+               and r.id not in ["qt/qt5", "yocto/meta-qt6"]
+               for r in blocking_repos):
         if config.args.update_supermodule:
             supermodule = push_supermodule_update(config)
             config.state_data[supermodule.id] = supermodule
