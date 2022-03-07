@@ -404,7 +404,12 @@ def parse_failed_integration_log(config, repo: Repo = None, log_url: str = "") -
         return ""
     r = requests.get(log_url)
     if r.status_code == 200:
-        log_text = r.content.decode("utf-8")
+        try:
+            log_text = r.content.decode("utf-8")
+        except UnicodeDecodeError:
+            print(f"Error decoding integration failure log for"
+                  f" {repo.proposal.change_id if repo else ''} at {log_url}")
+            return ""
         if repo:
             print(f"Found integration failure log for {repo.proposal.change_id}")
     else:
