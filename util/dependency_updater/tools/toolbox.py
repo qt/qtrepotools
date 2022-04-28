@@ -813,7 +813,7 @@ def do_try_supermodule_updates(config: Config) -> dict[str, Repo]:
     """Push supermodule updates if needed"""
     blocking_repos = [r for r in config.state_data.values() if not r.is_non_blocking]
     if not any((r.progress < PROGRESS.DONE or r.progress == PROGRESS.DONE_FAILED_BLOCKING)
-               and r.id not in ["qt/qt5", "yocto/meta-qt6"]
+               and r.id not in [f"{config.args.repo_prefix}qt5", "yocto/meta-qt6"]
                for r in blocking_repos):
         if config.args.update_supermodule:
             supermodule = push_supermodule_update(config)
@@ -995,10 +995,14 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
     gerrit = config.datasources.gerrit_client
     yocto_repo = search_for_repo(config, "yocto/meta-qt6")
     filename = "recipes-qt/qt6/qt6-git.inc"
+
     if yocto_repo.progress >= PROGRESS.IN_PROGRESS:
         return yocto_repo
     yocto_repo.is_supermodule = True
-    yocto_repo.branch = config.args.branch
+    # LTS branch updates are expected to always use a prefix of tqtc/lts-
+    # but yocto lts branches remain in the public repo, so strip off
+    # the tqtc/ prefix
+    yocto_repo.branch = config.args.branch.removeprefix('tqtc/')
     yocto_repo.proposal.change_id, yocto_repo.proposal.change_number \
         = search_existing_change(config, yocto_repo, "Update submodule refs")
 
@@ -1006,6 +1010,7 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
         .get_file_content(filename)
     old_file = bytes.decode(base64.b64decode(r), "utf-8")
     file_lines = old_file.splitlines()
+
     # The trial-and error nature of finding submodules can be a bit noisy, so suppress warnings.
     config.suppress_warn = True
     print("Preparing yocto/meta-qt6 update:")
@@ -1017,11 +1022,15 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
         repo_name_maybe_submodule = SRCREV.split("_")[1]
         module_name = ""
         pinned_submodule_sha = ""
+        # If the module name is hypenated, it may be a submodule. Try to find the parent
+        # and use that sha.
         if "-" in repo_name_maybe_submodule:
             split = repo_name_maybe_submodule.split("-")
             maybe_parent = "-".join(split[:-1])
             parent_lines = [l for l in file_lines[:i] if l.startswith(f"SRCREV_{maybe_parent}")]
             if parent_lines:
+                # Found a potential parent, run some checks to see if it's a known or
+                # real repository.
                 parent_line = parent_lines[-1].split(" = ")
                 module_name = parent_line[0].split("_").pop()
                 if "-" in module_name:
@@ -1046,7 +1055,7 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
                       f"Trying {repo_name_maybe_submodule} as a regular module instead.")
                 module_name = repo_name_maybe_submodule
                 submodule_name = ""
-        else:
+        else:  # Expected to be just a regular module
             module_name = repo_name_maybe_submodule
         module_repo = search_for_repo(config, module_name)
         if not module_repo.original_ref:
