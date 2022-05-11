@@ -3,7 +3,7 @@
 
 #############################################################################
 ##
-## Copyright (C) 2020 The Qt Company Ltd.
+## Copyright (C) 2022 The Qt Company Ltd.
 ## Contact: https://www.qt.io/licensing/
 ##
 ## This file is part of the build tools of Qt.
@@ -66,22 +66,23 @@ in the format key=value:
     "%CONFIGFILE%"
 
 Configuration keys:
-Acceleration     Incredibuild or unset
-BuildType        CMake Build type
-CMake            CMake binary
-DeveloperBuild   (boolean) Developer build
-DisabledFeatures Disabled CMake features
-Features         CMake features
-Examples         (boolean) whether to build examples
-Generator        CMake generator, defaults to Ninja
-Mkspec           Qt make spec (e.g. win32-g++)
-GerritUser       Gerrit user
-InitArguments    ,-separated list of arguments to init-repository
-Jobs             Number of jobs to be run simultaneously
-Modules          ,-separated list of modules to build ("all": all modules,
-                 ("wall": all modules except qtwebengine [default]).
-Static           Build statically
-Tests            (boolean) whether to build tests
+Acceleration       Incredibuild or unset
+BuildType          CMake Build type
+CMake              CMake binary
+ConfigureArguments Configure arguments
+DeveloperBuild     (boolean) Developer build
+DisabledFeatures   Disabled CMake features
+Features           CMake features
+Examples           (boolean) whether to build examples
+Generator          CMake generator, defaults to Ninja
+Mkspec             Qt make spec (e.g. win32-g++)
+GerritUser         Gerrit user
+InitArguments      ,-separated list of arguments to init-repository
+Jobs               Number of jobs to be run simultaneously
+Modules            ,-separated list of modules to build ("all": all modules,
+                   ("wall": all modules except qtwebengine [default]).
+Static             Build statically
+Tests              (boolean) whether to build tests
 
 It is possible to use repository-specific values by adding a suffix preceded by
 a dash, eg:
@@ -150,6 +151,7 @@ ACCELERATION_KEY = 'Acceleration'
 BUILD_EXAMPLES_KEY = 'Examples'
 BUILD_TESTS_KEY = 'Tests'
 BUILD_TYPE_KEY = 'BuildType'
+CONFIGURE_ARGUMENTS_KEY = 'ConfigureArguments'
 CMAKE_KEY = 'CMake'
 DEVELOPER_BUILD_KEY = 'DeveloperBuild'
 DISABLED_FEATURES_KEY = 'DisabledFeatures'
@@ -593,6 +595,7 @@ def configure_arguments():
     build_examples = read_bool_config(BUILD_EXAMPLES_KEY)
     build_tests = read_bool_config(BUILD_TESTS_KEY)
     build_statically = read_bool_config(STATIC_KEY)
+    arguments = read_config(CONFIGURE_ARGUMENTS_KEY)
     mkspec = read_config(MKSPEC_KEY)
 
     result = [cmake(), f'-DCMAKE_INSTALL_PREFIX={install_dir}',
@@ -617,6 +620,10 @@ def configure_arguments():
 
     if build_type:
         result.append(f'-DCMAKE_BUILD_TYPE={build_type}')
+
+    if arguments:
+        result.extend(arguments.split())
+
     return result
 
 
