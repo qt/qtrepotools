@@ -1,6 +1,7 @@
 # Copyright (C) 2020 The Qt Company Ltd.
 # SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 import copy
+from typing import Union
 
 from tools import toolbox
 from .config import Config
@@ -32,7 +33,7 @@ def prepare_update(config: Config, repo: Repo) -> tuple[Repo, bool]:
     """Bump progress of a repo if it's dependencies are met,
     then create a proposal if it doesn't already exist."""
 
-    repo.progress, progress_changed = determine_ready(config, repo)
+    repo.progress, progress_changed, repo.failed_dependencies = determine_ready(config, repo)
     if repo.is_supermodule:
         return repo, False
     repo.proposal = retrieve_or_generate_proposal(config, repo)
@@ -51,7 +52,8 @@ def prepare_update(config: Config, repo: Repo) -> tuple[Repo, bool]:
 def retrieve_or_generate_proposal(config: Config, repo) -> Proposal:
     """Return the proposed YAML if it exists and should not be updated,
     otherwise, generate a new one with the latest shas."""
-    if repo.progress in [PROGRESS.DONE_FAILED_NON_BLOCKING, PROGRESS.DONE_FAILED_BLOCKING, PROGRESS.DONE, PROGRESS.DONE_NO_UPDATE,
+    if repo.progress in [PROGRESS.DONE_FAILED_DEPENDENCY, PROGRESS.DONE_FAILED_NON_BLOCKING,
+                         PROGRESS.DONE_FAILED_BLOCKING, PROGRESS.DONE, PROGRESS.DONE_NO_UPDATE,
                          PROGRESS.WAIT_DEPENDENCY, PROGRESS.WAIT_INCONSISTENT,
                          PROGRESS.IN_PROGRESS]:
         return repo.proposal
@@ -80,9 +82,12 @@ def check_subtree(config, source: Repo,
     Recurse for each dependency which is not the same as the source.
 
     :returns: the id of a target repo which has a mismatching sha to the source_ref"""
-    deps = target.deps_yaml.get(
-        "dependencies") if target.progress < PROGRESS.DONE else target.proposal.proposed_yaml.get(
-        "dependencies")
+    deps = target.deps_yaml.get("dependencies") \
+        if target.progress < PROGRESS.DONE \
+        or target.progress == Repo.progress.DONE_FAILED_DEPENDENCY \
+        or target.progress in (Repo.progress.DONE_FAILED_BLOCKING,
+                               Repo.progress.DONE_FAILED_NON_BLOCKING) \
+        else target.proposal.proposed_yaml.get("dependencies")
     for dependency in deps.keys():
         if source.name in dependency:
             if not source_ref == deps[dependency]["ref"]:
@@ -184,10 +189,14 @@ def discover_missing_dependencies(config: Config, repo: Repo) -> dict[str, Repo]
     return config.state_data
 
 
-def determine_ready(config: Config, repo: Repo) -> tuple[PROGRESS, bool]:
+def determine_ready(config: Config, repo: Repo) -> tuple[PROGRESS, bool, Union[list, None]]:
     """Check to see if a repo is waiting on another, or if all
     dependency conflicts have been resolved and/or updated."""
     worst_state = PROGRESS.READY
+    # Keep a list of failed dependencies so we can explain
+    # why a repo is being marked as failed without
+    # actually attempting an update.
+    failed_repos = set()
 
     def is_worse(state):
         nonlocal worst_state
@@ -196,19 +205,28 @@ def determine_ready(config: Config, repo: Repo) -> tuple[PROGRESS, bool]:
 
     if repo.proposal.inconsistent_set:
         is_worse(PROGRESS.WAIT_INCONSISTENT)
-    if repo.progress < PROGRESS.IN_PROGRESS:
+    if repo.progress < PROGRESS.IN_PROGRESS \
+            or repo.progress == PROGRESS.DONE_FAILED_DEPENDENCY:
         for dependency in repo.dep_list:
+            dep_repo = config.state_data[dependency]
             if dependency in config.state_data.keys():
-                if config.state_data[dependency].progress < PROGRESS.DONE:
+                # Recurse and update the progress in the case that we're trying
+                # to rewind with many previously failed dependencies.
+                dep_repo.progress, _, dep_repo.failed_dependencies \
+                    = determine_ready(config, dep_repo)
+
+                if dep_repo.progress < PROGRESS.DONE:
                     is_worse(PROGRESS.WAIT_DEPENDENCY)
-                elif config.state_data[dependency].progress == PROGRESS.DONE_FAILED_NON_BLOCKING:
+                elif dep_repo.progress == PROGRESS.DONE_FAILED_NON_BLOCKING:
                     print(f"WARN: {repo.id} dependency {dependency} is a non-blocking module which"
-                          f" failed. Marking {repo.id} as failed.")
-                    is_worse(PROGRESS.DONE_FAILED_NON_BLOCKING)
-                elif config.state_data[dependency].progress == PROGRESS.DONE_FAILED_BLOCKING:
+                          f" failed. Marking {repo.id} as Failed due to dependency.")
+                    failed_repos.add(dependency)
+                    is_worse(PROGRESS.DONE_FAILED_DEPENDENCY)
+                elif dep_repo.progress == PROGRESS.DONE_FAILED_BLOCKING:
                     print(f"WARN: {repo.id} dependency {dependency} is a blocking module which"
-                          f" failed. Marking {repo.id} as failed-blocking.")
-                    is_worse(PROGRESS.DONE_FAILED_BLOCKING)
-        return worst_state, repo.progress != worst_state
+                          f" failed. Marking {repo.id} as Failed due to dependency.")
+                    is_worse(PROGRESS.DONE_FAILED_DEPENDENCY)
+                    failed_repos.add(dependency)
+        return worst_state, repo.progress != worst_state, list(failed_repos)
     else:
-        return repo.progress, False
+        return repo.progress, False, None

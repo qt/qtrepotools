@@ -22,7 +22,8 @@ class PROGRESS(IntEnum):
     DONE_NO_UPDATE = 8
     DONE_FAILED_NON_BLOCKING = 9
     DONE_FAILED_BLOCKING = 10
-    IGNORE_IS_META = 11
+    DONE_FAILED_DEPENDENCY = 11
+    IGNORE_IS_META = 12
 
 
 class Repo(Namespace):
@@ -37,6 +38,7 @@ class Repo(Namespace):
     proposal: Proposal = Proposal()
     to_stage: list[str]
     progress: PROGRESS = PROGRESS.UNSPECIFIED
+    failed_dependencies: list[str]
     stage_count: int = 0
     retry_count: int = 0
     is_supermodule: bool = False  # Bypasses dependency calculation
@@ -49,6 +51,7 @@ class Repo(Namespace):
         super().__init__(**kwargs)
         self.to_stage = list()
         self.dep_list = list()
+        self.failed_dependencies = list()
         self.id = unquote(id)
         self.prefix = prefix
         self.name = id.removeprefix(prefix)

@@ -1204,6 +1204,7 @@ def reset_module_properties(config: Config, repo: Repo) -> Repo:
     print(f"Resetting module state for {repo.id}")
     repo.progress = PROGRESS.UNSPECIFIED
     repo.proposal = Proposal()
+    repo.failed_dependencies = list()
     repo.stage_count = 0
     repo.retry_count = 0
     repo.to_stage = list()
@@ -1289,12 +1290,23 @@ def state_printer(config: Config) -> tuple[dict[PROGRESS, int], str]:
     repos.clear()
     msg = "\nThe following repos failed to update:"
     for repo in config.state_data.keys():
-        if config.state_data[repo].progress >= PROGRESS.DONE_FAILED_NON_BLOCKING:
+        if config.state_data[repo].progress in (PROGRESS.DONE_FAILED_NON_BLOCKING,
+                                                PROGRESS.DONE_FAILED_BLOCKING):
             total_state[PROGRESS.DONE_FAILED_NON_BLOCKING.value] += 1
             repos.append(repo)
     if repos:
         ret_str += _print(msg)
         for repo in repos:
             ret_str += _print(f"\t{repo}")
+    repos.clear()
+    msg = "\nThe following repos cannot be updated due to a failed dependency:"
+    for repo in config.state_data.keys():
+        if config.state_data[repo].progress == PROGRESS.DONE_FAILED_DEPENDENCY:
+            total_state[PROGRESS.DONE_FAILED_DEPENDENCY.value] += 1
+            repos.append(repo)
+    if repos:
+        ret_str += _print(msg)
+        for repo in repos:
+            ret_str += _print(f"\t{repo}: {config.state_data[repo].failed_dependencies}")
 
     return total_state, ret_str

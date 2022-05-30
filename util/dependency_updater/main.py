@@ -117,21 +117,6 @@ def main():
         config.rewind_module = toolbox.search_for_repo(config, config.args.rewind_module)
     # Load the state cache
     config.state_data = state.load_updates_state(config)
-    # Check to see if we should abort as finished-failed
-    if config.state_data.get("pause_on_finish_fail"):
-        if not any([config.args.retry_failed, config.args.rewind_module]):
-            print(
-                "Round is in Failed_finish state and this round was run in Paused On Finish Fail Mode.\n"
-                "To move the round forward, run the script with one of the following --reset,"
-                " --rewind, or --retry_failed")
-            parse_args(print_help=True)
-            exit()
-        # Continue the round and try again.
-        del config.state_data["pause_on_finish_fail"]
-        if config.args.retry_failed:
-            for module in [r for r in config.state_data.values()
-                           if r.progress == Repo.PROGRESS.DONE_FAILED_BLOCKING]:
-                toolbox.reset_module_properties(config, module)
     report_new_round = False
     if not config.state_data and config.args.update_default_repos:
         # State data is always empty if the round is fresh.
@@ -153,9 +138,43 @@ def main():
     config.state_data = state.update_state_data(config.state_data, repos)
 
     # Update the progress of all repos in the state since the last run of the tool.
+    changes_since_last_run = False
     for repo in config.state_data.values():
+        progress = repo.progress
         repo.progress, repo.proposal.merged_ref, repo.proposal.gerrit_status = \
             toolbox.get_check_progress(config, repo)
+        if progress != repo.progress:
+            changes_since_last_run = True
+            print(f"{repo.id} moved from {progress.name} to {repo.progress.name}.")
+
+    # Check to see if we should abort as finished-failed
+    if config.state_data.get("pause_on_finish_fail"):
+        # If none of the retry conditions are met, print the help and exit.
+        if not any([config.args.retry_failed, config.args.rewind_module, changes_since_last_run]):
+            print(
+                "Round is in Failed_finish state and this round was run in"
+                " Pause On Finish Fail Mode.\n"
+                "To move the round forward, run the script with one of the following --reset,"
+                " --rewind, or --retry_failed, or manually integrate any of the"
+                " failed changes below.")
+            print(toolbox.state_printer(config))
+            parse_args(print_help=True)
+            exit()
+        # Continue the round and try again.
+        del config.state_data["pause_on_finish_fail"]
+
+    # Reset failed modules as necessary or re-determine readiness.
+    if config.args.retry_failed or changes_since_last_run:
+        for module in [r for r in config.state_data.values()
+                       if r.progress in [Repo.PROGRESS.DONE_FAILED_BLOCKING,
+                                         Repo.PROGRESS.DONE_FAILED_NON_BLOCKING,
+                                         Repo.PROGRESS.DONE_FAILED_DEPENDENCY]]:
+            if config.args.retry_failed:
+                toolbox.reset_module_properties(config, module)
+            elif changes_since_last_run:
+                # Update the progress of repos such that previously failed
+                # modules which are now unblocked get set to READY.
+                module.progress, _, __ = dependency_resolver.determine_ready(config, module)
 
     # Collect necessary data if dropping a dependency from a repo.
     if config.args.drop_dependency:

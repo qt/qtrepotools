@@ -8,21 +8,26 @@ from .repo import Repo, PROGRESS
 from typing import Union
 
 
-def gerrit_link_maker(config, change: Union[GerritChange.GerritChange, Repo]) -> tuple[str, str]:
+def gerrit_link_maker(config, change_or_repo: Union[GerritChange.GerritChange, Repo, str],
+                      change_id_override: str = None) -> tuple[str, str]:
     repo = ""
+    change_override = ""
     _change = None
-    if type(change) == GerritChange:
-        repo = change.project
-        _change = change
-    elif type(change) == Repo:
-        repo = change.id
-        _change = config.datasources.gerrit_client.changes.get(change.proposal.change_id)
+    if type(change_or_repo) == GerritChange:
+        repo = change_or_repo.project
+        _change = change_or_repo
+    elif type(change_or_repo) == Repo:
+        repo = change_or_repo.id
+    _change = _change \
+        or config.datasources.gerrit_client.changes.get(change_id_override
+                                                        or change_or_repo.proposal.change_id)
     if not repo:
         return "", ""
     subject = _change.subject
     mini_sha = _change.get_revision("current").get_commit().commit[:10]
     url = f"{config.GERRIT_HOST}c/{repo}/+/{_change._number}"
-    return f"({mini_sha}) {subject[:70]}{'...' if len(subject) > 70 else ''}", url
+    change_status = f"[{_change.status}]" if _change.status != "NEW" else ""
+    return f"{change_status}({mini_sha}) {subject[:70]}{'...' if len(subject) > 70 else ''}", url
 
 
 class TeamsConnector:
@@ -125,15 +130,24 @@ class TeamsConnector:
                 msteams.connectorcard.addPotentialAction(reset_section, retry)
                 message_card.addSection(reset_section)
             failed_section = msteams.cardsection()
-            failed_modules_text = "\n".join([r.id for r in config.state_data.values()
-                                             if r.progress == PROGRESS.DONE_FAILED_BLOCKING])
-            failed_section.text(f"```\nFailed Modules on {config.args.branch}:\n{failed_modules_text}")
+            # Join the list of failed modules with their failed dependencies if there are any.
+            # If there's no failed dependencies, it means the module itself had issues integrating.
+            failed_modules_text = "\n".join(r.id for r in config.state_data.values()
+                                            if r.progress == PROGRESS.DONE_FAILED_BLOCKING)
+            failed_modules_text += "\n\nThe following modules could not be updated due to failed" \
+                                   " dependencies:\n"
+            failed_modules_text += "\n".join(f"{r.id}: {r.failed_dependencies}"
+                                             for r in config.state_data.values()
+                                             if r.progress == PROGRESS.DONE_FAILED_DEPENDENCY)
+            failed_section.text(
+                f"```\nFailed Modules on {config.args.branch}:\n{failed_modules_text}")
             message_card.addSection(failed_section)
+            print(message_card.payload)
             message_card.send()
-            if message_card.last_http_status.status_code != 200:
-                print(
-                    f"WARN: Unable to send alert to webhook for Round Failed Finished on {config.args.branch}")
-                return False
+            # if message_card.last_http_status.status_code != 200:
+            #     print(
+            #         f"WARN: Unable to send alert to webhook for Round Failed Finished on {config.args.branch}")
+            #     return False
         return True
 
     def send_teams_webhook_basic(self, text: str, repo: Repo = None, reset_links=False):
