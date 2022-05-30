@@ -99,7 +99,8 @@ def update_state_data(old_state: dict[str, Repo],
     return updated
 
 
-def save_updates_state(config, _clear_state: bool = False) -> None:
+def save_updates_state(config, _clear_state: bool = False,
+                       prune_and_keep: str = None) -> None:
     """Save updates to the state file"""
     if not config.args.simulate:
         if _clear_state:
@@ -110,43 +111,72 @@ def save_updates_state(config, _clear_state: bool = False) -> None:
         data: dict[str, dict[str, Repo]] = {}
         with open(state_path, 'rb') as state_file:
             data = pickle.load(state_file)
-            data[config.args.branch] = config.state_data
+            if prune_and_keep:
+                keep_branches = prune_and_keep.split(",")
+                print(f"Found branches: {data.keys()}")
+                print(f"Retaining branches: {keep_branches}")
+                for branch in list(data.keys()):
+                    if branch not in keep_branches:
+                        del data[branch]
+            else:
+                data[config.args.branch] = config.state_data
         with open(state_path, 'wb') as state_file:
             pickle.dump(data, state_file)
         config.state_repo.index.add("state.bin")
         config.state_repo.index.commit("Update state")
         if config._state_ref:
             config.state_repo.remotes.origin.push(['-f', f"HEAD:{config._state_ref}"])
+            print("Done saving state.")
     elif config.args.no_state:
         print("Running in no-state mode. Not saving state!")
 
 
-def clear_state(config) -> None:
-    """Clear state data. All branches are wiped if not specified!"""
-    print("Clearing state and resetting updates...")
-    if config.args.branch:
-        config.state_data = {}
-        save_updates_state(config)
-        print(f"Clearing branch state for {config.args.branch}")
-        return
+def clear_state(config, prune_and_keep: str = None) -> None:
+    """Clear state data. Currently operating branch is cleared if not pruning!
 
-    if config._state_ref:
-        try:
-            config.state_repo.remotes.origin.push(['-f', f":{config._state_ref}"])
-            print("Cleared remote state on codereview...")
-        except git.exc.GitCommandError:
-            print(
-                "WARN: Failed to push an empty commit, probably because the state is already clear.")
-        del config.state_repo  # Need to tear down the instance of PyGit to close the file handle.
-        sleep(5)  # workaround for sometimes slow closing of git handles.
+    Parameters:
+        prune_and_keep: str: List of branches to keep.
+                             Prune all others. Set to "ALL" clears all branches.
+    """
+
+    def clear_one():
+        print(f"Clearing state and resetting updates for {config.args.branch}...")
+        if config.args.branch:
+            config.state_data = {}
+            save_updates_state(config)
+            print(f"Clearing branch state for {config.args.branch}")
+            return
+
+    def clear_all():
+        if config._state_ref:
+            try:
+                config.state_repo.remotes.origin.push(['-f', f":{config._state_ref}"])
+                print("Cleared remote state on codereview...")
+            except git.exc.GitCommandError:
+                print(
+                    "WARN: Failed to push an empty commit, probably because the state is already clear.")
+            del config.state_repo  # Need to tear down the instance of PyGit to close the file handle.
+            sleep(5)  # workaround for sometimes slow closing of git handles.
+        else:
+            print("\nWARN: No state remote ref set! Only deleting local state.bin file.\n"
+                  "WARN: Run this script again with --reset after configuring an ssh user\n"
+                  "WARN: in ~/.ssh/config for your gerrit host as set by 'GERRIT_HOST' in config.yaml.\n"
+                  "WARN: If a remote state exists next time this script is run, it will likely\n"
+                  "WARN: cause unexpected behavior!")
+        shutil.rmtree(Path(config.cwd, "_state"), onerror=_unlink_file)
+        print("Deleted local state files.")
+
+    def clear_some():
+        save_updates_state(config, prune_and_keep=prune_and_keep)
+
+    if prune_and_keep:
+        print("Pruning state data.")
+        if prune_and_keep == "ALL":
+            clear_all()
+        else:
+            clear_some()
     else:
-        print("\nWARN: No state remote ref set! Only deleting local state.bin file.\n"
-              "WARN: Run this script again with --reset after configuring an ssh user\n"
-              "WARN: in ~/.ssh/config for your gerrit host as set by 'GERRIT_HOST' in config.yaml.\n"
-              "WARN: If a remote state exists next time this script is run, it will likely\n"
-              "WARN: cause unexpected behavior!")
-    shutil.rmtree(Path(config.cwd, "_state"), onerror=_unlink_file)
-    print("Deleted local state files.")
+        clear_one()
 
 
 def _unlink_file(function, path, excinfo):

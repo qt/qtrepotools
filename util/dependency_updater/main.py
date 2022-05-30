@@ -17,6 +17,12 @@ def parse_args(print_help: bool = False) -> Namespace:
                              "the final state.")
     parser.add_argument('--reset', dest='reset', action='store_true',
                         help="Forget current update state of [branch], then exit. Requires branch.")
+    parser.add_argument('--prune_state', dest="prune_and_keep",
+                        help="Prune the saved state of unused branches, then exit.\n"
+                             "Exclusive with all other options.\n"
+                             "Pass a comma-separated list of branches to keep."
+                             "Everything else gets pruned.\n"
+                             "Pass keyword 'ALL' to clear all branches.")
     parser.add_argument('--pauseOnFail', dest='pause_on_finish_fail', action='store_true',
                         help="If the round finished with failures in blocking repos, do not reset\n"
                              "the round. Hold the current state until rewound or reset.")
@@ -98,6 +104,10 @@ def main():
     config = Config._load_config("config.yaml", parse_args())
     config.datasources.load_datasources(config)
     config.state_repo = state.check_create_local_repo(config)
+    if config.args.prune_and_keep:
+        print(config.args.prune_and_keep)
+        state.clear_state(config, config.args.prune_and_keep)
+        exit()
     if config.args.reset:
         state.clear_state(config)
         exit()
