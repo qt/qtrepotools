@@ -574,6 +574,38 @@ def stage_update(config: Config, repo: Repo) -> bool:
     """Perform a 'safe stage' on the update by attempting to stage all
     updates together, but cancel the attempt and unstage if a conflict
     is generated during staging."""
+
+    def _do_staging(change_id, is_retry=False) -> bool:
+        "Stage a change or add failed stage to the retry list if it hasn't been."
+        if repo.proposal.change_id == change_id:
+            if len(repo.to_stage) > 1:
+                message = f"Staging this update with other changes:\n{costaging_changes_links}"
+            else:
+                message = ""
+        else:
+            message = "Staging this change automatically with the dependency update for this" \
+                      f" module:\n" \
+                      f"{gerrit_link_self}"
+        stage_success, retry_stage = stage_change(config, change_id, message, is_retry)
+        if stage_success:
+            print(f"{repo.id}: Staged "
+                  f"{'submodule update' if repo.proposal.change_id == change_id else 'related change'}"
+                  f" {change_id}")
+        elif retry_stage:
+            needs_staging_retry.append(change_id)
+        else:
+            if repo.proposal.change_id == change_id:
+                post_gerrit_comment(config, change_id,
+                                    f"Failed to stage this dependency update automatically.\n"
+                                    f"{'Co-staged with ' + costaging_changes_links if len(repo.to_stage) > 1 else ''}")
+            else:
+                post_gerrit_comment(config, change_id, "Failed to stage this change automatically"
+                                                       " with the dependency update for this repo."
+                                                       " It probably created a merge conflict."
+                                                       " Please review.\n"
+                                                       f"See: {gerrit_link_self}.")
+            return True
+
     if repo.proposal.gerrit_status in ["STAGED", "INTEGRATING", "MERGED"]:
         print(f"{repo.id} update is already {repo.proposal.gerrit_status}. Skipping.")
         return False
@@ -587,32 +619,11 @@ def stage_update(config: Config, repo: Repo) -> bool:
     gerrit_link_self = " ".join(gerrit_link_maker(config, repo))
     costaging_changes_links = "\n" + "\n".join(
         [" ".join(gerrit_link_maker(config, repo, change_override=make_full_id(repo, change_id))) for change_id in repo.to_stage if change_id != repo.proposal.change_id])
+    needs_staging_retry = list()
     for change_id in repo.to_stage:
-        if repo.proposal.change_id == change_id:
-            if len(repo.to_stage) > 1:
-                message = f"Staging this update with other changes:\n{costaging_changes_links}"
-            else:
-                message = ""
-        else:
-            message = ("Staging this change automatically with the dependency update for this"
-                       f" module:\n"
-                       f"{gerrit_link_self}")
-        if stage_change(config, change_id, message):
-            print(f"{repo.id}: Staged "
-                  f"{'submodule update' if repo.proposal.change_id == change_id else 'related change'}"
-                  f" {change_id}")
-        else:
-            if repo.proposal.change_id == change_id:
-                post_gerrit_comment(config, change_id,
-                                    f"Failed to stage this dependency update automatically.\n"
-                                    f"{'Co-staged with ' + costaging_changes_links if len(repo.to_stage) > 1 else ''}")
-            else:
-                post_gerrit_comment(config, change_id, "Failed to stage this change automatically"
-                                                       " with the dependency update for this repo."
-                                                       " It probably created a merge conflict."
-                                                       " Please review.\n"
-                                                       f"See: {gerrit_link_self}.")
-            error = True
+        _do_staging(change_id, False)
+    for change_id in needs_staging_retry:
+        error = _do_staging(change_id, True)
     if error:
         print(f"failed to stage {repo.id}: {repo.to_stage}\n")
         config.teams_connector.send_teams_webhook_failed_stage(repo)
@@ -625,11 +636,15 @@ def stage_update(config: Config, repo: Repo) -> bool:
     return True
 
 
-def stage_change(config: Config, change_id: str, comment: str = "") -> bool:
-    """Stage a change in gerrit. Requires the QtStage permission."""
+def stage_change(config: Config, change_id: str, comment: str = "",
+                 is_retry = False) -> tuple[bool, bool]:
+    """Stage a change in gerrit. Requires the QtStage permission.
+
+    Return a tuple of bools: Success, Retry
+    """
     if config.args.simulate:
         print(f"SIM: Simulated successful staging of {change_id}")
-        return True
+        return True, False
     change = config.datasources.gerrit_client.changes.get(change_id)
     # Sleep for one second to give gerrit a second to cool off. If the change was just
     # created, sometimes gerrit can be slow to release the lock, resulting in a 409 response code.
@@ -638,16 +653,17 @@ def stage_change(config: Config, change_id: str, comment: str = "") -> bool:
         change.stage()
         if comment:
             post_gerrit_comment(config, change_id, comment)
-    except GerritExceptions.NotAllowedError:
+    except (GerritExceptions.NotAllowedError, GerritExceptions.AuthError):
         print(f"WARN: Unable to stage {change_id} automatically.\n"
               f"Either you do not have permissions to stage this change, or the branch is closed.")
-        return False
+        return False, False
     except GerritExceptions.ConflictError:
-        print(f"ERROR: Unable to stage {change_id} automatically.\n"
-              "The change contains conflicts and cannot be staged. Please verify that no other\n"
-              "changes currently staged conflict with this update.")
-        return False
-    return True
+        print(f"ERROR: Unable to stage {change_id} automatically.")
+        if is_retry:
+              print("The change creates a conflict and cannot be staged. Please verify that no"
+                    "other changes currently staged conflict with this update.")
+        return False, not is_retry
+    return True, False
 
 
 def unstage_change(config: Config, change_id: str) -> bool:
@@ -1179,7 +1195,7 @@ def approve_change_id(change: GerritChange, repo_name: str) -> bool:
             }
         })
         return True
-    except GerritExceptions.NotAllowedError:
+    except (GerritExceptions.NotAllowedError, GerritExceptions.AuthError):
         print(f"WARN: You do not have self-approval rights to auto-approve in {repo_name}\n"
               f"You must have change ID {change.change_id} approved and"
               f" manually stage it.")
