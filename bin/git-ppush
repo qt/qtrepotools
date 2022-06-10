@@ -189,7 +189,11 @@ sub run_setup
             die "Have no upstream. Cannot determine base remote.\n" if (!$base);
             chomp $base;
         }
-        $url = `git config remote.$base.url`;
+        # Personal repos can only be in Gerrit, but the base repo might be using
+        # a mirror. Try the pushurl first, if that has been set up, it most likely
+        # will point to Gerrit. It will be set as .url, so both push and fetch work.
+        $url = `git config remote.$base.pushurl`;
+        $url = `git config remote.$base.url` if (!$url);
         die "Cannot determine URL of base remote. Try --url.\n" if (!$url);
         chomp $url;
     }
