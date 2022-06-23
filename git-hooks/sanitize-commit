@@ -718,6 +718,7 @@ sub flushFile()
 
 my $merge;
 my $new_file;
+my $foreign;
 my $is_bin;
 my $maybe_bin;
 my $is_special;
@@ -771,6 +772,8 @@ while (<DIFF>) {
             } elsif ($file =~ /\.(prl|la|pc|ilk)$/i) {
                 complain("Adding build artifact", "generated") if ($new_file && !defined($cfg{generated}));
                 $ws_check = 0;
+            } elsif ($file =~ /\.(hpp|ch|h\+\+|hh|hxx)$/i) {
+                complain("Adding header file with a non-.h extension", "extension") if ($new_file && !$foreign && !defined($cfg{extension}));
             } elsif ($file !~ /\.qmltypes$/i) {
                 $check_gen = 1;
             }
@@ -875,7 +878,7 @@ while (<DIFF>) {
             $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|qdoc|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
             $qmake = ($file =~ /\.pr[filo]$/i);
             $is_bin = ($file =~ /\.(ps|pdf)$/);
-            my $foreign = $is_bin || ($file =~ /(^|\/)3rdparty\//);
+            $foreign = $is_bin || ($file =~ /(^|\/)3rdparty\//);
             $new_file = 0;
             $maybe_bin = 0;
             $is_special = 0;
