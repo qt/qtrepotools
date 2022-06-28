@@ -603,6 +603,24 @@ if ($with_pickbot) {
             } else {
                 complain("Omission of Pick-to footer is probably incorrect", "cherry");
             }
+        } elsif (%picktos) {
+            my %majors;
+            # Populate a hash of majors with arrays of stable branches
+            foreach (keys %allHeads) {
+                if (/^(\d+)\.(\d+)$/) {
+                    push @{$majors{$1}}, $2;
+                }
+            }
+            foreach (sort keys %majors) {
+                if (@{$majors{$_}} >= 2) {
+                    my @major = sort { $a <=> $b } @{$majors{$_}};
+                    my ($latest, $previous) = ("$_.$major[-1]", "$_.$major[-2]");
+                    if (exists($picktos{$previous}) && !exists($picktos{$latest})) {
+                        complain("Omission of $latest from cherry-pick targets".
+                                 " is probably incorrect", "cherry");
+                    }
+                }
+            }
         }
     }
 } elsif (!$havecherry && length($ltsForSha1)) {
