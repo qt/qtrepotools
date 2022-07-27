@@ -484,10 +484,10 @@ def get_dependencies_yaml(config, repo: Repo, fetch_head: bool = False) -> tuple
                 and config.state_data[repo.id].progress >= PROGRESS.DONE):
             print(f"Using state deps.yaml from merged repo {repo.id}")
             if config.state_data[repo.id].proposal:
-                return config.state_data[repo.id].proposal.proposed_yaml, config.state_repo[
+                return config.state_data[repo.id].proposal.proposed_yaml, config.state_data[
                     repo.id].branch
             else:
-                return config.state_data[repo.id].deps_yaml, config.state_repo[repo.id].branch
+                return config.state_data[repo.id].deps_yaml, config.state_data[repo.id].branch
         branches = [config.args.branch, "dev", "master"]
         for branch in branches:
             try:
