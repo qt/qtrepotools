@@ -286,6 +286,8 @@ def modules_dependencies():
                 for dep_module, param_dict in items:
                     if dep_module.startswith('../'):
                         dep_module = dep_module[3:]
+                    if dep_module.startswith('tqtc-'):
+                        dep_module = dep_module[5:]
                     dependencies_dict[dep_module] = param_dict
                 result[module] = dependencies_dict
             except Exception as e:
