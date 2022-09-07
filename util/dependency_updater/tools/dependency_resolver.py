@@ -133,6 +133,8 @@ def discover_repo_dependencies(config: Config,
     Compile the list of dependencies for a given repo, direct and indirect."""
     for repo in repos_override or copy.deepcopy(list(config.state_data.values())):
         dep_list = set()
+        if repo.id in [repo.prefix + "qt5", "yocto/meta-qt6"]:
+            continue
         if repo.progress >= PROGRESS.IN_PROGRESS and not config.rewind_module:
             # If a module is done, or had no update, we don't care about its dependencies.
             # This means that if we're discovering against qt5.git submodule shas,
