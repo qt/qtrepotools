@@ -307,7 +307,11 @@ def get_top_integration_sha(config, repo: Repo) -> str:
         else:
             # Fallback to internal COIN if available. The task probably hadn't replicated to
             # testresults yet.
-            r = requests.get(f"http://coin/coin/api/integration/{repo.id}/tasks/{integration_id}")
+            try:
+                r = requests.get(f"http://{config.INTERNAL_COIN_HOST}/coin/api/integration/"
+                                 f"{repo.id}/tasks/{integration_id}")
+            except requests.exceptions.ConnectionError:
+                pass
             if r.status_code == 200:
                 sha = json.loads(r.text)[4]["1"]["rec"]["6"]["str"]
                 print(f"Found integration sha {sha} from Integration ID: {integration_id}")
@@ -315,8 +319,10 @@ def get_top_integration_sha(config, repo: Repo) -> str:
         print(f"ERROR: Failed to retrieve integration sha from testresults/coin for integration ID"
               f" {integration_id}.\n"
               f"\tRepo: {repo.id}, submodule update change ID: {repo.proposal.change_id}\n"
-              f"\t{gerrit_link_maker(config, change)}"
-              f"DISABLING AUTOMATIC STAGING AND CONTINUING...")
+              f"\t{gerrit_link_maker(config, change)}")
+        if repo.is_non_blocking:
+            return ""
+        print("Disabling automatic stage due to failure to retrieve module integration SHA")
         config.args.stage = False
         config.teams_connector.send_teams_webhook_basic(
             f"Error in updating {repo.id}."

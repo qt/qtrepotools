@@ -25,6 +25,7 @@ class Config(Namespace):
     GERRIT_STATE_PATH: str
     GERRIT_USERNAME: str
     GERRIT_PASSWORD: str
+    INTERNAL_COIN_HOST: str
     MS_TEAMS_NOTIFY_URL: str
     state_repo: Repo
     state_data: dict[str, Repo] = {}
