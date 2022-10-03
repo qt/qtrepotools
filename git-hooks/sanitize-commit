@@ -858,6 +858,9 @@ while (<DIFF>) {
                 complain_ln("__OBJC__ will never be defined for non-Objective-C/C++ source files", "objc");
             }
         }
+        if ($clike && /\bQ_CLANG_QDOC\b/) {
+            complain_ln("Using deprecated define Q_CLANG_QDOC; use Q_QDOC instead", "qdoc");
+        }
         # Check for Unicode Bi-directional Override exploit characters.
         # See https://trojansource.codes/
         # NB: data has been UTF-8 encoded by the time it gets here,
