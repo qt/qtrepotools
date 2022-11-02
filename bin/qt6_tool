@@ -322,8 +322,8 @@ def sort_by_dependencies(desired_module_list, modules_dependency_dict):
         if module in desired_module_list:
             required_dependencies = []
             for dep_module, param_dict in dependencies.items():
-                if (param_dict.get('required') or
-                    (module == 'qtdeclarative' and dep_module == 'qtshadertools')):
+                required = bool(param_dict.get('required'))
+                if required or dep_module in desired_module_list:
                     required_dependencies.append(dep_module)
             simple_dependencies[module] = required_dependencies
     # Brute force: Keep adding modules all of whose requirements are present
