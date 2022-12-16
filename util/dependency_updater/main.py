@@ -129,7 +129,7 @@ def main():
 
     # Collect the list of qt5 modules for our reference.
     config.qt5_default = toolbox.get_qt5_submodules(config, ["essential", "addon", "deprecated",
-                                                               "preview"])
+                                                             "preview"])
 
     # Collect Repo objects for everything in the cache or list of qt5 modules, as necessary.
     repos = toolbox.get_repos(config)
@@ -184,11 +184,11 @@ def main():
                 repo=config.rewind_module,
                 text=f"INFO: Rewinding '{config.args.branch}' to {new_sha}."
                      f" Modules depending on {config.rewind_module.id} have been reset.")
-            if config.args.update_supermodule and config.state_data.get("qt/qt5") \
-                    and not config.rewind_module.id == "yocto/meta-qt6":
+            if (config.args.update_supermodule and config.state_data.get("qt/qt5")
+                    and not config.rewind_module.id == "yocto/meta-qt6"):
                 del config.state_data["qt/qt5"]
-            if config.args.update_yocto_meta and config.state_data.get("yocto/meta-qt6") \
-                    and not config.rewind_module.id == "qt/qt5":
+            if (config.args.update_yocto_meta and config.state_data.get("yocto/meta-qt6")
+                    and not config.rewind_module.id == "qt/qt5"):
                 del config.state_data["yocto/meta-qt6"]
 
     # bump the progress of repos that have had updates pushed and merged.

@@ -16,6 +16,6 @@ class Datasources(Namespace):
         datasource_names = [o for o in Datasources.__dict__.keys() if o.endswith("_client")]
         for func_name in datasource_names:
             dict.__setattr__(self, func_name,
-                             getattr(sys.modules["tools.datasources." + func_name],
-                                     "create_" + func_name)(config))
+                             getattr(sys.modules[f"tools.datasources.{func_name}"],
+                                     f"create_{func_name}")(config))
         print("Done loading datasources!")

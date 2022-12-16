@@ -87,8 +87,8 @@ def load_updates_state(config) -> dict[str, Repo]:
         return {}
 
 
-def update_state_data(old_state: dict[str, Repo], new_data: dict[str, Repo]) -> dict[
-    str, Repo]:
+def update_state_data(old_state: dict[str, Repo],
+                      new_data: dict[str, Repo]) -> dict[str, Repo]:
     """Merge two update set dicts"""
     updated = old_state
     for key in new_data.keys():

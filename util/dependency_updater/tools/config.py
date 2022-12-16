@@ -1,7 +1,6 @@
 # Copyright (C) 2021 The Qt Company Ltd.
 # SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
-import json
 import os
 from pathlib import Path
 from shutil import copyfile
@@ -49,7 +48,7 @@ def _load_config(file, args):
             c = yaml.load(config_file, Loader=yaml.SafeLoader)
     else:
         try:
-            copyfile(file.parent / (file.name + ".template"), file)
+            copyfile(file.parent / (f"{file.name}.template"), file)
             print("Config file not found, so we created 'config.yaml' from the template.")
             with open(file) as config_file:
                 c = yaml.load(config_file)
@@ -76,6 +75,6 @@ def _load_config(file, args):
             user_loc = contents.find("User", loc)
             user_name = contents[user_loc:contents.find("\n", user_loc)].split(" ")[1]
             if user_name:
-                config._state_ref = f"refs/personal/{user_name or config.GERRIT_USERNAME}" \
-                                    f"/submodule_updater"
+                config._state_ref = (f"refs/personal/{user_name or config.GERRIT_USERNAME}"
+                                     f"/submodule_updater")
     return config

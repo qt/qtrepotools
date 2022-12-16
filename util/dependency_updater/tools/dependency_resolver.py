@@ -1,7 +1,6 @@
 # Copyright (C) 2020 The Qt Company Ltd.
 # SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 import copy
-import json
 
 from tools import toolbox
 from .config import Config
@@ -74,8 +73,9 @@ def retrieve_or_generate_proposal(config: Config, repo) -> Proposal:
     return repo.proposal
 
 
-def check_subtree(config, source: Repo, source_ref: str, target: Repo) -> tuple[
-    str, tuple[str, str]]:
+def check_subtree(config, source: Repo,
+                  source_ref: str,
+                  target: Repo) -> tuple[str, tuple[str, str]]:
     """Compare a sha between two repos' dependencies.yaml references for the same dependency.
     Recurse for each dependency which is not the same as the source.
 
@@ -120,8 +120,8 @@ def discover_dep_inconsistencies(config: Config, repo: Repo) \
     return mismatches
 
 
-def discover_repo_dependencies(config: Config, repos_override: list[Repo] = None) -> dict[
-    str, Repo]:
+def discover_repo_dependencies(config: Config,
+                               repos_override: list[Repo] = None) -> dict[str, Repo]:
     """Traverse the dependency tree for a repo and add any repos found
     to the list of repos to update if it was not already specified
     or found to be part of qt5 default modules.

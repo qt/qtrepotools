@@ -23,12 +23,12 @@ class Proposal:
             self.__dict__[key] = value
 
     def __str__(self):
-        return f"Proposal(change_id='{self.change_id}'," \
-               f" change_number={self.change_number}" \
-               f" gerrit_status='{self.gerrit_status}'" \
-               f" inconsistent_set={self.inconsistent_set}," \
-               f" merged_ref={self.merged_ref}," \
-               f" proposed yaml={self.proposed_yaml})"
+        return (f"Proposal(change_id='{self.change_id}',"
+                f" change_number={self.change_number}"
+                f" gerrit_status='{self.gerrit_status}'"
+                f" inconsistent_set={self.inconsistent_set},"
+                f" merged_ref={self.merged_ref},"
+                f" proposed yaml={self.proposed_yaml})")
 
     def __bool__(self):
         if self.proposed_yaml or self.change_id or self.inconsistent_set:

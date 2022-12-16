@@ -1,6 +1,5 @@
 # Copyright (C) 2021 The Qt Company Ltd.
 # SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
-import json
 
 import pymsteams as msteams
 import yaml
@@ -72,9 +71,9 @@ class TeamsConnector:
 
     def send_teams_webhook_module_failed(self, repo, text_override: str = None, test_failures: str = None, pause_links: bool = False):
         if self.config.args.simulate:
+            _text = text_override or f"Dependency update on *{repo.id}* failed in **{repo.branch}**"
             print(f"SIM: send Teams webhook for {repo.id} with text:"
-                  + (text_override or f"Dependency update on *{repo.id}* failed in **{repo.branch}**")
-                  + '\n' + test_failures)
+                  f"{_text}\n{test_failures}")
             return
         if self.endpoint:
             message_card = msteams.connectorcard(self.endpoint)
@@ -113,7 +112,7 @@ class TeamsConnector:
             if reset_links:
                 reset_section = msteams.cardsection()
                 reset = msteams.potentialaction(
-                    f"Reset round (New qtbase)", "HttpPOST")
+                    "Reset round (New qtbase)", "HttpPOST")
                 reset.payload[
                     "target"] = "https://qt-cherry-pick-bot.herokuapp.com/reset-submodule-updates"
                 reset.payload["body"] = yaml.dump({"branch": config.args.branch})

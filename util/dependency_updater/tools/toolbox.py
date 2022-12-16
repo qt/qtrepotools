@@ -47,8 +47,8 @@ def make_full_id(repo: Repo, change_id_override: str = "") -> str:
     """Create gerrit change IDs from smaller bits if necessary
     Format: repo~branch~change_id"""
     retstr = ""
-    if (repo.id in change_id_override or urllib.parse.quote_plus(repo.id) in change_id_override)\
-            and (repo.branch in change_id_override or urllib.parse.quote_plus(repo.branch) in change_id_override):
+    if ((repo.id in change_id_override or urllib.parse.quote_plus(repo.id) in change_id_override)
+            and (repo.branch in change_id_override or urllib.parse.quote_plus(repo.branch) in change_id_override)):
         # Already formatted!
         retstr = change_id_override
     elif change_id_override:
@@ -176,8 +176,10 @@ def search_for_repo(config, repo: Union[str, Repo]) -> Union[None, Repo]:
     return ret_repo if ret_repo else Repo(guess_id, guess_prefix)
 
 
-def parse_gitmodules(config: Config, repo: [Repo, str], branch: str = "", ref: str = "") -> dict[
-                     str, dict[str, str]]:
+def parse_gitmodules(config: Config,
+                     repo: [Repo, str],
+                     branch: str = "",
+                     ref: str = "") -> dict[str, dict[str, str]]:
     """Retrieve .gitmodules and parse it into a dict.
 
     :param branch branch: exclusive with ref. Pull from branch head.
@@ -195,12 +197,11 @@ def parse_gitmodules(config: Config, repo: [Repo, str], branch: str = "", ref: s
     gerrit = config.datasources.gerrit_client
     retdict = dict()
     try:
+        _repo = gerrit.projects.get(repo_id)
         if ref:
-            gitmodules = gerrit.projects.get(repo_id).get_commit(ref) \
-                .get_file_content(".gitmodules")
+            gitmodules = _repo.get_commit(ref).get_file_content(".gitmodules")
         else:
-            gitmodules = gerrit.projects.get(repo_id).branches.get(branch) \
-                .get_file_content('.gitmodules')
+            gitmodules = _repo.branches.get(branch).get_file_content('.gitmodules')
     except GerritExceptions.NotFoundError:
         print(f"WARN: {repo_id} does not contain .gitmodules! "
               f"It probably doesn't have any submodules.")
@@ -244,8 +245,8 @@ def get_head(config: Config, repo: Union[Repo, str], pull_head: bool = False) ->
     gerrit = config.datasources.gerrit_client
     if type(repo) == str:
         repo = search_for_repo(config, repo)
-    if not pull_head and repo.id in config.state_data.keys() \
-            and config.state_data[repo.id].progress >= PROGRESS.DONE:
+    if (not pull_head and repo.id in config.state_data.keys()
+            and config.state_data[repo.id].progress >= PROGRESS.DONE):
         if config.state_data[repo.id].proposal.merged_ref:
             return config.state_data[repo.id].proposal.merged_ref
         else:
@@ -259,7 +260,7 @@ def get_head(config: Config, repo: Union[Repo, str], pull_head: bool = False) ->
         branch_head = None
         for branch in branches:
             try:
-                branch_head = gerrit.projects.get(repo.id).branches.get("refs/heads/" + branch)
+                branch_head = gerrit.projects.get(repo.id).branches.get(f"refs/heads/{branch}")
                 if branch != config.args.branch and not config.suppress_warn:
                     print(f"INFO: Using {branch} instead of {config.args.branch} "
                           f"as the reference for {repo}")
@@ -390,8 +391,8 @@ def parse_failed_integration_log(config, repo: Repo = None, log_url: str = "") -
     if test_failures:
         ret_str += f"Total failed test cases: {len(test_failures)}\n"
         for fail_case in test_failures.keys():
-            ret_str += fail_case + "\n"
-            ret_str += '\n'.join(test_failures[fail_case]) + '\n'
+            _failures = '\n'.join(test_failures[fail_case])
+            ret_str += f"{fail_case}\n{_failures}\n"
             # ret_str += "\n"
     ret_str = strip_agent_from_test_log(ret_str)
     return ret_str
@@ -442,8 +443,8 @@ def parse_log_test_failures(logtext: str) -> dict[str, list[str]]:
         ret_dict[tstname] = []
 
         # Save a snip of the log with the failed test(s)
-        logsnip = logtext[
-                  crash_index: logtext.find("\n", logtext.find("***Failed ", tstnameindex))]
+        logsnip = logtext[crash_index: logtext.find("\n", logtext.find("***Failed ",
+                                                                       tstnameindex))]
 
         ret_dict[tstname].append(logsnip)
 
@@ -479,8 +480,8 @@ def get_dependencies_yaml(config, repo: Repo, fetch_head: bool = False) -> tuple
             pass
 
     if not r:
-        if repo.id in config.state_data.keys() and not fetch_head and \
-                config.state_data[repo.id].progress >= PROGRESS.DONE:
+        if (repo.id in config.state_data.keys() and not fetch_head
+                and config.state_data[repo.id].progress >= PROGRESS.DONE):
             print(f"Using state deps.yaml from merged repo {repo.id}")
             if config.state_data[repo.id].proposal:
                 return config.state_data[repo.id].proposal.proposed_yaml, config.state_repo[
@@ -490,8 +491,8 @@ def get_dependencies_yaml(config, repo: Repo, fetch_head: bool = False) -> tuple
         branches = [config.args.branch, "dev", "master"]
         for branch in branches:
             try:
-                r = gerrit.projects.get(repo.id).branches.get(
-                    'refs/heads/' + branch).get_file_content('dependencies.yaml')
+                _repo = gerrit.projects.get(repo.id)
+                r = _repo.branches.get(f"refs/heads/{branch}").get_file_content('dependencies.yaml')
                 found_branch = branch
                 if not branch == config.args.branch:
                     if not config.suppress_warn:
@@ -593,9 +594,9 @@ def stage_update(config: Config, repo: Repo) -> bool:
             else:
                 message = ""
         else:
-            message = "Staging this change automatically with the dependency update for this" \
-                      f" module:\n" \
-                      f"{gerrit_link_self}"
+            message = ("Staging this change automatically with the dependency update for this"
+                       f" module:\n"
+                       f"{gerrit_link_self}")
         if stage_change(config, change_id, message):
             print(f"{repo.id}: Staged "
                   f"{'submodule update' if repo.proposal.change_id == change_id else 'related change'}"
@@ -680,12 +681,12 @@ def gather_costaging_changes(config: Config, repo: Repo) -> list[str]:
 def search_existing_change(config: Config, repo: Repo, message: str) -> tuple[str, str]:
     """Try to re-use open changes the bot created where possible
     instead of spamming new changes"""
-    changes = config.datasources.gerrit_client.changes \
-        .search(f'q=message:"{message}"'
-                f'+owner:{config.GERRIT_USERNAME}'
-                f'+(status:open+OR+status:staged+OR+status:integrating)'
-                f'+branch:{repo.branch}'
-                f'+repo:{repo.id}')
+    _query = (f'q=message:"{message}"'
+              f'+owner:{config.GERRIT_USERNAME}'
+              f'+(status:open+OR+status:staged+OR+status:integrating)'
+              f'+branch:{repo.branch}'
+              f'+repo:{repo.id}')
+    changes = config.datasources.gerrit_client.changes.search(_query)
     if changes:
         change = changes.pop()
         return change.change_id, change._number
@@ -712,9 +713,10 @@ def push_submodule_update(config: Config, repo: Repo, retry: bool = False) -> Pr
         # This can occur if the round was reset or rewound while a patch was still
         # integrating. Instead of creating a new change, locate it, compare our yaml file
         # with the integrating one.
-        current_patch_deps = yaml.load(bytes.decode(base64.b64decode(
-            change.get_revision("current").get_commit().get_file_content("dependencies.yaml")),
-                                                    'utf-8'), Loader=yaml.Loader)
+        _commit = change.get_revision("current").get_commit()
+        current_patch_deps = yaml.load(
+            bytes.decode(base64.b64decode(_commit.get_file_content("dependencies.yaml")), 'utf-8'),
+            Loader=yaml.Loader)
         if current_patch_deps == repo.proposal.proposed_yaml:
             repo.proposal.gerrit_status = change.status
             print(f"Currently {change.status} change in {repo.id} is already up-to-date!")
@@ -733,8 +735,8 @@ def push_submodule_update(config: Config, repo: Repo, retry: bool = False) -> Pr
         change.rebase({"base": ""})
         print(f"Rebased change {change.change_id}")
     except GerritExceptions.ConflictError:
-        if not change.get_revision("current").get_commit().parents[0]["commit"]\
-               == get_head(config, repo, True):
+        if (not change.get_revision("current").get_commit().parents[0]["commit"]
+                == get_head(config, repo, True)):
             print("WARN: Failed to rebase change due to conflicts."
                   " Abandoning and recreating the change.")
             # Failed to rebase because of conflicts
@@ -752,7 +754,9 @@ def push_submodule_update(config: Config, repo: Repo, retry: bool = False) -> Pr
     try:
         edit.put_change_file_content("dependencies.yaml", deps_yaml_file)
         file_content_edit = bytes.decode(base64.b64decode(edit.get_change_file_content("dependencies.yaml")))
-        print(f"Push file succeeded? {deps_yaml_file == file_content_edit}\n{file_content_edit if deps_yaml_file != file_content_edit else ''}")
+        _succeeded = deps_yaml_file == file_content_edit
+        _content = file_content_edit if deps_yaml_file != file_content_edit else ''
+        print(f"Push file succeeded? {_succeeded}\n{_content}")
         time.sleep(1)
         edit.publish({
             "notify": "NONE"
@@ -792,7 +796,7 @@ def do_try_supermodule_updates(config: Config) -> dict[str, Repo]:
 def push_supermodule_update(config: Config, retry: bool = False) -> Repo:
     """Push the meta-update with all the new shas to the supermodule repo"""
     gerrit = config.datasources.gerrit_client
-    qt5_name = config.args.repo_prefix + "qt5"
+    qt5_name = f"{config.args.repo_prefix}qt5"
     qt5_repo = search_for_repo(config, qt5_name)
     if qt5_repo.progress >= PROGRESS.IN_PROGRESS:
         return qt5_repo
@@ -874,8 +878,8 @@ def push_supermodule_update(config: Config, retry: bool = False) -> Repo:
         change.rebase({"base": ""})
         print(f"Rebased change {change.change_id}")
     except GerritExceptions.ConflictError:
-        if not change.get_revision("current").get_commit().parents[0]["commit"]\
-               == get_head(config, qt5_repo, True):
+        if (not change.get_revision("current").get_commit().parents[0]["commit"]
+                == get_head(config, qt5_repo, True)):
             print("WARN: Failed to rebase change due to conflicts."
                   " Abandoning and recreating the change.")
             # Failed to rebase because of conflicts
@@ -904,8 +908,8 @@ def push_supermodule_update(config: Config, retry: bool = False) -> Repo:
         print(f"Published edit as new patchset on {change.change_id}")
         qt5_repo.progress = PROGRESS.IN_PROGRESS
         approve_change_id(change, qt5_repo.id)
-        config.teams_connector.send_teams_webhook_basic(text=f"Updating {qt5_repo.id} with a consistent"
-                              f" set of submodules in **{qt5_repo.branch}**", repo=qt5_repo)
+        _text = f"Updating {qt5_repo.id} with a consistent set of submodules in **{qt5_repo.branch}**"
+        config.teams_connector.send_teams_webhook_basic(text=_text, repo=qt5_repo)
     except GerritExceptions.ConflictError:
         print(f"No changes made to {qt5_repo.id}, possible that the current patchset is up-to-date")
         edit.delete()
@@ -913,8 +917,8 @@ def push_supermodule_update(config: Config, retry: bool = False) -> Repo:
         for repo in qt5_modules.values():
             submodule_patch_ref = bytes.decode(base64.b64decode(
                 change.get_revision("current").get_commit().get_file_content(repo.name)), 'utf-8')
-            if repo.proposal and submodule_patch_ref == repo.proposal.merged_ref\
-                    and not submodule_patch_ref == repo.original_ref:
+            if (repo.proposal and submodule_patch_ref == repo.proposal.merged_ref
+                    and not submodule_patch_ref == repo.original_ref):
                 diff = True
         if not diff:
             # The current patchset is the same as HEAD. Don't stage empty changes!
@@ -945,9 +949,10 @@ def search_pinned_submodule(config: Config, module: Repo, submodule: [str, Repo]
                                   ref=module_ref)
     submodule_name = submodule.name if type(submodule) == Repo else submodule
     for key, data in gitmodules.items():
-        if submodule_name in key or submodule_name in data.get("url"):
+        data_url = data.get("url")
+        if submodule_name in key or submodule_name in data_url:
             print(
-                f"Found submodule {submodule_name} in {[d for d in [key, 'url: ' + data.get('url')] if submodule_name in d]}")
+                f"Found submodule {submodule_name} in {[d for d in [key, f'url: {data_url}'] if submodule_name in d]}")
             # Fetch the pinned submodule ref
             r = gerrit.projects.get(module.id).get_commit(module_ref).get_file_content(
                 data.get("path"))
@@ -1124,8 +1129,8 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
     return yocto_repo
 
 
-def acquire_change_edit(config: Config, repo: Repo, subject: str) -> tuple[
-                        GerritChange, GerritChangeEdit]:
+def acquire_change_edit(config: Config,
+                        repo: Repo, subject: str) -> tuple[GerritChange, GerritChangeEdit]:
     """Create a new codereview change if necessary and acquire an edit
     on the change"""
     gerrit = config.datasources.gerrit_client

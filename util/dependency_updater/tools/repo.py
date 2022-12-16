@@ -59,12 +59,12 @@ class Repo(Namespace):
             self.to_stage.append(proposal.change_id)
 
     def __str__(self):
-        return f"Repo(id='{self.id}', name='{self.name}'," \
-               f" ref='{self.original_ref}', branch='{self.branch}'," \
-               f" progress={self.progress}," \
-               f" stage_count={self.stage_count}," \
-               f" retry_count={self.retry_count}," \
-               f" proposal={str(self.proposal)})"
+        return (f"Repo(id='{self.id}', name='{self.name}',"
+                f" ref='{self.original_ref}', branch='{self.branch}',"
+                f" progress={self.progress},"
+                f" stage_count={self.stage_count},"
+                f" retry_count={self.retry_count},"
+                f" proposal={str(self.proposal)})")
 
     def __repr__(self):
         return self.id

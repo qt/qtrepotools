@@ -7,10 +7,12 @@ class Namespace(object):
     'object[attr]' and '.get(attr)' accessors.
     """
 
-    def __init__(self, **kwargs): self.__dict__.update(kwargs)
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
 
     @property  # For use when serializing, to dump back to JSON
-    def as_map(self): return self.__dict__
+    def as_map(self):
+        return self.__dict__
 
     def __repr__(self):
         return str(self.as_map)
