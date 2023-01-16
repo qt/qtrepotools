@@ -318,7 +318,7 @@ while (<HEADS>) {
     }
     if ($name =~ m,/dev$,) {
         $foundDev = 1;
-    } elsif ($name =~ m,/(\d+(?:\.\d+)+)$,) {
+    } elsif ($name =~ m,/((?:(?:tqtc/)?lts-)?\d+(?:\.\d+)+)$,) {
         my $branch = $1;
         ONCE: while (1) {
             foreach my $lts (@LTS) {
