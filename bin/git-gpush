@@ -1853,7 +1853,7 @@ sub update_unpushed($)
         my ($rvrs, $ccs) = ($$group{add_rvrs} // [], $$group{add_ccs} // []);
         if (@$rvrs) {
             run_process(FWD_OUTPUT | DRY_RUN,
-                        'ssh', @gerrit_ssh, 'gerrit', 'set-reviewers',
+                        @gerrit_ssh, 'gerrit', 'set-reviewers',
                         (map { ('-a', $_) } @$rvrs), '--', (map { $$_{key} } @$invite_list));
         }
         if (@$ccs) {
@@ -1871,7 +1871,7 @@ sub update_unpushed($)
             if (!$quiet && !$printed);
         $printed = 1;
         run_process(FWD_OUTPUT | DRY_RUN,
-                    'ssh', @gerrit_ssh, 'gerrit', 'set-topic',
+                    @gerrit_ssh, 'gerrit', 'set-topic',
                     '-t', $$group{topic}, map { $$_{key} } @$topic_list);
     }
 }

@@ -2167,7 +2167,7 @@ sub _update_target_branches($)
 
 # URL for pushing/fetching from the Gerrit instance.
 our $gerrit_url;
-# SSH arguments for connecting the Gerrit instance.
+# SSH command with arguments for connecting the Gerrit instance.
 our @gerrit_ssh;
 # Target repository name on the Gerrit instance.
 our $gerrit_project;
@@ -2192,6 +2192,16 @@ sub set_gerrit_config($)
     } else {
         fail("Remote '$rmt' does not use a supported protocol.\n")
     }
+    if (@gerrit_ssh) {
+        # Precedence according to git/connect.c:fill_ssh_args()
+        my $gssh = $ENV{GIT_SSH_COMMAND} // git_config('core.sshcommand');
+        if (defined($gssh)) {
+            # Should use shell rules here, but that seems like overkill.
+            unshift @gerrit_ssh, split(/ /, $gssh);
+        } else {
+            unshift @gerrit_ssh, $ENV{GIT_SSH} // 'ssh';
+        }
+    }
 }
 
 sub query_gerrit_only($;$)
@@ -2199,7 +2209,7 @@ sub query_gerrit_only($;$)
     my ($ids, $extra) = @_;
 
     my @ginfos;
-    my $info = open_cmd_pipe(0, 'ssh', @gerrit_ssh, 'gerrit', 'query', '--format', 'JSON',
+    my $info = open_cmd_pipe(0, @gerrit_ssh, 'gerrit', 'query', '--format', 'JSON',
                                 '--no-limit', '--patch-sets', $extra ? @$extra : (),
                                 "project:$gerrit_project", '\\('.join(' OR ', @$ids).'\\)');
     while (read_process($info)) {
