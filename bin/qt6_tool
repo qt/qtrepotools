@@ -44,6 +44,8 @@ Jobs               Number of jobs to be run simultaneously
 Modules            ,-separated list of modules to build ("all": all modules,
                    ("wall": all modules except qtwebengine [default]).
 Static             Build statically
+Unity              CMake Unity (Jumbo) builds
+UnityBatchSize     Batch size for Unity (32)
 Tests              (boolean) whether to build tests
 
 It is possible to use repository-specific values by adding a suffix preceded by
@@ -125,6 +127,8 @@ JOBS_KEY = 'Jobs'
 MKSPEC_KEY = 'Mkspec'
 MODULES_KEY = 'Modules'
 STATIC_KEY = 'Static'
+UNITY_KEY = 'Unity'
+UNITY_BATCH_SIZE_KEY = 'UnityBatchSize'
 
 
 def default_config_file():
@@ -559,6 +563,7 @@ def configure_arguments():
     build_examples = read_bool_config(BUILD_EXAMPLES_KEY)
     build_tests = read_bool_config(BUILD_TESTS_KEY)
     build_statically = read_bool_config(STATIC_KEY)
+    unity_build = read_bool_config(UNITY_KEY)
     arguments = read_config(CONFIGURE_ARGUMENTS_KEY)
     mkspec = read_config(MKSPEC_KEY)
 
@@ -571,6 +576,10 @@ def configure_arguments():
         result.append('-DQT_BUILD_EXAMPLES=OFF')
     if build_statically:
         result.append('-DBUILD_SHARED_LIBS=OFF')
+    if unity_build:
+        batch_size = read_int_config(UNITY_BATCH_SIZE_KEY, 32)
+        result.extend(['-DCMAKE_UNITY_BUILD=ON',
+                       f'-DCMAKE_UNITY_BUILD_BATCH_SIZE={batch_size}'])
     if mkspec:
         result.append(f'-DQT_QMAKE_TARGET_MKSPEC={mkspec}')
 
