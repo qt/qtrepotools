@@ -137,11 +137,11 @@ Options:
         disables all actions that modify the structure of a series and
         implies --ignore-struct.
 
-    -r, --remote
+    -r, --remote <remote>
         Specify the remote used to determine the Gerrit server to fetch
         PatchSets from. The fallback behavior matches git-gpush.
 
-    -b, --branch
+    -b, --branch <branch>
         Specify the branch for which the Changes to download were pushed
         to Gerrit. In case of ambiguity, the default is the upstram branch
         of the current local branch.

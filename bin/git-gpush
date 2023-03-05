@@ -115,10 +115,10 @@ Options:
     -f, --force
         Push despite newer PatchSets being on Gerrit.
 
-    -r, --remote
+    -r, --remote <remote>
         Specify the git remote to push to.
 
-    -b, --branch
+    -b, --branch <branch>
         Specify the git branch to push for. If not specified, 'from's
         upstream branch is used as the target branch.
         This setting persists for the series, even when it grows.
@@ -127,11 +127,12 @@ Options:
         Push for specified branch despite the pushed Changes having
         been pushed previously, but only for different branches.
 
-    -t, --topic
+    -t, --topic <topic>
         Specify the Gerrit topic name for the pushed Changes.
         This setting persists for the series, even when it grows.
+        Use an empty topic to delete a previously set one.
 
-    -o, --onto, --base
+    -o, --onto, --base <base>
         Specify the commit to rebase the pushed series onto. It is possible
         to specify arbitrary other commits already known to Gerrit, including
         still pending PatchSets. Use 'ROOT' to orphan the series.
