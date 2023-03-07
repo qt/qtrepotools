@@ -579,6 +579,14 @@ sub init_commit($)
     $commit_by_id{$id} = $commit;
 }
 
+sub commit_metas_equal($$)
+{
+    my ($commit, $old_commit) = @_;
+
+    return ($$commit{message} eq $$old_commit{message})
+        && ("@{$$commit{author}}" eq "@{$$old_commit{author}}");
+}
+
 sub changes_from_commits($)
 {
     my ($commits) = @_;

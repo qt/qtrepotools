@@ -1358,8 +1358,7 @@ sub rebase_commit($$$$$)
             # commit itself will work just as well for the series' first commit.
             if (($parent ? $$parent{tree} : $parent_id)
                     eq get_1st_parent_tree($orig_commit)) {
-                if (($$commit{message} eq $$orig_commit{message})
-                        && ("@{$$commit{author}}" eq "@{$$orig_commit{author}}")) {
+                if (commit_metas_equal($commit, $orig_commit)) {
                     # We are picking the same content to the same base, so
                     # we can just recycle the previously created commit.
                     return ($old_commit, 'recycled amended');

@@ -2453,8 +2453,7 @@ sub can_recycle($$$)
     return 0 if ($parent_tree ne get_1st_parent_tree($orig_commit));
 
     # Finally compare the meta data.
-    return 1 if (($$commit{message} eq $$orig_commit{message})
-                 && ("@{$$commit{author}}" eq "@{$$orig_commit{author}}")
+    return 1 if (commit_metas_equal($commit, $orig_commit)
                  && (get_more_parents($commit) eq get_more_parents($orig_commit)));
 
     # While the commit is not the same, the diff is, so pre-populate
