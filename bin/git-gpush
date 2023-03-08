@@ -134,8 +134,8 @@ Options:
 
     -o, --onto, --base <base>
         Specify the commit to rebase the pushed series onto. It is possible
-        to specify arbitrary other commits already known to Gerrit, including
-        still pending PatchSets. Use 'ROOT' to orphan the series.
+        to specify upstream commits, commits pushed for review, or 'ROOT' to
+        orphan the series.
         Except for merge commits and their children, once chosen, the base
         will persist through subsequent pushes until overridden, even when
         the series grows.
@@ -301,7 +301,6 @@ my $minimal;  # default set by process_config()
 my $extend = 0;
 my $capture = 0;
 my $ref_base;
-my $ref_base_ok = 1;
 my $ref_to;
 my $force_branch = 0;
 my $topic;
@@ -1071,10 +1070,8 @@ use constant {
     FAILED => 'FAILED'
 };
 
-sub resolve_ref_base($)
+sub resolve_ref_base()
 {
-    my ($queries) = @_;
-
     return if (!length($ref_base) || ($ref_base eq "ROOT"));
     print "Resolving specified push base ...\n" if ($debug);
     # Make sure we don't get confusing errors later.
@@ -1085,28 +1082,27 @@ sub resolve_ref_base($)
     visit_local_commits([ $ref_base ]);
     if (!$commit_by_id{$ref_base}) {
         print "--base is upstream.\n" if ($debug);
-    } else {
-        print "--base needs Gerrit query.\n" if ($debug);
-        # Note: this will not recognize direct-pushed commits. That isn't
-        # really a problem, as the only expected use case for specifying
-        # a non-upstream base is pushing on top of another pending review.
-        push @$queries, "commit:".$ref_base;
-        $ref_base_ok = 0;
+        return;
     }
-}
-
-sub confirm_ref_base()
-{
-    return if ($ref_base_ok);
-    fail("Specified --base commit is not known to Gerrit.\n")
-        if (!defined($gerrit_info_by_sha1{$ref_base}));
+    my $base_change = $change_by_pushed{$ref_base};
+    if ($base_change) {
+        print "--base is a pushed commit.\n" if ($debug);
+        return;
+    }
+    # Fallback for pushed commits whose Changes have already been rebased out.
+    foreach my $chg (values %change_by_key) {
+        if (($$chg{pushed} // "") eq $ref_base) {
+            print "--base is an old pushed commit.\n" if ($debug);
+            return;
+        }
+    }
+    fail("Specified --base commit is not acceptable.\n");
 }
 
 sub determine_base($)
 {
     my ($group) = @_;
 
-    confirm_ref_base();
     my $base = $ref_base;
     if (!defined($base)) {
         # We have no base yet, so deduce it from the previous push(es).
@@ -1938,12 +1934,7 @@ sub execute_grouping()
     my $group = get_changes();
     # We validate a possibly specified push base early on, mostly
     # because delaying it would be a lot more complicated or costly.
-    my @queries;
-    resolve_ref_base(\@queries);
-    if (@queries) {
-        query_gerrit(\@queries);
-        confirm_ref_base();
-    }
+    resolve_ref_base();
     # We could rebase here, as that would tell us whether the desired
     # grouping is feasible (re dependencies) early on. However, it would
     # significantly slow down the operation for this little benefit.
@@ -1985,7 +1976,6 @@ sub execute_pushing()
                 # Only 2nd+ parents of local commits.
                 map { @$_ > 1 ? @$_[1 .. $#$_] : () }
                 map { $$_{local}{parents} } @$pushed_changes;
-        resolve_ref_base(\@queries);
         my @args;
         push @args, "--all-reviewers" if (@reviewers || @CCs);
         query_gerrit(\@queries, \@args) if (@queries);
@@ -1999,6 +1989,7 @@ sub execute_pushing()
         }
         map_remote_changes($groups);
     }
+    resolve_ref_base();
     foreach my $group (@$groups) {
         determine_topic($group);
     }
