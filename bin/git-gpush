@@ -97,6 +97,9 @@ Options:
         Note that this preserves various properties from a previous
         grouping, which may end up being inconsistent until they are
         reset.
+        Can be combined with --all to override the specified properties
+        of all series. Note that this is not affected by --exclude;
+        rather, it can be used to manipulate that property as well.
 
     -x, --exclude
         Exclude a series from subsequent push --all.
@@ -471,8 +474,6 @@ sub parse_arguments(@)
     if ($group_only) {
         fail("--group and --list are mutually exclusive.\n")
             if ($list_only);
-        fail("--group and --all are mutually exclusive.\n")
-            if ($push_all);
         fail("--group is incompatible with push-modifying options.\n")
             if ($push_specific);
         fail("--include and --exclude are mutually exclusive.\n")
@@ -486,7 +487,9 @@ sub parse_arguments(@)
             if ($push_specific || (!$list_rebase && $minimal_override));
         fail("--list is incompatible with base-modifying options.\n")
             if (defined($ref_base) && !$list_rebase);
-    } elsif ($push_all) {
+    }
+
+    if ($push_all) {
         fail("--all is incompatible with series-specifying options.\n")
             if ($series_specifying);
         fail("Cannot set same topic on all series.\n")
@@ -2086,7 +2089,16 @@ sub update_state($)
 
 sub execute_grouping()
 {
-    my $group = get_changes();
+    my $groups;
+    if ($push_all) {
+        my ($have_loose, $all_groups) = get_all_changes();
+        fail_with_listing($all_groups,
+                "Cannot group all with any free-standing loose Changes.\n")
+            if ($have_loose);
+        $groups = [ grep { !$$_{hide} } @$all_groups ];
+    } else {
+        $groups = [ get_changes() ];
+    }
     # We validate a possibly specified push base early on, mostly
     # because delaying it would be a lot more complicated or costly.
     resolve_ref_base();
@@ -2098,11 +2110,15 @@ sub execute_grouping()
     # yields mostly irrelevant and potentially even confusing annotations;
     # branch tracking is not necessary here, either.
     if (!$quiet) {
-        classify_changes_offline($group);
-        show_changes([ $group ]);
+        foreach my $group (@$groups) {
+            classify_changes_offline($group);
+        }
+        show_changes($groups);
     }
     print "Not pushing - group mode.\n" if ($debug);
-    update_state_grouping($group);
+    foreach my $group (@$groups) {
+        update_state_grouping($group);
+    }
 }
 
 sub execute_pushing()
