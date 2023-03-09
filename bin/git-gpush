@@ -98,9 +98,13 @@ Options:
         and base) from a previous grouping that was not pushed out yet.
 
     -x, --exclude
-        Like --group, but the series is excluded from --all. It is
-        possible to exclude existing series. To (re-)include a series,
-        use --group or push it separately.
+        Exclude a series from subsequent push --all.
+        To re-include a series, use --include or push it separately.
+        This option implies --group.
+
+    -i, --include
+        Re-include a series into subsequent push --all.
+        This option implies --group.
 
     -m, --minimal
         Try to avoid creating new PatchSets for unmodified Changes even
@@ -313,6 +317,7 @@ my $topic;
 my $force = 0;
 my $push_all = 0;
 my $group_only = 0;
+my $include = 0;
 my $exclude = 0;
 my $list_only = 0;
 my $list_rebase = 0;
@@ -325,7 +330,6 @@ sub parse_arguments(@)
 {
     my $rebase = 0;
     my $minimal_override = 0;
-    my $not_exclude = 0;
     while (scalar @_) {
         my $arg = shift @_;
 
@@ -344,10 +348,12 @@ sub parse_arguments(@)
             $capture = 1;
         } elsif ($arg eq "-g" || $arg eq "--group") {
             $group_only = 1;
-            $not_exclude = 1;
         } elsif ($arg eq "-x" || $arg eq "--exclude") {
             $group_only = 1;
             $exclude = 1;
+        } elsif ($arg eq "-i" || $arg eq "--include") {
+            $group_only = 1;
+            $include = 1;
         } elsif ($arg eq "-m" || $arg eq "--minimal") {
             $minimal = 1;
             $minimal_override = 1;
@@ -453,14 +459,14 @@ sub parse_arguments(@)
             || defined($remote);
 
     if ($group_only) {
-        fail("--group/--exclude and --list are mutually exclusive.\n")
+        fail("--group and --list are mutually exclusive.\n")
             if ($list_only);
-        fail("--group/--exclude and --all are mutually exclusive.\n")
+        fail("--group and --all are mutually exclusive.\n")
             if ($push_all);
-        fail("--group/--exclude is incompatible with push-modifying options.\n")
+        fail("--group is incompatible with push-modifying options.\n")
             if ($push_specific);
-        fail("--group and --exclude are mutually exclusive.\n")
-            if ($exclude && $not_exclude);
+        fail("--include and --exclude are mutually exclusive.\n")
+            if ($include && $exclude);
     } elsif ($list_only) {
         fail("--list/--list-rebase/--list-online is incompatible with --quiet/--verbose.\n")
             if ($quiet || ($verbose && !$debug));
@@ -937,7 +943,7 @@ sub get_all_changes()
         ($changes, $gid, $change, undef) = do_determine_series($change, 0, 0, 1);
         my $group = finalize_get_changes($changes, $gid);
         aggregate_bool_property($group, "exclude", "EXCLUDED", "exclusion",
-                                "Please gpush it separately or use --group/--exclude"
+                                "Please gpush it separately or use --exclude/--include"
                                 ." to make it consistent.")
             if (!$$group{hide});
         unshift @groups, $group;
@@ -2031,7 +2037,8 @@ sub update_state_grouping($)
         $$change{ntopic} = $topic;
         $$change{ntgt} = $ref_to;
         $$change{nbase} = $ref_base;
-        $$change{exclude} = $exclude ? 1 : undef;
+        $$change{exclude} = $exclude ? 1 : undef
+            if ($include || $exclude);
     }
 }
 
