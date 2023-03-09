@@ -444,9 +444,10 @@ sub parse_arguments(@)
         }
     }
 
-    my $series_specific =
-            $commit_count || $from_base || $extend || $capture
-            || defined($ref_to) || defined($topic);
+    my $series_specifying =
+            $commit_count || $from_base || $extend || $capture;
+    my $series_modifying =
+            $series_specifying || defined($ref_to) || defined($topic);
     my $push_specific =
             @reviewers || @CCs || $force || $force_branch
             || defined($remote);
@@ -463,15 +464,17 @@ sub parse_arguments(@)
     } elsif ($list_only) {
         fail("--list/--list-rebase/--list-online is incompatible with --quiet/--verbose.\n")
             if ($quiet || ($verbose && !$debug));
-        fail("--list/--list-rebase/--list-online is incompatible with series-specific options.\n")
-            if ($series_specific);
+        fail("--list/--list-rebase/--list-online is incompatible with series-modifying options.\n")
+            if ($series_modifying);
         fail("--list/--list-rebase/--list-online is incompatible with push-modifying options.\n")
             if ($push_specific || (!$list_rebase && $minimal_override));
         fail("--list is incompatible with base-modifying options.\n")
             if (defined($ref_base) && !$list_rebase);
     } elsif ($push_all) {
-        fail("--all is incompatible with series-specific options.\n")
-            if ($series_specific);
+        fail("--all is incompatible with series-specifying options.\n")
+            if ($series_specifying);
+        fail("Cannot set same topic on all series.\n")
+            if (length($topic));  # Notably, resetting the topic is fine.
         # Push options are perfectly legit with --all, even if some are
         # probably not too useful (e.g., --base).
     }
