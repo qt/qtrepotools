@@ -93,9 +93,10 @@ Options:
         Make the series capture loose Changes right in front of it.
 
     -g, --group
-        Group Changes into series without pushing them yet.
-        Note that this resets the pending properties (branch, topic,
-        and base) from a previous grouping that was not pushed out yet.
+        (Re-)group Changes into series without pushing them yet.
+        Note that this preserves various properties from a previous
+        grouping, which may end up being inconsistent until they are
+        reset.
 
     -x, --exclude
         Exclude a series from subsequent push --all.
@@ -104,6 +105,11 @@ Options:
 
     -i, --include
         Re-include a series into subsequent push --all.
+        This option implies --group.
+
+    -R, --reset-props
+        Resets the pending properties (branch, topic, base) from a
+        previous grouping that was not pushed out yet.
         This option implies --group.
 
     -m, --minimal
@@ -317,6 +323,7 @@ my $topic;
 my $force = 0;
 my $push_all = 0;
 my $group_only = 0;
+my $reset_props = 0;
 my $include = 0;
 my $exclude = 0;
 my $list_only = 0;
@@ -354,6 +361,9 @@ sub parse_arguments(@)
         } elsif ($arg eq "-i" || $arg eq "--include") {
             $group_only = 1;
             $include = 1;
+        } elsif ($arg eq "-R" || $arg eq "--reset-props") {
+            $group_only = 1;
+            $reset_props = 1;
         } elsif ($arg eq "-m" || $arg eq "--minimal") {
             $minimal = 1;
             $minimal_override = 1;
@@ -2034,9 +2044,12 @@ sub update_state_grouping($)
         $$change{grp} = $gid;
         # We persist only explicitly specified values. Fallbacks
         # are applied when the series is actually pushed.
-        $$change{ntopic} = $topic;
-        $$change{ntgt} = $ref_to;
-        $$change{nbase} = $ref_base;
+        $$change{ntopic} = $topic
+            if (defined($topic) || $reset_props);
+        $$change{ntgt} = $ref_to
+            if (defined($ref_to) || $reset_props);
+        $$change{nbase} = $ref_base
+            if (defined($ref_base) || $reset_props);
         $$change{exclude} = $exclude ? 1 : undef
             if ($include || $exclude);
     }
