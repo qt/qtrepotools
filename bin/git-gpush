@@ -145,8 +145,8 @@ Options:
         Reset the base of a previously pushed series to the local branch's
         base. Typically used after a conflicted pull.
 
-        The base-modifying options may be used with --list-online, but
-        their effect is not persisted in this case.
+        The base-modifying options may be used with --list-rebase and
+        --list-online, but their effect is not persisted in this case.
 
     --move {new|<range>}[/<from>]
         After cherry-picking Changes to the current branch, mark the picks
@@ -189,10 +189,13 @@ Options:
         This is a purely off-line operation.
         Implies --all unless 'from' is specified.
 
+    -lr, --list-rebase
+        Like --list, but also verify that the temporary rebasing will
+        succeed.
+
     -ll, --list-online
-        Report all Changes that would be pushed, then quit.
-        The Changes are annotated with state information from Gerrit.
-        Implies --all unless 'from' is specified.
+        Like --list-rebase, but also annotate the Changes with on-line
+        state information from Gerrit.
 
     --aliases
         Report all registered aliases and quit.
@@ -312,6 +315,7 @@ my $push_all = 0;
 my $group_only = 0;
 my $exclude = 0;
 my $list_only = 0;
+my $list_rebase = 0;
 my $list_online = 0;
 
 my @reviewers;
@@ -372,8 +376,12 @@ sub parse_arguments(@)
             $push_all = 1;
         } elsif ($arg eq "-l" || $arg eq "--list") {
             $list_only = 1;
+        } elsif ($arg eq "-lr" || $arg eq "--list-rebase") {
+            $list_only = 1;
+            $list_rebase = 1;
         } elsif ($arg eq "-ll" || $arg eq "--list-online") {
             $list_only = 1;
+            $list_rebase = 1;
             $list_online = 1;
         } elsif ($arg eq "--aliases") {
             foreach my $key (sort(keys %aliases)) {
@@ -453,14 +461,14 @@ sub parse_arguments(@)
         fail("--group and --exclude are mutually exclusive.\n")
             if ($exclude && $not_exclude);
     } elsif ($list_only) {
-        fail("--list/--list-online is incompatible with --quiet/--verbose.\n")
+        fail("--list/--list-rebase/--list-online is incompatible with --quiet/--verbose.\n")
             if ($quiet || ($verbose && !$debug));
-        fail("--list/--list-online is incompatible with series-specific options.\n")
+        fail("--list/--list-rebase/--list-online is incompatible with series-specific options.\n")
             if ($series_specific);
-        fail("--list/--list-online is incompatible with push-modifying options.\n")
-            if ($push_specific || (!$list_online && $minimal_override));
+        fail("--list/--list-rebase/--list-online is incompatible with push-modifying options.\n")
+            if ($push_specific || (!$list_rebase && $minimal_override));
         fail("--list is incompatible with base-modifying options.\n")
-            if (defined($ref_base) && !$list_online);
+            if (defined($ref_base) && !$list_rebase);
     } elsif ($push_all) {
         fail("--all is incompatible with series-specific options.\n")
             if ($series_specific);
@@ -1670,6 +1678,28 @@ sub classify_changes_offline($)
     }
 }
 
+sub classify_changes_offline_rebase($)
+{
+    my ($group) = @_;
+
+    my $changes = $$group{changes};
+    foreach my $change (@$changes) {
+        my $commit = $$change{final};
+        next if (!$commit);  # Rebase failure
+        my $pushed = $$change{pushed};
+        if (defined($pushed)) {
+            my $sha1 = $$commit{id};
+            if ($pushed ne $sha1) {
+                $$change{freshness} = MODIFIED;
+            } else {
+                $$change{freshness} = UNMODIFIED;
+            }
+        } else {
+            $$change{freshness} = NEW;
+        }
+    }
+}
+
 my $have_rejected = 0;
 my $have_modified = 0;
 my $need_force = 0;
@@ -2039,7 +2069,8 @@ sub execute_grouping()
     resolve_ref_base();
     # We could rebase here, as that would tell us whether the desired
     # grouping is feasible (re dependencies) early on. However, it would
-    # significantly slow down the operation for this little benefit.
+    # significantly slow down the operation for this little benefit. The
+    # use case is covered by the --list-rebase option instead.
     # We also don't query Gerrit, as online-classifying unrebased Changes
     # yields mostly irrelevant and potentially even confusing annotations;
     # branch tracking is not necessary here, either.
@@ -2053,6 +2084,7 @@ sub execute_grouping()
 
 sub execute_pushing()
 {
+    my $rebase = !$list_only || $list_rebase;
     my $online = !$list_only || $list_online;
     my ($groups, $all_groups);
     if ($push_all) {
@@ -2096,7 +2128,7 @@ sub execute_pushing()
     foreach my $group (@$groups) {
         determine_topic($group);
     }
-    if ($online) {
+    if ($rebase) {
         # Rebasing may take a while, so make sure all base determination
         # errors are reported before we start.
         foreach my $group (@$groups) {
@@ -2109,7 +2141,11 @@ sub execute_pushing()
         rebase_groups($groups, $upstreamed_changes);
         foreach my $group (@$groups) {
             if (defined($$group{gid})) {
-                classify_changes_online($group);
+                if ($online) {
+                    classify_changes_online($group);
+                } else {
+                    classify_changes_offline_rebase($group);
+                }
             } else {
                 # We don't rebase sets of loose Changes, as this will often
                 # create garbage or fail. We can get here only in --list mode.
@@ -2124,7 +2160,7 @@ sub execute_pushing()
     if ($list_only) {
         show_changes($all_groups);
         print "Not pushing - list mode.\n" if ($debug);
-        update_rebase_cache($groups) if ($online);
+        update_rebase_cache($groups) if ($rebase);
     } else {
         print_errors($groups);
         show_changes($groups) if (!$quiet);
