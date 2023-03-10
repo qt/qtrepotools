@@ -145,6 +145,9 @@ Options:
         Reset the base of a previously pushed series to the local branch's
         base. Typically used after a conflicted pull.
 
+        The base-modifying options may be used with --list-online, but
+        their effect is not persisted in this case.
+
     --move {new|<range>}[/<from>]
         After cherry-picking Changes to the current branch, mark the picks
         as the _only_ source for subsequent pushes of these Changes.
@@ -456,8 +459,8 @@ sub parse_arguments(@)
             if ($series_specific);
         fail("--list/--list-online is incompatible with push-modifying options.\n")
             if ($push_specific || (!$list_online && $minimal_override));
-        fail("--list/--list-online is incompatible with base-modifying options.\n")
-            if (defined($ref_base));
+        fail("--list is incompatible with base-modifying options.\n")
+            if (defined($ref_base) && !$list_online);
     } elsif ($push_all) {
         fail("--all is incompatible with series-specific options.\n")
             if ($series_specific);
