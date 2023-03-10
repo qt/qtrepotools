@@ -1501,9 +1501,10 @@ sub do_rebase_changes($$)
                 }
                 # Failure to apply to the current base is fatal.
                 set_change_error($change, 'fixed',
-                                 ",----- Failed to rebase commit ------\n"
+                                 ",----- Failed to rebase commit "
+                                        .format_id($$commit{id})." ------\n"
                                  .($errors =~ s/^/| /mgr)
-                                 ."\`------------------------------------\n")
+                                 ."\`-----------------------------------------------\n")
                     if (!$failed);  # Otherwise it's too much noise.
             }
             $$change{freshness} = FAILED;
