@@ -1300,13 +1300,12 @@ sub define_series($)
 {
     my ($commits) = @_;
 
-    # A new group key is used if a series is being (re-)assigned;
-    # for simplicity, we do not bother preserving keys.
     # Stealing Changes from existing series could dissolve these series
     # entirely. This implementation does not do this for simplicity's
     # sake, thus losing some expressiveness - but that might have been
     # more annoying than helpful anyway.
-    return (changes_from_commits($commits), $next_group++);
+    my $changes = changes_from_commits($commits);
+    return ($changes, obtain_gid($changes));
 }
 
 sub determine_series($)

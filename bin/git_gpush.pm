@@ -850,7 +850,7 @@ our %changes_by_id;  # { gerrit-id => [ change-object, ... ] }
 # Note that other local branches may have gpick'd the same commits.
 our %change_by_pushed;  # { sha1 => change-object }
 
-our $next_group = 10000;
+my $next_group = 10000;
 
 my $next_prop = 10000;
 # Indirect Change properties, which are shared to save space.
@@ -1599,11 +1599,44 @@ sub parse_local_rev($$)
 # smart series #
 ################
 
+sub obtain_gid($)
+{
+    my ($changes) = @_;
+
+    # First collect the group ids appearing within the set.
+    my %gid_hash;
+    foreach my $change (@$changes) {
+        my $gid = $$change{grp};
+        $gid_hash{$gid} = 1 if (defined($gid));
+    }
+    if (%gid_hash) {
+        # Then collect all Changes with these group ids ...
+        my %orphans;
+        foreach my $change (values %change_by_key) {
+            my $gid = $$change{grp};
+            $orphans{$gid}{$$change{key}} = $change
+                if (defined($gid) && defined($gid_hash{$gid}));
+        }
+        # ... and subtract the ones we're currently grouping.
+        foreach my $change (@$changes) {
+            my $gid = $$change{grp};
+            delete $orphans{$gid}{$$change{key}}
+                if (defined($gid));
+        }
+        foreach my $gid (sort keys %gid_hash) {
+            # If there are no orphans, we are enlarging the group without
+            # dropping any Changes. Then we can recycle the id.
+            return $gid if (!%{$orphans{$gid}});
+        }
+    }
+    return $next_group++;
+}
+
 sub assign_series($)
 {
     my ($changes) = @_;
 
-    my $gid = $next_group++;
+    my $gid = obtain_gid($changes);
     $$_{grp} = $gid foreach (@$changes);
 }
 
