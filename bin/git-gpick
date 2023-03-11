@@ -1199,17 +1199,21 @@ sub drop_merged_patchsets($$)
 
 # Traverse a series until we hit the upstream. On the way back,
 # set each visited commit's push base to the found merge base.
-sub set_base_deduced($);
+sub set_base_deduced($;$);
 
-sub set_base_deduced($)
+sub set_base_deduced($;$)
 {
-    my ($sha1) = @_;
+    my ($sha1, $cld_topic) = @_;
 
     my $commit = $commit_by_id{$sha1};
     return $sha1 if (!$commit);
     my $base = $$commit{base};
     return $base if (defined($base));
-    $base = set_base_deduced(get_1st_parent($commit));
+    # Auto-split by topic, which is a poor man's replacement for imposed bases.
+    my $ginfo = $gerrit_info_by_sha1{$sha1};
+    my $topic = $ginfo && $$ginfo{topic} // "";
+    return $sha1 if (defined($cld_topic) && ($topic ne $cld_topic));
+    $base = set_base_deduced(get_1st_parent($commit), $topic);
     $$commit{base} = $base;
     return $base;
 }

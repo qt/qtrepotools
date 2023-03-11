@@ -1175,8 +1175,11 @@ sub finalize_get_changes($$)
     my ($changes, $gid) = @_;
 
     my %group = (changes => $changes, gid => $gid);
-    aggregate_bool_property(\%group, "hide", "HIDDEN", "hiding",
-                            "Use --move/--copy/--hide to make it consistent.");
+    if ($gid) {
+        aggregate_bool_property(\%group, "hide", "HIDDEN", "hiding",
+                                "Use --move/--copy/--hide to make it consistent.");
+        $$_{group} = \%group foreach (@$changes);
+    }
     return \%group;
 }
 
@@ -2165,11 +2168,36 @@ sub annotate_changes($)
     }
 }
 
+sub annotate_group_base($$)
+{
+    my ($annot, $group) = @_;
+
+    my $base = $$group{base_chg};
+    return if (!$base);  # Not during grouping/offline listing
+    # The group object is available only in --all mode.
+    my $bgrp = $$base{group};
+    my $btpc = ($bgrp ? $$bgrp{topic} :
+            # This is unreliable, as other Changes in the containing
+            # series may still contribute a topic.
+            ($$base{ntopic} // $$base{topic})) // "";
+    my $tpc = $$group{topic} // "";
+    return if ($tpc ne $btpc);
+    push @$annot,
+            "Warning: Both the series and its base Change have "
+            .(length($tpc) ? "the same" : "no")." topic.\n";
+    state $noted;
+    push @$annot,
+            "git gpick will be unable to automatically split the series.\n"
+        if (!$noted++);
+}
+
 sub annotate_group($$)
 {
     my ($group, $extra) = @_;
 
     my @annot;
+    annotate_group_base(\@annot, $group)
+        if (!$mail_mode && ($addbase == BASE_NO));
     if ($extra) {
         my $irt = $$group{irt_text};
         push @annot, "> In-Reply-To: ".$irt."\n"
