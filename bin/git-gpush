@@ -167,6 +167,11 @@ Options:
         This setting persists for the series, even when it grows.
         Use an empty topic to delete a previously set one.
 
+    -- <git option>...
+        In mail mode, set additional options for git format-patch and
+        git send-email for the specified series. All subsequent arguments
+        are consumed by this, so this must be the last option.
+
     -o, --onto, --base <base>
         Specify the commit to rebase the pushed series onto. It is possible
         to specify upstream commits, commits pushed for review, or 'ROOT' to
@@ -390,6 +395,7 @@ my $list_online = 0;
 my $send_email = 0;
 my $keep_version = 0;
 my $reset_version = 0;
+my $format_opts;
 my $outdir;
 
 my @reviewers;
@@ -467,6 +473,9 @@ sub parse_arguments(@)
             $list_online = 1;
         } elsif ($arg eq "--send") {
             $send_email = 1;
+        } elsif ($arg eq "--") {
+            $format_opts = \@_;
+            last;
         } elsif ($arg eq "--aliases") {
             foreach my $key (sort(keys %aliases)) {
                 print "$key = $aliases{$key}\n";
@@ -532,7 +541,8 @@ sub parse_arguments(@)
             $commit_count || $from_base || $extend || $capture;
     my $series_modifying =
             $series_specifying || defined($ref_to) || defined($topic)
-            || $keep_version || $reset_version;
+            || $keep_version || $reset_version
+            || $format_opts;
     my $gerrit_specific =
             @reviewers || @CCs || defined($remote) || $force_branch;
     my $push_specific =
@@ -552,6 +562,8 @@ sub parse_arguments(@)
             if ($send_email);
         fail("--keep-version/--reset-version is exclusive to mail mode.\n")
             if ($keep_version || $reset_version);
+        fail("-- ... is exclusive to mail mode.\n")
+            if ($format_opts);
     }
 
     if ($group_only) {
@@ -921,6 +933,36 @@ sub determine_version($)
         ++$ver if ($inc_ver || !$ver);
     }
     $$group{version} = $ver;
+}
+
+sub new_fmt_opt()
+{
+    return new_prop(quote_list_prop(@$format_opts));
+}
+
+sub determine_format_options($)
+{
+    my ($group) = @_;
+
+    my ($fmt_opt, $fmt_opt_text);
+    if ($format_opts) {
+        $fmt_opt = new_fmt_opt();
+        $fmt_opt_text = $fmt_opt && $format_opts;
+    } else {
+        $fmt_opt = aggregate_indirect_property(
+                $group,
+                # Loose Changes should inherit the series' options,
+                # while for grouped ones undef means empty.
+                sub { defined($$_{grp}) ? ($$_{fmt} // -1) : undef },
+                sub { ("has inconsistent patch preparation options:\n",
+                       map { "  ".(length($_) ? format_cmd(unquote_list_prop($_))
+                                    : "<none>")."\n" } @_) });
+        $fmt_opt = undef if (($fmt_opt // 0) == -1);
+        $fmt_opt_text = [ unquote_list_prop($prop_by_key{$fmt_opt}) ]
+            if (defined($fmt_opt));
+    }
+    $$group{fmt_opt} = $fmt_opt;
+    $$group{fmt_opt_text} = $fmt_opt_text;
 }
 
 sub scan_pushed_group($$)
@@ -1996,7 +2038,9 @@ sub annotate_group($$)
 
     my @annot;
     if ($extra) {
-        # TODO
+        my $fmt_opt = $$group{fmt_opt_text};
+        push @annot, "> Format options: ".format_cmd(@$fmt_opt)."\n"
+            if ($fmt_opt);
     }
     $$group{annotation} = \@annot if (@annot);
 }
@@ -2221,9 +2265,11 @@ sub format_patches($)
     my $base = $$group{base};
     my $tpc = $$group{topic};
     my $ver = $$group{version};
+    my $fmt_opt = $$group{fmt_opt_text};
 
     my @gitopt = ('--binary');
     push @gitopt, '--reroll-count', $ver if ($ver > 1);
+    push @gitopt, @$fmt_opt if ($fmt_opt);
     # Can't use the -<n> <tip> notation, as -8 is misunderstood
     # by git send-email.
     push @gitopt, (($base eq 'ROOT') ? '--root' : '^'.$base), $tip;
@@ -2253,6 +2299,7 @@ sub update_state_grouping($)
     my ($group) = @_;
 
     my $gid = $$group{gid};
+    my $fmt = $format_opts && new_fmt_opt();
     foreach my $change (@{$$group{changes}}) {
         $$change{grp} = $gid;
         # We persist only explicitly specified values. Fallbacks
@@ -2265,6 +2312,8 @@ sub update_state_grouping($)
             if (defined($ref_base) || $reset_props);
         $$change{ver} = 0
             if ($reset_version);
+        $$change{fmt} = $fmt
+            if ($format_opts);
         $$change{exclude} = $exclude ? 1 : undef
             if ($include || $exclude);
     }
@@ -2274,10 +2323,10 @@ sub update_state($)
 {
     my ($group) = @_;
 
-    my ($gid, $branch, $tpc, $ver, $base) =
+    my ($gid, $branch, $tpc, $ver, $fmt, $base) =
             ($$group{gid}, $$group{branch}, $$group{topic},
              $$group{version},
-             $$group{base});
+             $$group{fmt_opt}, $$group{base});
     # Setting an empty topic clears the previous topic from the server.
     $tpc = undef if (defined($tpc) && !length($tpc));
     foreach my $change (@{$$group{changes}}) {
@@ -2287,6 +2336,7 @@ sub update_state($)
         $$change{topic} = $tpc;
         $$change{ntopic} = undef;
         $$change{ver} = $ver;
+        $$change{fmt} = $fmt;
         $$change{tgt} = $branch;
         $$change{ntgt} = undef;
         my $commit = $$change{local};
@@ -2388,6 +2438,9 @@ sub execute_pushing()
     resolve_ref_base();
     foreach my $group (@$annot_groups) {
         determine_topic($group);
+        if ($mail_mode) {
+            determine_format_options($group);
+        }
     }
     if ($rebase) {
         # Rebasing may take a while, so make sure all base determination

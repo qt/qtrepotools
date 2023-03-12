@@ -17,7 +17,7 @@ use Carp;
 $SIG{__WARN__} = \&Carp::cluck;
 $SIG{__DIE__} = \&Carp::confess;
 
-use List::Util qw(min max);
+use List::Util qw(min max pairmap);
 use File::Spec;
 use File::Temp qw(mktemp);
 use IPC::Open3 qw(open3);
@@ -125,7 +125,7 @@ use constant {
     DRY_RUN => 512       # Don't actually run the command if $dry_run is true
 };
 
-sub _format_cmd(@)
+sub format_cmd(@)
 {
     return join(' ', map { /\s/ ? '"' . $_ . '"' : $_ } @_);
 }
@@ -138,10 +138,10 @@ sub open_process($@)
     $flags &= ~DRY_RUN if (!$dry_run);
     $process{flags} = $flags;
     if ($flags & DRY_RUN) {
-        print "+ "._format_cmd(@cmd)." [DRY]\n" if ($debug);
+        print "+ ".format_cmd(@cmd)." [DRY]\n" if ($debug);
         return \%process;
     }
-    my $cmd = _format_cmd(@cmd);
+    my $cmd = format_cmd(@cmd);
     $process{cmd} = $cmd;
     my ($in, $out, $err);
     if ($flags & USE_STDIN) {
@@ -708,6 +708,47 @@ our %gerrit_info_by_key;
 our %gerrit_info_by_sha1;
 our %gerrit_infos_by_id;
 
+#############################
+# state variable processing #
+#############################
+
+{  # start text escape functions
+
+my @escapes = split //, "\\\\\"\"\aa\bb\tt\nn\rr\013v\ff\ee s";
+my %esc_to_char = pairmap { $b => $a } @escapes;
+my %char_to_esc = pairmap { $a => $b } @escapes;
+
+sub quote_text_prop($;$)
+{
+    my ($in, $sp) = @_;
+
+    my $re = $sp ? qr/(\p{Cc}|\\|\"| )/ : qr/(\p{Cc}|\\|\")/;
+    $in =~ s{$re}{"\\".($char_to_esc{$1} // sprintf("%03o", ord($1)))}ge;
+    return $in;
+}
+
+sub unquote_text_prop($)
+{
+    my ($in) = @_;
+
+    $in =~ s{(?>\\([\\\"a-z]|[0-3][0-7][0-7]))}{$esc_to_char{$1} // chr(oct($1))}ge;
+    return $in;
+}
+
+}  # end text escape functions
+
+sub quote_list_prop(@)
+{
+    return join(" ", map { quote_text_prop($_, 1) } @_);
+}
+
+sub unquote_list_prop($)
+{
+    my ($in) = @_;
+
+    return map { unquote_text_prop($_) } split(/ /, $in);
+}
+
 ##################
 # state handling #
 ##################
@@ -721,6 +762,7 @@ our %gerrit_infos_by_id;
 # - src: Local branch name, or "-" if Change is on a detached HEAD.
 # - tgt: Target branch name.
 # - topic: Gerrit topic. Persisted only as a cache.
+# - fmt: format-patch/send-email options (indirect).
 # - pushed: SHA1 of the commit this Change was pushed as last time
 #   from this repository.
 # - rebased: prospective value for 'pushed'.
@@ -807,9 +849,9 @@ sub save_state(;$$)
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my %prop_hash;
     my (@lines, @updates);
-    my %ikeys = map { $_ => 1 } ();
+    my %ikeys = map { $_ => 1 } ('fmt');
     my @fkeys = ('key', 'grp', 'id', 'base', 'src', 'tgt',
-                 'topic', 'ver',
+                 'topic', 'ver', 'fmt',
                  'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
     my @rkeys = ('pushed', 'rebased', 'orig', 'rorig');
     if ($new) {
