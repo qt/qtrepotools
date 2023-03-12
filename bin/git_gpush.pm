@@ -1390,7 +1390,7 @@ sub analyze_local_branch($)
     # Get the revs ...
     print "Enumerating local Changes ...\n" if ($debug);
     my $raw_commits = visit_local_commits([ $tip ]);
-    return 0 if (!@$raw_commits);
+    return if (!@$raw_commits);
 
     # ... then sanity-check a bit ...
     my %seen;
@@ -1444,7 +1444,7 @@ sub analyze_local_branch($)
         $change_by_pushed{$pushed} = $change if (defined($pushed));
     }
 
-    return 1;
+    return $commits;
 }
 
 ##### ... and also for upstream commits.

@@ -373,8 +373,8 @@ sub determine_local_branch()
 # Get the list of local commits (which can be replaced).
 sub get_changes()
 {
-    return get_commits_free($local_tip)
-        if (analyze_local_branch('HEAD'));
+    my $commits = analyze_local_branch('HEAD');
+    return $commits if ($commits);
     # We get here if we have no local Changes ...
     if (!defined($local_tip)) {
         # ...when working on a detached HEAD.
