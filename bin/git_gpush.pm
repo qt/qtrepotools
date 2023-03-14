@@ -364,6 +364,7 @@ sub _rewrite_git_push_url($)
     return $url;
 }
 
+my $curr_tree = "";
 our $_indexfile;
 END { unlink($_indexfile) if ($_indexfile); }
 
@@ -371,6 +372,7 @@ sub with_local_git_index($@)
 {
     my ($callback, @args) = @_;
 
+    $curr_tree = "";
     $_indexfile = mktemp(($ENV{TMPDIR} or "/tmp") . "/git-gpush.XXXXXX");
     local $ENV{GIT_INDEX_FILE} = $_indexfile;
 
@@ -1579,7 +1581,6 @@ sub apply_diff($$$)
     # series by definition, so we need to load it anyway. The
     # subsequent apply will change it in every case, so there
     # is no chance to recycle it, either.
-    state $curr_tree = "";
     my $base = $commit_by_id{$base_id};
     run_process(FWD_STDERR, 'git', 'read-tree', ($base_id eq 'ROOT') ? '--empty' : $base_id)
         if (!$base || ($curr_tree ne $$base{tree}));
