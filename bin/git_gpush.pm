@@ -1586,7 +1586,10 @@ sub apply_diff($$$)
     my $errors = get_process_output($proc, 'stderr')
         if ($flags & USE_STDERR);
     close_process($proc);
-    return (undef, $errors) if ($?);
+    if ($?) {
+        print "Diff application failed.\n" if ($debug);
+        return (undef, $errors);
+    }
     $curr_tree = read_cmd_line(0, 'git', 'write-tree');
     return ($curr_tree, undef);
 }
