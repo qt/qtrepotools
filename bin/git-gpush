@@ -562,8 +562,6 @@ sub parse_arguments(@)
         fail("--include and --exclude are mutually exclusive.\n")
             if ($include && $exclude);
     } elsif ($list_only) {
-        fail("--list/--list-rebase/--list-online is incompatible with --quiet/--verbose.\n")
-            if ($quiet || ($verbose && !$debug));
         fail("--list/--list-rebase/--list-online is incompatible with series-modifying options.\n")
             if ($series_modifying);
         fail("--list/--list-rebase/--list-online is incompatible with push-modifying options.\n")
@@ -692,6 +690,8 @@ sub report_pushed_group($$)
 
     my ($title, $changes) = caption_group($group);
     report_flowed($reports, $title);
+    my $annot = $$group{annotation};
+    report_text($reports, 'fixed', @$annot) if (defined($annot));
     report_local_changes($reports, $changes);
     my $error = $$group{error};
     report_text($reports, $$group{error_style}, $error) if (defined($error));
@@ -1990,12 +1990,24 @@ sub annotate_changes($)
     }
 }
 
-sub make_listing($)
+sub annotate_group($$)
 {
-    my ($groups) = @_;
+    my ($group, $extra) = @_;
+
+    my @annot;
+    if ($extra) {
+        # TODO
+    }
+    $$group{annotation} = \@annot if (@annot);
+}
+
+sub make_listing($;$)
+{
+    my ($groups, $extra) = @_;
 
     foreach my $group (@$groups) {
         annotate_changes($group);
+        annotate_group($group, $extra);
     }
     return report_pushed_changes(@$groups);
 }
@@ -2004,7 +2016,7 @@ sub show_changes($)
 {
     my ($groups) = @_;
 
-    print format_reports(make_listing($groups));
+    print format_reports(make_listing($groups, !$quiet));
 }
 
 sub fail_with_listing($@)
@@ -2402,7 +2414,7 @@ sub execute_pushing()
                 classify_changes_offline($group);
             }
         }
-    } elsif (!$quiet) {
+    } elsif (!$quiet || $list_only) {
         foreach my $group (@$groups) {
             classify_changes_offline($group);
         }
