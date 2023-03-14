@@ -1915,12 +1915,9 @@ sub update_state($)
     $tpc = undef if (defined($tpc) && !length($tpc));
     foreach my $change (@{$$group{changes}}) {
         $$change{grp} = $gid;
-        my $sha1 = $$change{final}{id};
-        if (($$change{pushed} // "") ne $sha1) {
-            $$change{pushed} = $sha1;
-            $$change{topic} = $tpc;
-            $$change{ntopic} = undef;
-        }
+        $$change{pushed} = $$change{final}{id};
+        $$change{topic} = $tpc;
+        $$change{ntopic} = undef;
         $$change{tgt} = $branch;
         $$change{ntgt} = undef;
         my $commit = $$change{local};
