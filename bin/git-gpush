@@ -589,12 +589,13 @@ sub aggregate_property($$$$)
     my ($group, $prop_name, $get_prop, $get_ann) = @_;
 
     my $changes = $$group{changes};
-    my %prop_map = map { $_ => 1 } grep { $_ } map { $get_prop->($_) } @$changes;
+    my %prop_map = map { $_ => 1 } grep { $_ } map { $get_prop->() } @$changes;
     my @props = keys %prop_map;
     if (@props > 1) {
         foreach my $change (@$changes) {
-            my $p = $get_prop->($change);
-            $$change{annotation} = $get_ann->($p) if (defined($p));
+            $_ = $change;
+            $_ = $get_prop->();
+            $$change{annotation} = $get_ann->() if (defined($_));
         }
         set_group_error($group, 'flowed',
                         "Changes were previously pushed with mixed ${prop_name}s."
@@ -724,8 +725,8 @@ sub determine_remote_branch($)
     my $br = $ref_to;
     if (!defined($br)) {
         $br = aggregate_property($group, 'target',
-                                 sub { $_[0]->{ntgt} // $_[0]->{tgt} },
-                                 sub { '  => '.$_[0] });
+                                 sub { $$_{ntgt} // $$_{tgt} },
+                                 sub { '  => '.$_ });
     }
     if (!defined($br)) {
         fail("Cannot deduce source branch for $from. Please use --branch.\n")
@@ -746,8 +747,8 @@ sub determine_topic($)
     if (!defined($tpc)) {
         # No topic was specified, so deduce it from the previous push(es).
         $tpc = aggregate_property($group, 'topic',
-                                  sub { $_[0]->{ntopic} // $_[0]->{topic} },
-                                  sub { '  /'.$_[0] });
+                                  sub { $$_{ntopic} // $$_{topic} },
+                                  sub { '  /'.$_ });
     }
     $$group{topic} = $tpc;
 }
@@ -1123,8 +1124,8 @@ sub determine_base($)
         # is functionally equivalent to gpick-ing the entire series and
         # subsequently dropping some Changes locally.
         $base = aggregate_property($group, 'base',
-                                   sub { $_[0]->{nbase} // $_[0]->{base} },
-                                   sub { '  @'.($_[0] ? substr($_[0], 0, 8) : "<reset>") });
+                                   sub { $$_{nbase} // $$_{base} },
+                                   sub { '  @'.($_ ? substr($_, 0, 8) : "<reset>") });
         # Technically, we should re-validate the base before each push,
         # because pending PatchSets (or entire Changes) can be deleted,
         # and upstream commits can disappear due to forced pushes.
