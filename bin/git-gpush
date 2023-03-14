@@ -1550,11 +1550,21 @@ sub do_rebase_changes($$)
     }
 }
 
-sub rebase_changes($$)
+sub do_rebase_groups($$)
 {
-    my ($group, $upstreamed_changes) = @_;
+    my ($groups, $upstreamed_changes) = @_;
 
-    with_local_git_index(\&do_rebase_changes, $group, $upstreamed_changes);
+    foreach my $group (@$groups) {
+        do_rebase_changes($group, $upstreamed_changes)
+            if (defined($$group{gid}));
+    }
+}
+
+sub rebase_groups($$)
+{
+    my ($groups, $upstreamed_changes) = @_;
+
+    with_local_git_index(\&do_rebase_groups, $groups, $upstreamed_changes);
 }
 
 sub classify_changes_offline($)
@@ -1999,9 +2009,9 @@ sub execute_pushing()
         }
         visit_pushed_changes($groups);
         my $upstreamed_changes = get_upstreamed_changes($pushed_changes);
+        rebase_groups($groups, $upstreamed_changes);
         foreach my $group (@$groups) {
             if (defined($$group{gid})) {
-                rebase_changes($group, $upstreamed_changes);
                 classify_changes_online($group);
             } else {
                 # We don't rebase sets of loose Changes, as this will often
