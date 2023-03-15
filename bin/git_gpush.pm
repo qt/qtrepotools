@@ -748,15 +748,16 @@ sub _commit_state($$)
 {
     my ($blob, $new) = @_;
 
-    run_process(0, 'git', 'update-index', '--add', '--cacheinfo', "100644,$blob,state");
+    run_process(FWD_OUTPUT, 'git', 'update-index', '--add', '--cacheinfo',
+                            "100644,$blob,state");
     my $tree = read_cmd_line(0, 'git', 'write-tree');
     my $sha1 = read_cmd_line(0, 'git', 'commit-tree', '-m', 'Saving state', $tree);
     if ($new) {
-        run_process(0, 'git', 'update-ref', 'refs/gpush/state-new', $sha1);
-        return;
+        run_process(FWD_OUTPUT, 'git', 'update-ref', 'refs/gpush/state-new', $sha1);
+    } else {
+        run_process(FWD_OUTPUT, 'git', 'update-ref', '-m', $state_updater,
+                                '--create-reflog', 'refs/gpush/state', $sha1);
     }
-    run_process(0, 'git', 'update-ref', '-m', $state_updater,
-                   '--create-reflog', 'refs/gpush/state', $sha1);
 }
 
 sub save_state(;$$)
