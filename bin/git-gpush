@@ -1501,18 +1501,20 @@ sub do_rebase_changes($$)
     printf("Rebasing %s to %s.\n", format_group_id($group), format_id($base))
         if ($verbose);
 
-    # Preparation for advance_base(). We "pull down" the parent commits from
-    # subsequent previously pushed Changes into preceding new ones, to avoid
-    # that the "gap" in the chain disrupts the mechanism.
-    my $pchg;
-    foreach my $change (@$changes) {
-        $pchg = $change if (!$pchg);
-        my $old_id = $$change{pushed};
-        next if (!defined($old_id));
-        my $old_commit = $commit_by_id{$old_id};
-        next if (!$old_commit);
-        $$pchg{old_parent_id} = get_1st_parent($old_commit);
-        $pchg = undef;
+    if (%$upstreamed_changes) {
+        # Preparation for advance_base(). We "pull down" the parent commits from
+        # subsequent previously pushed Changes into preceding new ones, to avoid
+        # that the "gap" in the chain disrupts the mechanism.
+        my $pchg;
+        foreach my $change (@$changes) {
+            $pchg = $change if (!$pchg);
+            my $old_id = $$change{pushed};
+            next if (!defined($old_id));
+            my $old_commit = $commit_by_id{$old_id};
+            next if (!$old_commit);
+            $$pchg{old_parent_id} = get_1st_parent($old_commit);
+            $pchg = undef;
+        }
     }
 
     # We don't attempt minimal mode when the base of the entire push
@@ -1545,7 +1547,8 @@ sub do_rebase_changes($$)
             $holdoff--;
             print "Not trying old base.\n" if ($debug);
         } else {
-            advance_base(\$new_base, $$change{old_parent_id}, $upstreamed_changes);
+            advance_base(\$new_base, $$change{old_parent_id}, $upstreamed_changes)
+                if (%$upstreamed_changes);
             ($old_commit, $old_base, $try_old_base) =
                     prepare_rebase($change, $new_base, $try_minimal && $idx);
             $new_base = $old_base if ($try_old_base);
