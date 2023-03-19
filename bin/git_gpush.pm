@@ -1541,10 +1541,10 @@ sub _parse_local_rev_sym($$)
         $out = $local_tip;
     } elsif ($rev eq 'ROOT') {
         fail("ROOT is not valid for tip revspecs.\n") if ($scope == SPEC_TIP);
-        $out = $rev;
+        return ($rev, 1);
     } elsif (($rev eq '@{u}') || ($rev eq '@{upstream}')) {
         fail("\@{upstream} is not valid for tip revspecs.\n") if ($scope == SPEC_TIP);
-        $out = "";
+        return ("", 1);
     } else {
         return (undef, undef);
     }
