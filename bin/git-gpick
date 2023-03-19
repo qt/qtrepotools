@@ -1933,7 +1933,7 @@ sub changify_remote_specs($)
     source_map_finish();
 }
 
-sub check_specs($)
+sub finalize_insertion_specs($)
 {
     my ($specs) = @_;
 
@@ -1948,6 +1948,11 @@ sub check_specs($)
         $$spec{new_range_reference} = $$spec{tip};
     }
     changify_remote_specs($specs);
+}
+
+sub check_specs($)
+{
+    my ($specs) = @_;
 
     print "Checking remote commit specs for collisions ...\n" if ($debug);
     my @new_specs;
@@ -2189,6 +2194,7 @@ sub prepare_specs($)
     resolve_specs($specs);
     complete_spec_heads($specs);
     complete_spec_tails($specs);
+    finalize_insertion_specs($specs);
 
     # Before we can match up remote specs with unspecified local
     # series, we need to make sure that the series are actually
