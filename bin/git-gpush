@@ -562,8 +562,9 @@ sub parse_arguments(@)
         if ($from =~ /^(.*)\.\.(.*)$/) {
             fail("Specifying a commit count and a range base are mutually exclusive.\n")
                 if ($commit_count);
-            ($from_base, $from) = (length($1) ? $1 : '@{u}', length($2) ? $2 :'HEAD');
+            ($from_base, $from) = (length($1) ? $1 : '@{u}', $2);
         }
+        $from = "HEAD".$from if ($from =~ /^([~^]|$)/);
     }
 
     my $series_specifying =
@@ -1180,7 +1181,6 @@ sub initialize_get_changes()
     } else {
         # We did not need to visit the current branch to find the tip,
         # so determine the branch from the tip now.
-        $from = "HEAD".$from if ($from =~ /^[~^]/);
         my $tip = determine_local_branch($from);
         # Get the pool of Changes to push from.
         # We don't limit the range and even overshoot if possible; the
