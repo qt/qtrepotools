@@ -865,13 +865,23 @@ sub branch_for_commit($)
     }
     close_process($branches);
     if (!defined($curbranch)) {
-        # If the commit is not on the current branch, see if it is on _one_
-        # other branch with an upstream branch.
-        my @goodbranches;
-        foreach my $other (@otherbranches) {
-            push @goodbranches, $other if (defined(git_config("branch.$other.merge")));
+        # The commit is not on the current branch.
+        if (@otherbranches == 1) {
+            # It's on exactly one other branch, so use that.
+            $curbranch = $otherbranches[0];
+        } else {
+            # See if it is on exactly one other branch with an
+            # upstream branch (so we can derive a target branch
+            # from it).
+            my @goodbranches;
+            foreach my $other (@otherbranches) {
+                push @goodbranches, $other
+                    if (defined(git_config("branch.$other.merge")));
+            }
+            if (@goodbranches == 1) {
+                $curbranch = $goodbranches[0];
+            }
         }
-        $curbranch = $goodbranches[0] if (@goodbranches == 1);
     }
     return ($curbranch, $in_rebase);
 }
