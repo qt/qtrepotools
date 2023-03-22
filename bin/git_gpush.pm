@@ -1399,7 +1399,6 @@ sub visit_local_commits($;$)
     return visit_commits($tips, \@upstream_excludes, $cid_opt);
 }
 
-my $analyzed_local_branch = 0;
 # SHA1 of the local branch's merge base with upstream.
 our $local_base;
 # Mapping of Change-Ids to commits on the local branch.
@@ -1414,8 +1413,6 @@ sub _source_map_finish_initial();
 sub analyze_local_branch($)
 {
     my ($tip) = @_;
-
-    $analyzed_local_branch = 1;
 
     # Get the revs ...
     print "Enumerating local Changes ...\n" if ($debug);
@@ -1546,78 +1543,38 @@ use constant {
     SPEC_PARENT => 2
 };
 
-sub _finalize_parse_local_rev($$$)
-{
-    my ($rev, $out, $scope) = @_;
-
-    # There is no point in restricting the base here - subsequent
-    # use will find out soon enough if it is not reachable.
-    return $out if ($scope == SPEC_BASE);
-    return $out if (!$analyzed_local_branch || $commit_by_id{$out});
-    fail("$rev is outside the local branch.\n");
-}
-
-sub _parse_local_rev_sym($$)
-{
-    my ($rev, $scope) = @_;
-
-    my $out;
-    if ($rev eq 'HEAD') {
-        fail("HEAD is not valid for base revspecs.\n") if ($scope == SPEC_BASE);
-        $out = $head_commit;
-    } elsif ($rev eq 'ROOT') {
-        fail("ROOT is not valid for tip revspecs.\n") if ($scope == SPEC_TIP);
-        return ($rev, 1);
-    } elsif (($rev eq '@{u}') || ($rev eq '@{upstream}')) {
-        fail("\@{upstream} is not valid for tip revspecs.\n") if ($scope == SPEC_TIP);
-        return ("", 1);
-    } else {
-        return (undef, undef);
-    }
-    return (_finalize_parse_local_rev($rev, $out, $scope), 1);
-}
-
-sub _parse_local_rev_id_only($$)
-{
-    my ($rev, $scope) = @_;
-
-    fail("$rev is not a valid revspec.\n") if ($rev !~ /^(\w+)(.*)$/);
-
-    # This looks like a valid revspec, but git failed to parse it.
-    # Try to parse it as a Change-Id instead.
-    my ($id, $rest) = ($1, $2);
-    my $sha1 = _sha1_for_partial_local_id($id);
-    wfail("$rev does not refer to a Change on the local branch.\n") if (!$sha1);
-    return $sha1 if (!$rest);
-
-    my $out = read_cmd_line(SOFT_FAIL, 'git', 'rev-parse', '--verify', '-q', $sha1.$rest);
-    fail("$rev is not a valid revspec.\n") if (!$out);
-    return _finalize_parse_local_rev($rev, $out, $scope);
-}
-
-sub parse_local_rev_id($$)
-{
-    my ($rev, $scope) = @_;
-
-    my ($sout, $done) = _parse_local_rev_sym($rev, $scope);
-    return $sout if ($done);
-    return _parse_local_rev_id_only($rev, $scope);
-}
-
 # Parse a revision specification referring to a commit in the local branch.
-# This will return undef for @{u}, HEAD, and Change-Ids if the local branch
-# was not visited yet; call parse_local_rev_id() after doing so.
 sub parse_local_rev($$)
 {
     my ($rev, $scope) = @_;
 
-    $rev = "HEAD".$rev if ($rev =~ /^[~^]/);
-    my ($sout, $done) = _parse_local_rev_sym($rev, $scope);
-    return $sout if ($done);
-    my $out = read_cmd_line(SOFT_FAIL, 'git', 'rev-parse', '--verify', '-q', $rev);
-    return _finalize_parse_local_rev($rev, $out, $scope) if ($out);
-    return undef if (!$analyzed_local_branch);  # Come back later!
-    return _parse_local_rev_id_only($rev, $scope);
+    if ($rev eq 'ROOT') {
+        fail("ROOT is not valid for tip revspecs.\n")
+            if ($scope == SPEC_TIP);
+        return $rev;
+    } elsif (($rev eq '@{u}') || ($rev eq '@{upstream}')) {
+        fail("\@{upstream} is not valid for tip revspecs.\n")
+            if ($scope == SPEC_TIP);
+        return "";
+    }
+    fail("$rev is not a valid rev-spec.\n")
+        if ($rev !~ /^([^~^]*+)(.*)$/);
+    my ($core, $rest) = (length($1) ? $1 : "HEAD", $2);
+    my $out;
+    if ($core eq 'HEAD') {
+        $out = $head_commit;
+    } else {
+        $out = _sha1_for_partial_local_id($core);
+    }
+    $out = read_cmd_line(SOFT_FAIL, 'git', 'rev-parse', '--verify', '-q',
+                                    ($out // $core).$rest."^{commit}")
+        if (!defined($out) || length($rest));
+    fail("$rev is not a valid rev-spec.\n") if (!defined($out));
+    # There is no point in restricting the base here - subsequent
+    # use will find out soon enough if it is not reachable.
+    return $out if ($scope == SPEC_BASE);
+    return $out if ($commit_by_id{$out});
+    fail("$rev is outside the local branch.\n");
 }
 
 ################
