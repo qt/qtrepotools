@@ -572,8 +572,6 @@ sub parse_arguments(@)
             $add_ids = -$add_ids;
         }
     } else {
-        fail("--all is incompatible with specifying commits.\n")
-            if ($push_all);
         if ($from =~ /^(.*)\.\.(.*)$/) {
             fail("Specifying a commit count and a range base are mutually exclusive.\n")
                 if ($commit_count);
