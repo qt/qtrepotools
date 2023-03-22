@@ -1564,7 +1564,9 @@ sub parse_local_rev($$)
     if ($core eq 'HEAD') {
         $out = $head_commit;
     } else {
-        $out = _sha1_for_partial_local_id($core);
+        $core =~ s,^refs/heads/,,;
+        $out = $local_refs{$core};
+        $out = _sha1_for_partial_local_id($core) if (!defined($out));
     }
     $out = read_cmd_line(SOFT_FAIL, 'git', 'rev-parse', '--verify', '-q',
                                     ($out // $core).$rest."^{commit}")
