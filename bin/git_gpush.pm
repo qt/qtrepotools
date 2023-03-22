@@ -2104,7 +2104,7 @@ sub _source_map_finish_initial()
     }
 
     source_map_finish();
-    save_state() if ($sm_changed);
+    save_state($dry_run) if ($sm_changed);
 }
 
 # Update the target branches of local Changes according to the data
@@ -2159,7 +2159,7 @@ sub _update_target_branches($)
         # The Changes may be printed again later.
         delete $$_{annotation} foreach (@changed);
     }
-    save_state() if ($need_save);
+    save_state($dry_run) if ($need_save);
 }
 
 #######################
