@@ -851,8 +851,11 @@ sub branch_for_commit($)
             if (/^\* \(no branch, rebasing (.*)\)$/) {
                 $curbranch = $1;
                 $in_rebase = 1;
+                last;
             }
-            last;
+            # This is the "* (HEAD detached at [...])" case.
+            # The commit is somewhat likely still on the branch we
+            # detached from, so we continue here.
         } elsif (/^\* (.*)$/) {
             $curbranch = $1;
             last;
