@@ -358,11 +358,13 @@ sub determine_local_branch()
 # Get the list of local commits (which can be replaced).
 sub get_changes()
 {
-    my $commits = analyze_local_branch($head_commit);
-    return $commits if ($commits);
-    # We have no local Changes, so the tip is also the branch base.
-    $local_base = $head_commit;
-    return [];
+    my $commits = visit_local_branch($head_commit);
+    if (!@$commits) {
+        # We have no local Changes, so the tip is also the branch base.
+        $local_base = $head_commit;
+    }
+    analyze_local_branch($commits);
+    return $commits;
 }
 
 # Deduce series grouping from picked Changes.

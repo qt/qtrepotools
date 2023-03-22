@@ -1410,19 +1410,26 @@ sub source_map_assign($$);
 sub source_map_traverse();
 sub _source_map_finish_initial();
 
-sub analyze_local_branch($)
+sub visit_local_branch($)
 {
     my ($tip) = @_;
 
     # Get the revs ...
     print "Enumerating local Changes ...\n" if ($debug);
     my $raw_commits = visit_local_commits([ $tip ]);
-    return if (!@$raw_commits);
+    return [] if (!@$raw_commits);
 
     # Traverse along 1st parents only, unlike visit_local_commits().
     my $commits = get_commits_free($$raw_commits[-1]{id});
 
     $local_base = $$commits[0]{parents}[0];
+
+    return $commits;
+}
+
+sub analyze_local_branch($)
+{
+    my ($commits) = @_;
 
     # ... then sanity-check a bit ...
     foreach my $commit (@$commits) {
@@ -1467,8 +1474,6 @@ sub analyze_local_branch($)
         my $pushed = $$change{pushed};
         $change_by_pushed{$pushed} = $change if (defined($pushed));
     }
-
-    return $commits;
 }
 
 ##### ... and also for upstream commits.

@@ -1191,8 +1191,10 @@ sub initialize_get_changes()
     setup_remotes($source);
     set_gerrit_config($remote) if (!$mail_mode);
     source_map_validate();
-    analyze_local_branch($tip) or
-        fail("No local Changes (from $core_source).\n");
+    my $commits = visit_local_branch($tip);
+    fail("No local Changes (from $core_source).\n")
+        if (!@$commits);
+    analyze_local_branch($commits);
     return parse_local_rev($from, SPEC_TIP);
 }
 
