@@ -1809,14 +1809,44 @@ sub _format_branches(@)
     return "all of $str";
 }
 
+my %sm_notices;
+my %sm_failures;
+
 # Format the message about the outcome of a Change assignment attempt.
-sub _format_result($$$@)
+sub _format_result($$@)
+{
+    my ($new, $fmt, @args) = @_;
+
+    my $lbr = $local_branch // "-";
+    my $event = sprintf("%son %s $fmt.",
+                   $new ? "newly " : "", _format_branch($lbr), @args);
+}
+
+sub _push_notice($$$@)
 {
     my ($commit, $new, $fmt, @args) = @_;
 
-    my $lbr = $local_branch // "-";
-    return sprintf("%s\n    %son %s $fmt.\n", format_commit($commit),
-                   $new ? "newly " : "", _format_branch($lbr), @args);
+    return if ($quiet);
+    push @{$sm_notices{_format_result($new, $fmt, @args)}}, $commit;
+}
+
+sub _push_failure($$$@)
+{
+    my ($commit, $new, $fmt, @args) = @_;
+
+    push @{$sm_failures{_format_result($new, $fmt, @args)}}, $commit;
+}
+
+sub _format_results($)
+{
+    my ($target) = @_;
+
+    my $out = "";
+    foreach my $event (sort keys %$target) {
+        my @cmts = map { format_commit($_) } @{$$target{$event}};
+        $out .= join("\n", @cmts)."\n    ".$event."\n";
+    }
+    return $out;
 }
 
 use constant {
@@ -1831,9 +1861,9 @@ my $sm_option_new;
 my %sm_option_by_id;
 my %sm_wanted;
 my %sm_present;
-my $sm_printed = 0;
 my $sm_changed = 0;
 my $sm_failed = 0;
+my @sm_errors;
 
 # Parse a single command line option relating to source branch tracking.
 # $arg is the currently processed argument, while $args are the remaining
@@ -1960,6 +1990,8 @@ sub _obliterate_change($$)
 # determining which Change objects still correspond with actual commits.
 sub source_map_traverse()
 {
+    return if ($sm_failed);  # Errors are queued, don't iterate
+
     # It would be tempting to always query all local branches in
     # advance, to save the extra git call. However, this would also
     # collect *really* old branches, and even though they are short,
@@ -2111,9 +2143,8 @@ sub source_map_assign($$)
                 _init_change($change, $changeid);
             }
             $$change{hide} = ($action == _SRC_HIDE) ? 1 : undef;
-            wout(_format_result($commit, $new, "marked as $label"))
-                if (!$quiet);
-            goto PRINTED;
+            _push_notice($commit, $new, "marked as $label");
+            goto CHANGED;
         }
         print "Already have $$change{key} ($changeid) on $lbr; not $label.\n"
             if ($debug);
@@ -2125,11 +2156,13 @@ sub source_map_assign($$)
         if (defined($sbr)) {
             $schange = $change_by_branch{$sbr};
             if (!$schange) {
-                werr("Change $changeid does not exist on '$sbr'; cannot move.\n");
+                push @sm_errors,
+                    "Change $changeid does not exist on '$sbr'; cannot move.\n";
                 goto FAIL;
             }
             if ($$schange{hide}) {
-                werr("Change $changeid is hidden on '$sbr'; cannot move.\n");
+                push @sm_errors,
+                    "Change $changeid is hidden on '$sbr'; cannot move.\n";
                 goto FAIL;
             }
         } else {
@@ -2141,21 +2174,20 @@ sub source_map_assign($$)
             if ($new) {
                 if (@vanished) {
                     if (@vanished > 1) {
-                        werr(_format_result(
-                                $commit, 1, "was previously on %s.\n"
+                        _push_failure(
+                                $commit, 1, "was/were previously on %s.\n"
                                 ."  Use --move with a source, or use --copy/--hide",
-                                _format_branches(\@vanished)));
+                                _format_branches(\@vanished));
                         goto FAIL;
                     }
                     $change = pop @vanished;
                     # Note: this is a post-fact notice, so if the user failed to use
                     # --copy/--hide in advance, they'll need to fix it laboriously.
                     # This seems acceptable, as moving is the much more common case.
-                    wout(_format_result(
-                            $commit, 1, "was previously on %s. Inferring move",
-                            _format_branch($$change{src})))
-                        if (!$quiet);
-                    goto PRINTED;
+                    _push_notice(
+                            $commit, 1, "was/were previously on %s. Inferring move",
+                            _format_branch($$change{src}));
+                    goto CHANGED;
                 }
                 if (!@persisting) {
                     # This is the common case: an entirely new Change.
@@ -2164,42 +2196,42 @@ sub source_map_assign($$)
                     goto CHANGED;
                 }
                 if ($action != _SRC_MOVE) {
-                    werr(_format_result(
-                            $commit, 1, "exists also on %s.\n"
+                    _push_failure(
+                            $commit, 1, "exist(s) also on %s.\n"
                             ."  Prune unneeded copies, or use --move/--copy/--hide",
-                            _format_branches_raw(\@persisting)));
+                            _format_branches_raw(\@persisting));
                     goto FAIL;
                 }
             } else { # implies $action == _SRC_MOVE
                 if (!$$change{hide}) {
                     # Attempts to move over active Changes are most likely mistakes.
-                    werr(_format_result(
-                            $commit, 0, "is not hidden.\n"
-                            ."  Pass a source to --move if you really mean it"));
+                    _push_failure(
+                            $commit, 0, "is/are not hidden.\n"
+                            ."  Pass a source to --move if you really mean it");
                     goto FAIL;
                 }
                 if (@vanished) {
                     if (@vanished > 1) {
-                        werr(_format_result(
-                                $commit, 0, "was previously on %s.\n"
+                        _push_failure(
+                                $commit, 0, "was/were previously on %s.\n"
                                 ."  Pass a source to --move to disambiguate",
-                                _format_branches(\@vanished)));
+                                _format_branches(\@vanished));
                         goto FAIL;
                     }
                     $schange = pop @vanished;
                 } elsif (!@persisting) {
-                    werr(_format_result(
-                            $commit, 0, "exists on no other branch. Use --copy to unhide it"));
+                    _push_failure(
+                            $commit, 0, "exist(s) on no other branch. Use --copy to unhide it/them");
                     goto FAIL;
                 }
             }
             if (!$schange) {
                 if (@persisting > 1) {
-                    werr(_format_result(
-                            $commit, $new, "exists also on %s.\n"
+                    _push_failure(
+                            $commit, $new, "exist(s) also on %s.\n"
                             ."  Prune unneeded copies, pass a source to --move,"
                                 ." or use --copy/--hide",
-                            _format_branches_raw(\@persisting)));
+                            _format_branches_raw(\@persisting));
                     goto FAIL;
                 }
                 $schange = pop @persisting;
@@ -2219,17 +2251,14 @@ sub source_map_assign($$)
             _init_change(\%chg, $changeid);
             print "... and hidden on $sbr.\n" if ($debug);
         }
-        wout(_format_result($commit, $new, "moved from %s", _format_branch($sbr)))
-            if (!$quiet);
+        _push_notice($commit, $new, "moved from %s", _format_branch($sbr));
         $change = $schange;
-        goto PRINTED;
+        goto CHANGED;
     }
     print "Already have $$change{key} ($changeid) on $lbr; leaving alone.\n"
         if ($debug);
     goto FOUND;
 
-  PRINTED:
-    $sm_printed = 1 if (!$quiet);
   CHANGED:
     $$change{src} = $lbr;
     $sm_changed = 1;
@@ -2244,9 +2273,12 @@ sub source_map_assign($$)
 
 sub source_map_finish()
 {
+    wout(_format_results(\%sm_notices)) if (%sm_notices);
+    werr(_format_results(\%sm_failures)) if (%sm_failures);
+    werr(join("", @sm_errors)) if (@sm_errors);
     exit(1) if ($sm_failed);
-    print "\n" if ($sm_printed);  # Delimit from remaining output.
-    $sm_printed = 0;
+    print "\n" if (%sm_notices);  # Delimit from remaining output.
+    %sm_notices = ();
 }
 
 sub _source_map_finish_initial()
