@@ -1579,7 +1579,6 @@ sub classify_changes_online($)
 {
     my ($group) = @_;
 
-    my $any_modified = 0;
     foreach my $change (@{$$group{changes}}) {
         my $commit = $$change{final};
         next if (!$commit);  # Rebase failure
@@ -1633,12 +1632,8 @@ sub classify_changes_online($)
                     $$change{freshness} = NEW;
                 }
             }
-            $any_modified++;
+            $have_modified = 1;
         }
-    }
-    if ($any_modified) {
-        $$group{have_modified} = 1;
-        $have_modified = 1;
     }
 }
 
@@ -2029,7 +2024,7 @@ sub execute_pushing()
         }
         if ($have_modified) {
             foreach my $group (@$groups) {
-                push_changes($group) if ($$group{have_modified});
+                push_changes($group);
             }
         } else {
             print "No modified commits - nothing to push.\n" if (!$quiet);
