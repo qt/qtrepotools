@@ -296,6 +296,11 @@ sub check_apple_terminology()
 # The hard-coded fallbacks could be avoided by init-repository setting things up.
 my $with_pickbot = parse_bool($config{'with-pickbot'} // "false");
 my @LTS = split(/\s+/, $config{'lts-branch'} || "5.6 5.9 5.12 5.15 6.2 6.5");
+# Assume that all WIP branches are reliably prefixed with wip/.
+# Use this when the repo has official branches whose names
+# don't follow Qt policy. If this bypass is not enabled,
+# only numeric branches are included in the branch filters.
+my $wipPrefixed = parse_bool($config{'wip-prefixed'} // "false");
 
 my %allHeads = ();
 my %nonDevHeads = ();
@@ -318,7 +323,9 @@ while (<HEADS>) {
     }
     if ($name =~ m,/dev$,) {
         $foundDev = 1;
-    } elsif ($name =~ m,/((?:(?:tqtc/)?lts-)?\d+(?:\.\d+)+)$,) {
+    } elsif ($wipPrefixed
+                ? ($name =~ m,(?<!^wip)/(.+)$,)
+                : ($name =~ m,/((?:(?:tqtc/)?lts-)?\d+(?:\.\d+)+)$,)) {
         my $branch = $1;
         ONCE: while (1) {
             foreach my $lts (@LTS) {
