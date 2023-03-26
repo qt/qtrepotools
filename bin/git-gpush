@@ -589,7 +589,7 @@ sub aggregate_property($$$$)
     my ($group, $prop_name, $get_prop, $get_ann) = @_;
 
     my $changes = $$group{changes};
-    my %prop_map = map { $_ => 1 } grep { $_ } map { $get_prop->() } @$changes;
+    my %prop_map = map { $_ => 1 } grep { defined($_) } map { $get_prop->() } @$changes;
     my @props = keys %prop_map;
     if (@props > 1) {
         foreach my $change (@$changes) {
