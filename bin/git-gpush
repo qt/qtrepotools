@@ -598,7 +598,7 @@ sub aggregate_property($$$$)
             $$change{annotation} = $get_ann->() if (defined($_));
         }
         set_group_error($group, 'flowed',
-                        "Changes were previously pushed with mixed ${prop_name}s."
+                        "Series has inconsistent values for ${prop_name}."
                         ." Please specify one.");
         fail_formatted(report_pushed_changes($group));
     }
