@@ -918,7 +918,7 @@ while (<DIFF>) {
             $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|qdoc|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
             $qmake = ($file =~ /\.pr[filo]$/i);
             $is_bin = ($file =~ /\.(ps|pdf)$/);
-            $foreign = $is_bin || ($file =~ /(^|\/)3rdparty\//);
+            $foreign = $is_bin || ($file =~ /(^|\/)3rdparty\//) || ($file =~ /^LICENSES\//);
             $new_file = 0;
             $maybe_bin = 0;
             $is_special = 0;
