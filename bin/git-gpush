@@ -769,6 +769,26 @@ sub aggregate_bool_property($$$$$)
     fail_formatted(\@reports);
 }
 
+sub aggregate_indirect_property($$$)
+{
+    my ($group, $get_key, $get_err) = @_;
+
+    my $changes = $$group{changes};
+    my %key_map = map { $_ => 1 } grep { defined($_) } map { $get_key->() } @$changes;
+    my @pkeys = sort keys %key_map;
+    return if (!@pkeys);
+    # Again a hash, as different keys could still lead to the same value.
+    my %prop_map = map { ($prop_by_key{$_} // "") => 1 } @pkeys;
+    my @props = sort keys %prop_map;
+    return $pkeys[0] if (@props == 1);
+
+    my @reports;
+    report_fixed(\@reports, "Series of ".int(@$changes)." Changes:\n");
+    report_local_changes(\@reports, $changes);
+    report_fixed(\@reports, $get_err->(@props));
+    fail_formatted(\@reports);
+}
+
 # Find _the_ branch the specified commit lives on. This can be the current
 # branch (and other branches are ignored), or _one_ other branch.
 sub branch_for_commit($)

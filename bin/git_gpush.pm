@@ -746,10 +746,29 @@ our %change_by_pushed;  # { sha1 => change-object }
 
 our $next_group = 10000;
 
+my $next_prop = 10000;
+# Indirect Change properties, which are shared to save space.
+# An alternative would be group poperties, but this would require
+# resolving inconsistencies at inopportune times; in particular,
+# we do not want to concern gpick with this at all.
+our %prop_by_key;
+
 our $last_gc = 0;
 
 my $state_lines;
 my $state_updater = ($0 =~ s,^.*/,,r)." @ARGV";
+
+sub new_prop($)
+{
+    my ($val) = @_;
+
+    my $key;
+    if (length($val)) {
+        $key = $next_prop++;
+        $prop_by_key{$key} = $val;
+    }
+    return $key;
+}
 
 # Perform a batch update of refs.
 sub update_refs($$)
@@ -786,7 +805,9 @@ sub save_state(;$$)
     my ($dry, $new) = @_;
 
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
+    my %prop_hash;
     my (@lines, @updates);
+    my %ikeys = map { $_ => 1 } ();
     my @fkeys = ('key', 'grp', 'id', 'base', 'src', 'tgt',
                  'topic', 'ver',
                  'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
@@ -799,6 +820,7 @@ sub save_state(;$$)
     push @lines,
         "next_key $next_key",
         "next_group $next_group",
+        "next_prop $next_prop",
         "last_gc $last_gc",
         "";
     foreach my $key (sort keys %change_by_key) {
@@ -823,10 +845,12 @@ sub save_state(;$$)
                 # We assume that no property ever contains a literal "".
                 $val = '""' if (!length($val));
                 push @lines, "$ky $val";
+                $prop_hash{int($val)} = 1 if (defined($ikeys{$ky}));
             }
         }
         push @lines, "";
     }
+    push @lines, map { $_.'='.$prop_by_key{$_} } sort keys %prop_hash;
     foreach my $ginfo (values %gerrit_info_by_key) {
         my $fetched = $$ginfo{fetched};
         next if (!defined($fetched));
@@ -894,6 +918,11 @@ sub load_state_file(;$)
         if (!length($_)) {
             $inhdr = 0;
             $change = undef;
+        } elsif (/^(\d+)=(.*)/) {
+            my ($key, $val) = (int($1), $2);
+            fail("Bad state file: indirect property with duplicate id at line $line.\n")
+                if (defined($prop_by_key{$key}));
+            $prop_by_key{$key} = $val;
         } elsif (!/^(\w+) (.*)/) {
             fail("Bad state file: Malformed entry at line $line.\n");
         } elsif ($inhdr) {
@@ -901,6 +930,8 @@ sub load_state_file(;$)
                 $next_key = int($2);
             } elsif ($1 eq "next_group") {
                 $next_group = int($2);
+            } elsif ($1 eq "next_prop") {
+                $next_prop = int($2);
             } elsif ($1 eq "last_gc") {
                 $last_gc = int($2);
             } elsif ($new && ($1 eq "verify")) {
