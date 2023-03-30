@@ -202,6 +202,10 @@ Options:
         Reset the base of a previously pushed series to the local branch's
         base. Typically used after a conflicted pull.
 
+        When the base-modifying options are used with --group, the
+        resolution of bases which relate to the local branch is delayed
+        until the next push.
+
         The base-modifying options may be used with --list-rebase and
         --list-online, but their effect is not persisted in this case.
 
@@ -1600,7 +1604,6 @@ sub determine_base($)
         # This all doesn't appear to be worth it ...
     }
     if (!length($base)) {
-        $base = $local_base;
         printf("Basing series %s on local branch's base.\n", format_group_id($group))
             if ($verbose);
     }
@@ -1939,6 +1942,12 @@ sub do_rebase_changes($$)
 {
     my ($group, $upstreamed_changes) = @_;
     my ($base, $changes) = ($$group{base}, $$group{changes});
+
+    if (!length($base)) {
+        print "Resetting base to local branch's base.\n" if ($debug);
+        $base = $local_base;
+        $$group{base} = $base;
+    }
 
     printf("Rebasing %s to %s.\n", format_group_id($group), format_id($base))
         if ($verbose);
