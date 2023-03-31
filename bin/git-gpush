@@ -167,6 +167,14 @@ Options:
         This setting persists for the series, even when it grows.
         Use an empty topic to delete a previously set one.
 
+    -D, --edit-description
+        Edit the series' description. In mail mode, a non-empty description
+        causes a cover letter to be created; the first paragraph becomes
+        the subject, while the rest becomes the body. In Gerrit mode, the
+        description is not processed, and may be used for local notes. The
+        commit listing includes only the first line, except in verbose mode.
+        This option implies --group.
+
     -- <git option>...
         In mail mode, set additional options for git format-patch and
         git send-email for the specified series. All subsequent arguments
@@ -382,6 +390,7 @@ my $ref_base;
 my $ref_to;
 my $force_branch = 0;
 my $topic;
+my $edit_desc = 0;
 my $force = 0;
 my $push_all = 0;
 my $group_only = 0;
@@ -432,6 +441,10 @@ sub parse_arguments(@)
         } elsif ($arg eq "-R" || $arg eq "--reset-props") {
             $group_only = 1;
             $reset_props = 1;
+        } elsif ($arg eq "-D" || $arg eq "--edit-description") {
+            $group_only = 1;
+            $edit_desc = 1;
+            $quiet = 1;  # Suppress listing of Changes
         } elsif ($arg eq "--keep-version") {
             $keep_version = 1;
         } elsif ($arg eq "--reset-version") {
@@ -542,7 +555,7 @@ sub parse_arguments(@)
     my $series_modifying =
             $series_specifying || defined($ref_to) || defined($topic)
             || $keep_version || $reset_version
-            || $format_opts;
+            || $format_opts || $edit_desc;
     my $gerrit_specific =
             @reviewers || @CCs || defined($remote) || $force_branch;
     my $push_specific =
@@ -963,6 +976,40 @@ sub determine_format_options($)
     }
     $$group{fmt_opt} = $fmt_opt;
     $$group{fmt_opt_text} = $fmt_opt_text;
+}
+
+sub determine_description($)
+{
+    my ($group) = @_;
+
+    my $dsc = aggregate_indirect_property(
+            $group, sub { $$_{dsc} },
+            sub { "has inconsistent descriptions."
+                  ." Use --edit-description to rectify.\n" });
+    my $dsc_text = defined($dsc) ? unquote_text_prop($prop_by_key{$dsc}) : undef;
+    $$group{desc} = $dsc;
+    $$group{desc_text} = $dsc_text;
+}
+
+sub edit_description($)
+{
+    my ($group) = @_;
+
+    my $changes = $$group{changes};
+    my %desc_hash = map { unquote_text_prop($prop_by_key{$_}) => 1 }
+                    grep { defined($_) } map { $$_{dsc} } @$changes;
+    my $desc = join("\n=============================\n\n", keys %desc_hash);
+
+    my @reports;
+    report_text(\@reports, 'fixed', "Series of ".int(@$changes)." Change(s):\n");
+    report_local_changes(\@reports, $changes);
+    my $comment = format_reports(\@reports);
+    $comment =~ s/^/# /smg;
+    $desc .= "\n".$comment;
+
+    $desc = edit_textfile($desc);
+    $desc =~ s/(^|\n)(?:(?:#[^\n]*)?\n)+$/$1/g;
+    return new_prop(quote_text_prop($desc));
 }
 
 sub scan_pushed_group($$)
@@ -2041,6 +2088,19 @@ sub annotate_group($$)
         my $fmt_opt = $$group{fmt_opt_text};
         push @annot, "> Format options: ".format_cmd(@$fmt_opt)."\n"
             if ($fmt_opt);
+
+        my $dsc = $$group{desc_text};
+        if (defined($dsc)) {
+            if ($verbose) {
+                push @annot, ",----- Description ------\n";
+                push @annot, ($dsc =~ s/^/| /mgr);
+                push @annot, "\`-----------------------\n";
+            } else {
+                $dsc =~ s/^([^\n]*+)\n?+(.*)/$1/sm;
+                $dsc .= " [...]" if (length($2));
+                push @annot, "> Description: ".$dsc."\n";
+            }
+        }
     }
     $$group{annotation} = \@annot if (@annot);
 }
@@ -2265,10 +2325,14 @@ sub format_patches($)
     my $base = $$group{base};
     my $tpc = $$group{topic};
     my $ver = $$group{version};
+    my $dsc = $$group{desc_text};
     my $fmt_opt = $$group{fmt_opt_text};
 
     my @gitopt = ('--binary');
     push @gitopt, '--reroll-count', $ver if ($ver > 1);
+    push @gitopt, '--cover-letter', '--cover-from-description=subject',
+                  '--description-file='.write_textfile($dsc)
+        if (defined($dsc));
     push @gitopt, @$fmt_opt if ($fmt_opt);
     # Can't use the -<n> <tip> notation, as -8 is misunderstood
     # by git send-email.
@@ -2288,6 +2352,10 @@ sub format_patches($)
         push @gitcmd, @gitopt;
         run_process(SOFT_FAIL | FWD_OUTPUT | DRY_RUN, @gitcmd);
     }
+
+    cleanup_textfile();
+
+    # Note: no other processes must be invoked in between.
     return !$?;
 }
 
@@ -2299,6 +2367,7 @@ sub update_state_grouping($)
     my ($group) = @_;
 
     my $gid = $$group{gid};
+    my $dsc = $edit_desc && edit_description($group);
     my $fmt = $format_opts && new_fmt_opt();
     foreach my $change (@{$$group{changes}}) {
         $$change{grp} = $gid;
@@ -2312,6 +2381,8 @@ sub update_state_grouping($)
             if (defined($ref_base) || $reset_props);
         $$change{ver} = 0
             if ($reset_version);
+        $$change{dsc} = $dsc
+            if ($edit_desc);
         $$change{fmt} = $fmt
             if ($format_opts);
         $$change{exclude} = $exclude ? 1 : undef
@@ -2323,9 +2394,9 @@ sub update_state($)
 {
     my ($group) = @_;
 
-    my ($gid, $branch, $tpc, $ver, $fmt, $base) =
+    my ($gid, $branch, $tpc, $ver, $dsc, $fmt, $base) =
             ($$group{gid}, $$group{branch}, $$group{topic},
-             $$group{version},
+             $$group{version}, $$group{desc},
              $$group{fmt_opt}, $$group{base});
     # Setting an empty topic clears the previous topic from the server.
     $tpc = undef if (defined($tpc) && !length($tpc));
@@ -2336,6 +2407,7 @@ sub update_state($)
         $$change{topic} = $tpc;
         $$change{ntopic} = undef;
         $$change{ver} = $ver;
+        $$change{dsc} = $dsc;
         $$change{fmt} = $fmt;
         $$change{tgt} = $branch;
         $$change{ntgt} = undef;
@@ -2439,6 +2511,7 @@ sub execute_pushing()
     foreach my $group (@$annot_groups) {
         determine_topic($group);
         if ($mail_mode) {
+            determine_description($group);
             determine_format_options($group);
         }
     }

@@ -19,7 +19,7 @@ $SIG{__DIE__} = \&Carp::confess;
 
 use List::Util qw(min max pairmap);
 use File::Spec;
-use File::Temp qw(mktemp);
+use File::Temp qw(mktemp tempfile);
 use IPC::Open3 qw(open3);
 use Symbol qw(gensym);
 use Term::ReadKey;
@@ -749,6 +749,57 @@ sub unquote_list_prop($)
     return map { unquote_text_prop($_) } split(/ /, $in);
 }
 
+our $_textfile;
+
+sub cleanup_textfile()
+{
+    if (defined($_textfile)) {
+        unlink($_textfile);
+        $_textfile = undef;
+    }
+}
+
+END { cleanup_textfile(); }
+
+sub write_textfile($)
+{
+    my ($text) = @_;
+
+    die("Only one textfile may be active at a time.\n")
+        if (defined($_textfile));
+
+    my $fh;
+    ($fh, $_textfile) =
+            tempfile("git-gpush.XXXXXX", SUFFIX => ".txt", TMPDIR => 1);
+    print $fh $text;
+    close($fh) or fail("Cannot write temporary file.\n");
+    return $_textfile;
+}
+
+sub read_textfile()
+{
+    open(my $fh, $_textfile) or fail("Cannot open temporary file.\n");
+    local $/;
+    my $text = <$fh>;
+    close($fh);
+
+    cleanup_textfile();
+
+    return $text;
+}
+
+sub edit_textfile($)
+{
+    my ($text) = @_;
+
+    write_textfile($text);
+
+    state $editor = read_cmd_line(0, 'git', 'var', 'GIT_EDITOR');
+    run_process(FWD_STDIN | FWD_OUTPUT, $editor, $_textfile);
+
+    return read_textfile();
+}
+
 ##################
 # state handling #
 ##################
@@ -763,6 +814,7 @@ sub unquote_list_prop($)
 # - tgt: Target branch name.
 # - topic: Gerrit topic. Persisted only as a cache.
 # - fmt: format-patch/send-email options (indirect).
+# - dsc: verbose series description / notes (indirect).
 # - pushed: SHA1 of the commit this Change was pushed as last time
 #   from this repository.
 # - rebased: prospective value for 'pushed'.
@@ -849,9 +901,9 @@ sub save_state(;$$)
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my %prop_hash;
     my (@lines, @updates);
-    my %ikeys = map { $_ => 1 } ('fmt');
+    my %ikeys = map { $_ => 1 } ('fmt', 'dsc');
     my @fkeys = ('key', 'grp', 'id', 'base', 'src', 'tgt',
-                 'topic', 'ver', 'fmt',
+                 'topic', 'ver', 'fmt', 'dsc',
                  'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
     my @rkeys = ('pushed', 'rebased', 'orig', 'rorig');
     if ($new) {
