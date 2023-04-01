@@ -1327,7 +1327,9 @@ sub visit_commits_raw($$;$)
         my @cids = ($message =~ /^Change-Id: (.+)$/mg);
         my $changeid;
         if (!@cids) {
-            fail(format_subject($id, $subject, -18)." has no Change-Id.\n")
+            fail(format_subject($id, $subject, -18)." has no Change-Id.\n"
+                    ."Install the Gerrit commit-msg hook and amend affected Changes,\n"
+                    ."or fix the issue directly by running git gpush --add-ids.\n")
                 if (!$cid_opt);
         } else {
             # Gerrit uses the last Change-Id if multiple are present.
@@ -1410,13 +1412,13 @@ sub source_map_assign($$);
 sub source_map_traverse();
 sub _source_map_finish_initial();
 
-sub visit_local_branch($)
+sub visit_local_branch($;$)
 {
-    my ($tip) = @_;
+    my ($tip, $cid_opt) = @_;
 
     # Get the revs ...
     print "Enumerating local Changes ...\n" if ($debug);
-    my $raw_commits = visit_local_commits([ $tip ]);
+    my $raw_commits = visit_local_commits([ $tip ], $cid_opt);
     return [] if (!@$raw_commits);
 
     # Traverse along 1st parents only, unlike visit_local_commits().
@@ -1549,6 +1551,9 @@ use constant {
     SPEC_PARENT => 2
 };
 
+# Mapping of SHA1s rewritten by --add-ids.
+our %old2new;
+
 # Parse a revision specification referring to a commit in the local branch.
 sub parse_local_rev($$)
 {
@@ -1578,6 +1583,11 @@ sub parse_local_rev($$)
                                     ($out // $core).$rest."^{commit}")
         if (!defined($out) || length($rest));
     fail("$rev is not a valid rev-spec.\n") if (!defined($out));
+    my $new = $old2new{$out};
+    if (defined($new)) {
+        print "Remapping resolved $out => $new.\n" if ($debug);
+        $out = $new;
+    }
     # There is no point in restricting the base here - subsequent
     # use will find out soon enough if it is not reachable.
     return $out if ($scope == SPEC_BASE);
@@ -1726,7 +1736,7 @@ sub apply_diff($$$)
 }
 
 # Create a commit object from the specified metadata.
-sub create_commit($$$$$)
+sub create_commit_raw($$$$$)
 {
     my ($parents, $tree, $commit_msg, $author, $committer) = @_;
 
@@ -1738,7 +1748,14 @@ sub create_commit($$$$$)
     write_process($proc, $commit_msg);
     my $sha1 = read_process($proc);
     close_process($proc);
+    return $sha1;
+}
 
+sub create_commit($$$$$)
+{
+    my ($parents, $tree, $commit_msg, $author, $committer) = @_;
+
+    my $sha1 = create_commit_raw($parents, $tree, $commit_msg, $author, $committer);
     my $commit = {
         id => $sha1,
         parents => $parents,

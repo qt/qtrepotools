@@ -258,6 +258,14 @@ Options:
         In mail mode, send out the patches right away using git send-email,
         rather than merely preparing them using git format-patch.
 
+    -I, --add-ids
+        Add Change-Id footers to local commits that miss them. Use this
+        to fix up a branch whose commits were authored while Gerrit's
+        commit-msg hook was not installed yet.
+
+        This option does not prevent other actions in the same run;
+        only the default of pushing 'HEAD' is suppressed.
+
     --aliases
         Report all registered aliases and quit.
 
@@ -409,6 +417,7 @@ my $exclude = 0;
 my $list_only = 0;
 my $list_rebase = 0;
 my $list_online = 0;
+my $add_ids = 0;
 
 my $send_email = 0;
 my $keep_version = 0;
@@ -510,6 +519,8 @@ sub parse_arguments(@)
                 print "$key = $aliases{$key}\n";
             }
             exit 0;
+        } elsif ($arg eq "-I" || $arg eq "--add-ids") {
+            $add_ids = 1;
         } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
             usage();
             exit 0;
@@ -555,7 +566,11 @@ sub parse_arguments(@)
 
     if (!defined($from)) {
         $from = "HEAD";
-        $push_all = 1 if ($list_only);
+        if ($list_only) {
+            $push_all = 1;
+        } else {
+            $add_ids = -$add_ids;
+        }
     } else {
         fail("--all is incompatible with specifying commits.\n")
             if ($push_all);
@@ -915,13 +930,16 @@ sub determine_local_branch($$$)
 {
     my ($source, $core_source, $flags) = @_;
 
+    my $src_type;
     # First, try to extract a branch name directly.
     $local_branch = resolve_head($core_source);
     $local_branch =~ s,^refs/heads/,,;
     my $tip = $local_refs{$local_branch};
-    if (!defined($tip)) {
+    if (defined($tip)) {
+        $src_type = SRC_BRANCH;
+    } else {
         # Next, try to deduce a branch from the commit.
-        my ($branch, $src_type) = branch_for_commit($source, $flags);
+        (my $branch, $src_type) = branch_for_commit($source, $flags);
         return if (!defined($src_type));
         # Cannot use the branch's tip mid-rebase, because the
         # referenced commits may have been rewritten already.
@@ -937,7 +955,7 @@ sub determine_local_branch($$$)
     printf("Extracted tip %s (%s) from %s.\n", $tip,
            $local_branch ? "branch '$local_branch'" : "no branch", $source)
         if ($debug);
-    return $tip;
+    return ($tip, $src_type);
 }
 
 # Determine the target branch for the given series.
@@ -1165,6 +1183,83 @@ sub visit_pushed_changes($)
     visit_local_commits(\@commits, $mail_mode);
 }
 
+sub do_add_change_ids($)
+{
+    my ($commits) = @_;
+
+    printf("Adding Change-Ids to %s..%s.\n",
+           format_id($local_base), format_id($$commits[-1]{id}))
+        if ($verbose);
+    my $base = $local_base;
+    my ($any, $added) = (0, 0);
+    foreach my $commit (@$commits) {
+        my $message = $$commit{message};
+        if (defined($$commit{changeid})) {
+            if (!$any) {
+                printf("Skipping %s\n", $$commit{id}) if ($debug);
+                $base = $$commit{id};
+                next;
+            }
+            printf("Rebasing %s\n", $$commit{id}) if ($debug);
+        } else {
+            printf("Amending %s\n", $$commit{id}) if ($debug);
+            $message =~ s/^#.*\n//gsm;
+            $message .= "\n"
+                if ($message !~ /(\n[A-Z]+[-A-Za-z0-9]+: [^\n]+)+\n*$/);
+            $message .= "Change-Id: I".$$commit{id}."\n";
+            $added++;
+        }
+        my $parents = $$commit{parents};
+        my $new_parents =
+                ($base eq 'ROOT') ? [] : [ $base, @$parents[1..$#$parents] ];
+        $base = create_commit_raw(
+                $new_parents, $$commit{tree}, $message,
+                $$commit{author}, $$commit{committer});
+        $old2new{$$commit{id}} = $base;
+        $any = 1;
+    }
+    if ($any) {
+        printf("Added Change-Ids to %d commit(s).\n", $added)
+            if (!$quiet);
+        return $base;
+    }
+    print "Notice: All local commits already have Change-Ids.\n"
+        if (!$quiet);
+    return undef;
+}
+
+sub add_change_ids($$)
+{
+    my ($commits, $src_type) = @_;
+
+    # We refuse to add Change-Ids to detached HEADs (including mid-rebase
+    # states), as this would disproportionately contribute to creating
+    # duplicate Changes. This is of no concern for mail mode, so don't
+    # restrict it.
+    # We also reject "free-floating" commits, as the rewritten commits
+    # would be "lost".
+    fail("Adding Change-Ids requires a branch.\n")
+        if (($src_type == SRC_FLOATING) ||
+            (($src_type == SRC_HEAD) && !$mail_mode));
+    my ($target, $update_ref, $update_head);
+    if ($src_type == SRC_BRANCH) {
+        $target = "refs/heads/".$local_branch;
+        $update_head = ($target eq ($head_branch // ""));
+        $update_ref = 1;
+    } else {
+        $target = "HEAD";
+        $update_head = 1;
+    }
+    my $newtip = with_local_git_index(\&do_add_change_ids, $commits);
+    return if (!defined($newtip));
+    run_process(FWD_OUTPUT | DRY_RUN,
+                'git', 'update-ref', '-m', "Added Change-Ids",
+                $target, $newtip);
+    $local_refs{$local_branch} = $newtip if ($update_ref);
+    $head_commit = $newtip if ($update_head);
+    return $newtip;
+}
+
 sub initialize_get_changes()
 {
     # Get the pool of Changes to push from, and possibly search in
@@ -1178,7 +1273,7 @@ sub initialize_get_changes()
     # needs the full range.
     my ($source, $core_source) = ($from, $from =~ s/^([^~^]*+).*$/$1/r);
     # Try to derive the branch from the given tip.
-    my $tip = determine_local_branch($source, $core_source, SOFT_FAIL);
+    my ($tip, $src_type) = determine_local_branch($source, $core_source, SOFT_FAIL);
     if (!defined($tip)) {
         # That didn't work, so maybe the rev-spec refers to a Change-Id.
         # We need a place to start from. We try only the current local branch -
@@ -1186,14 +1281,19 @@ sub initialize_get_changes()
         # (as the same Change-Id can exist multiple times), and probably not
         # very useful to start with.
         $source = $core_source = 'HEAD';
-        $tip = determine_local_branch($source, $core_source, FWD_STDERR);
+        ($tip, $src_type) = determine_local_branch($source, $core_source, FWD_STDERR);
     }
     setup_remotes($source);
     set_gerrit_config($remote) if (!$mail_mode);
     source_map_validate();
-    my $commits = visit_local_branch($tip);
+    my $commits = visit_local_branch($tip, $add_ids);
     fail("No local Changes (from $core_source).\n")
         if (!@$commits);
+    if ($add_ids) {
+        $tip = add_change_ids($commits, $src_type);
+        exit(0) if ($add_ids < 0);
+        $commits = visit_local_branch($tip) if (defined($tip));
+    }
     analyze_local_branch($commits);
     return parse_local_rev($from, SPEC_TIP);
 }
