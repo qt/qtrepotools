@@ -1418,7 +1418,16 @@ sub advance_pushed_series($$@)
 # To a given set of Changes, add any missing Changes which were part of
 # the previous push from this repository of the Changes in the set.
 # This essentially builds a remote series, but constrained by the commits
-# (and their timestamps) that were pushed (or picked).
+# (and their timestamps) that were pushed (or picked). We do it that way,
+# because:
+# - The same PatchSet may have been gpick'd to multiple local branches,
+#   so lookup by pushed commit would be potentially ambiguous.
+# - We don't save previously pushed PatchSets, and lookup by Change-Id
+#   would be potentially ambiguous both locally and on Gerrit.
+# Possible disambiguation schemes (by local branch and/or group id) would
+# be unreliable in corner cases and ugly.
+# We need to query the Changes' status for filtering purposes anyway, and
+# the resulting PatchSet fetches are no-ops, so there is no extra cost.
 sub complete_pushed_series($$)
 {
     my ($spec, $missing) = @_;
