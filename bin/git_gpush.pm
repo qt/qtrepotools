@@ -1035,7 +1035,7 @@ sub format_reports($)
     foreach my $report (@$reports) {
         my $type = $$report{type} // "";
         if ($type eq "flowed") {
-            $output .= wrap("", "", $_)."\n" foreach (@{$$report{texts}});
+            $output .= _wrap_narrow($_)."\n" foreach (@{$$report{texts}});
         } elsif ($type eq "fixed") {
             $output .= join("", @{$$report{texts}});
         } elsif ($type eq "change") {
