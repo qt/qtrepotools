@@ -175,6 +175,11 @@ Options:
         commit listing includes only the first line, except in verbose mode.
         This option implies --group.
 
+    -irt, --in-reply-to <message-id>
+        In mail mode, set the series' In-Reply-To: header. The value is
+        automatically reset after each round of preparing/sending the
+        patches.
+
     -- <git option>...
         In mail mode, set additional options for git format-patch and
         git send-email for the specified series. All subsequent arguments
@@ -404,6 +409,7 @@ my $list_online = 0;
 my $send_email = 0;
 my $keep_version = 0;
 my $reset_version = 0;
+my $in_reply_to;
 my $format_opts;
 my $outdir;
 
@@ -463,6 +469,9 @@ sub parse_arguments(@)
         } elsif ($arg eq "-t" || $arg eq "--topic") {
             fail("--topic needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $topic = shift @_;
+        } elsif ($arg eq "-irt" || $arg eq "--in-reply-to") {
+            fail("--in-reply-to needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
+            $in_reply_to = shift @_;
         } elsif ($arg eq "-b" || $arg eq "--branch") {
             fail("--branch needs an argument.\n") if (!@_ || ($_[0] =~ /^-/));
             $ref_to = shift @_;
@@ -554,7 +563,7 @@ sub parse_arguments(@)
             $commit_count || $from_base || $extend || $capture;
     my $series_modifying =
             $series_specifying || defined($ref_to) || defined($topic)
-            || $keep_version || $reset_version
+            || $keep_version || $reset_version || defined($in_reply_to)
             || $format_opts || $edit_desc;
     my $gerrit_specific =
             @reviewers || @CCs || defined($remote) || $force_branch;
@@ -575,6 +584,8 @@ sub parse_arguments(@)
             if ($send_email);
         fail("--keep-version/--reset-version is exclusive to mail mode.\n")
             if ($keep_version || $reset_version);
+        fail("--in-reply-to is exclusive to mail mode.\n")
+            if (defined($in_reply_to));
         fail("-- ... is exclusive to mail mode.\n")
             if ($format_opts);
     }
@@ -946,6 +957,30 @@ sub determine_version($)
         ++$ver if ($inc_ver || !$ver);
     }
     $$group{version} = $ver;
+}
+
+sub new_in_reply_to()
+{
+    return new_prop($in_reply_to);
+}
+
+sub determine_in_reply_to($)
+{
+    my ($group) = @_;
+
+    my ($irt, $irt_text);
+    if (defined($in_reply_to)) {
+        $irt = new_in_reply_to();
+        $irt_text = $irt && $in_reply_to;
+    } else {
+        $irt = aggregate_indirect_property(
+                $group, sub { $$_{irt} },
+                sub { ("has inconsistent In-Reply-To values:\n",
+                       map { "  ".$_."\n" } @_) });
+        $irt_text = $prop_by_key{$irt} if (defined($irt));
+    }
+    $$group{irt} = $irt;
+    $$group{irt_text} = $irt_text;
 }
 
 sub new_fmt_opt()
@@ -2085,6 +2120,10 @@ sub annotate_group($$)
 
     my @annot;
     if ($extra) {
+        my $irt = $$group{irt_text};
+        push @annot, "> In-Reply-To: ".$irt."\n"
+            if (defined($irt));
+
         my $fmt_opt = $$group{fmt_opt_text};
         push @annot, "> Format options: ".format_cmd(@$fmt_opt)."\n"
             if ($fmt_opt);
@@ -2326,6 +2365,7 @@ sub format_patches($)
     my $tpc = $$group{topic};
     my $ver = $$group{version};
     my $dsc = $$group{desc_text};
+    my $irt = $$group{irt_text};
     my $fmt_opt = $$group{fmt_opt_text};
 
     my @gitopt = ('--binary');
@@ -2333,6 +2373,7 @@ sub format_patches($)
     push @gitopt, '--cover-letter', '--cover-from-description=subject',
                   '--description-file='.write_textfile($dsc)
         if (defined($dsc));
+    push @gitopt, '--in-reply-to='.$irt if (defined($irt));
     push @gitopt, @$fmt_opt if ($fmt_opt);
     # Can't use the -<n> <tip> notation, as -8 is misunderstood
     # by git send-email.
@@ -2368,6 +2409,7 @@ sub update_state_grouping($)
 
     my $gid = $$group{gid};
     my $dsc = $edit_desc && edit_description($group);
+    my $irt = defined($in_reply_to) && new_in_reply_to();
     my $fmt = $format_opts && new_fmt_opt();
     foreach my $change (@{$$group{changes}}) {
         $$change{grp} = $gid;
@@ -2383,6 +2425,8 @@ sub update_state_grouping($)
             if ($reset_version);
         $$change{dsc} = $dsc
             if ($edit_desc);
+        $$change{irt} = $irt
+            if (defined($in_reply_to));
         $$change{fmt} = $fmt
             if ($format_opts);
         $$change{exclude} = $exclude ? 1 : undef
@@ -2408,6 +2452,7 @@ sub update_state($)
         $$change{ntopic} = undef;
         $$change{ver} = $ver;
         $$change{dsc} = $dsc;
+        $$change{irt} = undef;
         $$change{fmt} = $fmt;
         $$change{tgt} = $branch;
         $$change{ntgt} = undef;
@@ -2512,6 +2557,7 @@ sub execute_pushing()
         determine_topic($group);
         if ($mail_mode) {
             determine_description($group);
+            determine_in_reply_to($group);
             determine_format_options($group);
         }
     }

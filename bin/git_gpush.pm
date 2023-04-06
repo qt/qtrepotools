@@ -901,9 +901,9 @@ sub save_state(;$$)
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my %prop_hash;
     my (@lines, @updates);
-    my %ikeys = map { $_ => 1 } ('fmt', 'dsc');
+    my %ikeys = map { $_ => 1 } ('irt', 'fmt', 'dsc');
     my @fkeys = ('key', 'grp', 'id', 'base', 'src', 'tgt',
-                 'topic', 'ver', 'fmt', 'dsc',
+                 'topic', 'ver', 'irt', 'fmt', 'dsc',
                  'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
     my @rkeys = ('pushed', 'rebased', 'orig', 'rorig');
     if ($new) {
