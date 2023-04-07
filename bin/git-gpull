@@ -66,7 +66,7 @@ while (@ARGV) {
 
 goto_gitdir();
 load_config();
-my $gc_interval = git_config('gpush.gcInterval', 30);
+my $gc_interval = git_config('gpush.gcinterval', 30);
 if ($gc_interval != 0) {
     load_state_file();  # No load_state(), and thus no load_refs().
     my $next_gc = $last_gc + $gc_interval * 24 * 60 * 60;
