@@ -1649,9 +1649,9 @@ sub do_sort_series($$$$$)
 # Turn a set of Changes into a series via topological sorting.
 # The series may be also filtered during sorting. Doing this
 # earlier would distort the parent-child relationships.
-sub sort_series($$$$)
+sub sort_series($$$$$)
 {
-    my ($name, $range, $commits, $current) = @_;
+    my ($name, $range, $commits, $current, $drop_closed) = @_;
 
     # For the given set of commits, collect the IDs of Changes which
     # should not be included into the final series after all.
@@ -1690,11 +1690,19 @@ sub sort_series($$$$)
 
         # Drop Changes "more closed" than the "most open" ones in the
         # series, unless forced.
-        # This is the preparation part.
         if ($force_closed < 2) {
             my $status = $$ginfo{status};
             my $lvl = ($status eq 'ABANDONED') ? 2 : ($status eq 'DEFERRED') ? 1 : 0;
-            push @{$levels[$lvl]}, $commit;
+            if ($current) {
+                # For remote series, prepare for execution below.
+                push @{$levels[$lvl]}, $commit;
+            } else {
+                # For pushed series, execute immediately, using to the
+                # threshold previously established for the remote series,
+                # so the divergences are minimized.
+                $exclude{$changeid} = $status
+                    if ($lvl >= $drop_closed);
+            }
         }
     }
 
@@ -1703,7 +1711,7 @@ sub sort_series($$$$)
           ."Use --force-merged to add them nonetheless.\n"
         if (@merged);
 
-    # The execution part of dropping closed Changes.
+    # The execution part of dropping closed Changes (in remote series).
     my $have_levels = 0;
     for my $lvl (0..2) {
         if (defined($levels[$lvl])) {
@@ -1714,14 +1722,11 @@ sub sort_series($$$$)
                     my $changeid = $$commit{changeid};
                     # If such a Change is already in the local branch, it might be
                     # so because it was forced, or because it was still open at the
-                    # time of the previous push/pick. For reconstructing the previous
-                    # series this does not matter, so we just keep it. For the current
-                    # series, we prefer to follow recent abandonments, and the user
-                    # may need to use force again.
-                    if ($current || !defined($selected{$changeid})) {
-                        $exclude{$changeid} = $status;
-                        push @closed, $commit if ($report);
-                    }
+                    # time of the previous push/pick. We prefer to follow recent
+                    # abandonments, and the user may need to use force again.
+                    # So don't examine %$selected here.
+                    $exclude{$changeid} = $status;
+                    push @closed, $commit if ($report);
                 }
                 if (@closed) {
                     my $twice = ($have_levels > 1) ? " (twice)" : "";
@@ -1729,10 +1734,12 @@ sub sort_series($$$$)
                           .format_commits(\@closed)
                           ."Use --force-closed$twice to add them nonetheless.\n";
                 }
+                $drop_closed //= $lvl;
             }
             $have_levels++;
         }
     }
+    $drop_closed //= 3;
 
     my %order = map { $$_{id} => $$_{index} } @$range;
 
@@ -1740,27 +1747,28 @@ sub sort_series($$$$)
     my $result = do_sort_series($name, $commits, "base", \%exclude, \%order);
     printf("Result:\n  %s\n", join("\n  ", map { $$_{changeid} } @$result))
         if ($debug);
-    return $result;
+    return ($result, $drop_closed);
 }
 
-sub finalize_pushed_series($$$)
+sub finalize_pushed_series($$$$)
 {
-    my ($name, $range, $commits) = @_;
+    my ($name, $range, $commits, $drop_closed) = @_;
 
     # Note that unlike for remote series, it is just fine if the series
     # turns out to be empty. The most likely reason for that is that
     # %$commits was empty to start with (i.e., the series was never
     # gpush'd from this repo).
-    return sort_series($name, $range, $commits, 0);
+    my ($sorted, undef) = sort_series($name, $range, $commits, 0, $drop_closed);
+    return $sorted;
 }
 
 sub finalize_remote_series($$$)
 {
     my ($name, $range, $commits) = @_;
 
-    my $sorted = sort_series($name, $range, $commits, 1);
+    my ($sorted, $drop_closed) = sort_series($name, $range, $commits, 1, undef);
     fail("Series $name is empty after filtering.\n") if (!@$sorted && !$check && !$pick_all);
-    return $sorted;
+    return ($sorted, $drop_closed);
 }
 
 # Download the metadata and PatchSets referenced by the specs.
@@ -1944,7 +1952,8 @@ sub finalize_insertion_specs($)
         # the step may be obsoleted by the spec being matched up.
         next if ($$spec{action} != INSERT);
 
-        $$spec{new_range_commits} = finalize_remote_series($$spec{orig}, [], $$spec{changes});
+        ($$spec{new_range_commits}, undef) =
+                finalize_remote_series($$spec{orig}, [], $$spec{changes});
         $$spec{new_range_reference} = $$spec{tip};
     }
     changify_remote_specs($specs);
@@ -2111,7 +2120,7 @@ sub finalize_specs($)
         next if ($$spec{action} != UPDATE);
 
         next if ($$spec{new_range});
-        $$spec{new_range_commits} =
+        ($$spec{new_range_commits}, $$spec{drop_closed}) =
                 finalize_remote_series("$$spec{orig}/remote", $$spec{range}, $$spec{changes});
         $$spec{new_range_reference} = $$spec{range}[-1];
     }
@@ -2127,7 +2136,8 @@ sub finalize_specs($)
         my $range = $$spec{range};
         my $new_range = $$spec{new_range};
         # Note that these are commits, unlike the other two, which are Changes.
-        my $pushed = finalize_pushed_series("$$spec{orig}/pushed", $range, $$spec{pushed_changes});
+        my $pushed = finalize_pushed_series("$$spec{orig}/pushed", $range,
+                                            $$spec{pushed_changes}, $$spec{drop_closed});
 
         # Find the first divergences between the structures of the previous push
         # and the current local and remote series.
