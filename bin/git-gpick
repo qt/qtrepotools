@@ -1427,7 +1427,15 @@ sub complete_pushed_series($$)
 
     print "Completing $$spec{orig}/pushed ...\n" if ($debug);
     my (%result, %seen, $fails);
-    foreach my $change (reverse @{$$spec{range}}) {
+    foreach my $chg (reverse @{$$spec{range}}) {
+        my $change;
+        my $tip = $$chg{tip};
+        if (defined($tip)) {
+            $change = $change_by_key{$tip};
+            print "Initial $$chg{id} pushed with tip $$change{id}.\n" if ($debug);
+        } else {
+            $change = $chg;
+        }
         my ($sha1, $changeid) = ($$change{pushed}, $$change{id});
         if (!defined($sha1)) {
             # This would happen when completing a local series containing
@@ -1797,6 +1805,12 @@ sub complete_spec_heads($)
                     # To be able to set {did_query} once we have the commits.
                     push @queried, $pushed;
                 }
+                my $tip = $$change{tip};
+                if (defined($tip)) {
+                    my $tip_sha1 = $$change_by_key{$tip}{pushed};
+                    $visits{$tip_sha1} = 1;
+                    push @queried, $tip_sha1;
+                }
                 my $orig = $$change{orig};
                 $visits{$orig} = 1 if (defined($orig));
             }
@@ -1933,6 +1947,8 @@ sub changify_remote_specs($)
             my $changes = changify_remote_series($commits, $$spec{new_range_reference});
             if ($changes) {
                 $$spec{new_range} = $changes;
+                my $tip = $$changes[-1]{key};
+                $$_{tip} = $tip foreach (@$commits);
                 delete $$spec{new_range_commits};
             }
         }
@@ -2890,6 +2906,7 @@ sub do_adjust_changes($)
             push @changes, $change;
             if ($upd & UPD_PUSHED) {
                 $$change{pushed} = $$rmt_commit{id};
+                $$change{tip} = $$rmt_commit{tip};
                 # Make the downloaded commit recyclable. This won't help in many
                 # cases, as any added/dropped/tree-modified commits will invalidate
                 # it anyway, but tracking that would add complexity for little benefit.

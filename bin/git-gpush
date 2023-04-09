@@ -2438,13 +2438,15 @@ sub update_state($)
 {
     my ($group) = @_;
 
+    my $changes = $$group{changes};
+    my $tip = $$changes[-1]{key};
     my ($gid, $branch, $tpc, $ver, $dsc, $fmt, $base) =
             ($$group{gid}, $$group{branch}, $$group{topic},
              $$group{version}, $$group{desc},
              $$group{fmt_opt}, $$group{base});
     # Setting an empty topic clears the previous topic from the server.
     $tpc = undef if (defined($tpc) && !length($tpc));
-    foreach my $change (@{$$group{changes}}) {
+    foreach my $change (@$changes) {
         $$change{grp} = $gid;
         $$change{pushed} = $$change{final}{id};
         $$change{rebased} = undef;
@@ -2465,6 +2467,7 @@ sub update_state($)
         $base = undef if (@{$$commit{parents}} > 1);
         $$change{base} = $base;
         $$change{nbase} = undef;
+        $$change{tip} = $tip;
         $$change{exclude} = undef;
     }
 }

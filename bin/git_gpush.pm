@@ -902,7 +902,7 @@ sub save_state(;$$)
     my %prop_hash;
     my (@lines, @updates);
     my %ikeys = map { $_ => 1 } ('irt', 'fmt', 'dsc');
-    my @fkeys = ('key', 'grp', 'id', 'base', 'src', 'tgt',
+    my @fkeys = ('key', 'grp', 'id', 'base', 'tip', 'src', 'tgt',
                  'topic', 'ver', 'irt', 'fmt', 'dsc',
                  'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
     my @rkeys = ('pushed', 'rebased', 'orig', 'rorig');

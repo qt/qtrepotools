@@ -187,11 +187,23 @@ sub perform_gc()
     my $local_changes = visit_revs_pull('HEAD', (map { 'refs/heads/'.$_ } @local_refs));
 
     print "Collecting locally present Changes ...\n" if ($debug);
-    my @visit_push;
+    my %push_hash;
     foreach my $changeid (keys %changes_by_id) {
         if (defined($$local_changes{$changeid})) {
             $kept_changes{$changeid} = "exists locally";
-            push @visit_push, $changeid;
+            $push_hash{$changeid} = 1;
+
+            my $changes = $changes_by_id{$changeid};
+            foreach my $change (@$changes) {
+                my $tip = $$change{tip};
+                if (defined($tip)) {
+                    my $tip_chg = $change_by_key{$tip};
+                    next if (!defined($tip_chg));  # Not supposed to happen
+                    my $tipchgid = $$tip_chg{id};
+                    $kept_changes{$tipchgid} //= "is tip of push";
+                    $push_hash{$tipchgid} = 1;
+                }
+            }
         }
     }
 
@@ -202,6 +214,7 @@ sub perform_gc()
     # in gpick does not need to re-fetch them.
     # On the downside, this means that long closed Changes will be kept
     # if the remaining part of their containing series is not rebased.
+    my @visit_push = sort keys %push_hash;
     while (my $changeid = shift @visit_push) {
         foreach my $change (@{$changes_by_id{$changeid}}) {
             my $sha1 = $$change{pushed};
