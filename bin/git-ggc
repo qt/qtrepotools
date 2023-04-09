@@ -197,8 +197,8 @@ sub perform_gc()
         get_gerrit_config();
         my $ginfos = query_gerrit_only([ map { "change:".$_ } (keys %zap_ids, keys %fzaps) ]);
         foreach my $ginfo (@$ginfos) {
-            my ($key, $changeid, $status, $branch) =
-                    ($$ginfo{key}, $$ginfo{id}, $$ginfo{status}, $$ginfo{branch});
+            my ($changeid, $status, $branch) =
+                    ($$ginfo{id}, $$ginfo{status}, $$ginfo{branch});
             my $active = (($status ne 'MERGED') && ($status ne 'ABANDONED'));
             print "$changeid is ".($active ? "" : "NOT ")."active on $branch.\n" if ($debug);
             $change2active{$changeid} ||= $active;
