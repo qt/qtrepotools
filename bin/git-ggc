@@ -134,7 +134,7 @@ sub perform_gc()
     my %pushed;  # { sequence-number => sha1 }
     my %zaps;  # { sequence-number => [ state-ref, ... ] }
     my %fzaps;  # { gerrit-number => [ patchset-number => fetched-ref, ... ] }
-    my @fsha1s;  # [ fetched-sha1, ... ]
+    my %visits;  # { sha1 => 1 }
     my @local_refs;  # These define which Changes are still active.
     my %remote_refs;  # Used for quickly validating upstreams.
     my $branches = open_cmd_pipe(0, "git", "for-each-ref", "--format=%(objectname) %(refname)",
@@ -148,10 +148,13 @@ sub perform_gc()
             my $sha1 = $1;
             if (m,^i(\d+)_(.*)$,) {
                 push @{$zaps{$1}}, $_;
-                $pushed{$1} = $sha1 if ($2 eq "pushed");
+                if ($2 eq "pushed") {
+                    $pushed{$1} = $sha1;
+                    $visits{$sha1} = 1;
+                }
             } elsif (m,^g(\d+)_(\d+)$,) {
                 $fzaps{$1}[$2] = $_;
-                push @fsha1s, $sha1;
+                $visits{$sha1} = 1;
             } elsif (!m,^state(-new)?$,) {
                 print "Keeping unrecognized '$_'.\n" if ($debug);
             }
@@ -180,18 +183,50 @@ sub perform_gc()
     my $local_changes = visit_revs_pull('HEAD', (map { 'refs/heads/'.$_ } @local_refs));
 
     print "Collecting locally present Changes ...\n" if ($debug);
-    my %zap_ids;  # { change-id => 1 }
+    my @visit_push;
     foreach my $changeid (keys %changes_by_id) {
         if (defined($$local_changes{$changeid})) {
             $kept_changes{$changeid} = "exists locally";
-        } else {
-            $zap_ids{$changeid} = 1;
+            push @visit_push, $changeid;
+        }
+    }
+
+    print "Visiting pushed and fetched PatchSets ...\n" if ($debug);
+    visit_local_commits([ keys %visits ]);
+
+    # Keep ancestors of pushed commits, so complete_pushed_series()
+    # in gpick does not need to re-fetch them.
+    # On the downside, this means that long closed Changes will be kept
+    # if the remaining part of their containing series is not rebased.
+    while (my $changeid = shift @visit_push) {
+        foreach my $change (@{$changes_by_id{$changeid}}) {
+            my $sha1 = $$change{pushed};
+            next if (!defined($sha1));
+
+            my $commit = $commit_by_id{$sha1};
+            next if (!$commit);  # Not supposed to happen
+
+            # We ignore push bases here, so chained series are treated
+            # as one. This is a feature ... sort of.
+            $sha1 = get_1st_parent($commit);
+            $commit = $commit_by_id{$sha1};
+            next if (!$commit);  # Hit upstream
+
+            $changeid = $$commit{changeid};
+
+            next if (defined($kept_changes{$changeid}));
+            $kept_changes{$changeid} = "part of push";
+
+            push @visit_push, $changeid;
         }
     }
 
     # Even Changes which are absent from the local branch are pruned
     # only if they are in a terminal state. Otherwise, there is reason
     # to believe that they might be used again at a later point.
+    my %zap_ids = map { $_ => 1 }
+                  grep { !defined($kept_changes{$_}) }
+                  keys %changes_by_id;
     if (%zap_ids || %fzaps) {
         print "Querying Gerrit for prunable Changes ...\n" if ($debug);
         get_gerrit_config();
@@ -227,9 +262,6 @@ sub perform_gc()
                 if (!$change_by_key{$key});
         }
     }
-
-    print "Visiting fetched PatchSets ...\n" if ($debug);
-    visit_local_commits(\@fsha1s);
 
     # Keep fetched PatchSets that correspond with kept Changes, but only the ones
     # that are not older than the pushed revision of the Change. Older PatchSets
