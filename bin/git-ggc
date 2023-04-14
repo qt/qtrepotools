@@ -128,6 +128,8 @@ sub visit_revs_pull(@)
 # state on Gerrit for any branch.
 sub perform_gc()
 {
+    my %kept_changes;  # { change-id => reason-string }
+
     print "Loading refs ...\n" if ($debug);
     my %pushed;  # { sequence-number => sha1 }
     my %zaps;  # { sequence-number => [ state-ref, ... ] }
@@ -179,19 +181,17 @@ sub perform_gc()
 
     print "Collecting locally present Changes ...\n" if ($debug);
     my %zap_ids;  # { change-id => 1 }
-    foreach my $key (sort keys %change_by_key) {
-        my $change = $change_by_key{$key};
-        my $changeid = $$change{id};
+    foreach my $changeid (keys %changes_by_id) {
         if (defined($$local_changes{$changeid})) {
-            print "Keeping $key ($changeid): exists locally.\n"
-                if ($verbose);
-            delete $zaps{$key};
+            $kept_changes{$changeid} = "exists locally";
         } else {
             $zap_ids{$changeid} = 1;
         }
     }
 
-    my %change2active;
+    # Even Changes which are absent from the local branch are pruned
+    # only if they are in a terminal state. Otherwise, there is reason
+    # to believe that they might be used again at a later point.
     if (%zap_ids || %fzaps) {
         print "Querying Gerrit for prunable Changes ...\n" if ($debug);
         get_gerrit_config();
@@ -201,23 +201,18 @@ sub perform_gc()
                     ($$ginfo{id}, $$ginfo{status}, $$ginfo{branch});
             my $active = (($status ne 'MERGED') && ($status ne 'ABANDONED'));
             print "$changeid is ".($active ? "" : "NOT ")."active on $branch.\n" if ($debug);
-            $change2active{$changeid} ||= $active;
+            $kept_changes{$changeid} //= "active on Gerrit"
+                if ($active);
         }
     }
 
     print "Pruning stale Changes ...\n" if ($debug);
     foreach my $key (sort keys %change_by_key) {
         my $change = $change_by_key{$key};
-        # Even Changes which are absent from the local branch are pruned
-        # only if they are in a terminal state. Otherwise, there is reason
-        # to believe that they might be used again at a later point.
         my $changeid = $$change{id};
-        if (!defined($zap_ids{$changeid})) {
-            # Exists locally; already handled above.
-        } elsif ($change2active{$changeid}) {
-            print "Keeping $key ($changeid): active on Gerrit.\n"
-                if ($verbose);
-            $$local_changes{$changeid} = 1;
+        my $reason = $kept_changes{$changeid};
+        if (defined($reason)) {
+            print "Keeping $key ($changeid): $reason.\n" if ($verbose);
             delete $zaps{$key};
         } else {
             print "Pruning $key ($changeid).\n" if ($verbose);
@@ -249,7 +244,7 @@ sub perform_gc()
         }
 
         my $changeid = $$ginfo{id};
-        if (!defined($$local_changes{$changeid})) {
+        if (!defined($kept_changes{$changeid})) {
             # Might be still referenced recursively.
             print "Might prune fetched $key ($changeid): corresponds with no kept Change.\n"
                 if ($debug);
@@ -305,7 +300,7 @@ sub perform_gc()
             # Ancestry traversal may lead us to older PatchSets than those in the
             # initial set, but assemble_series()' callbacks would upgrade from these
             # anyway, so we can just stop here.
-            last if (defined($$local_changes{$$ginfo{id}}));
+            last if (defined($kept_changes{$$ginfo{id}}));
 
             my $ps = $$ginfo{rev_by_id}{$sha1};
             last if (!defined($ps));  # Shouldn't happen.
