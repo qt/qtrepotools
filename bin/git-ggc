@@ -195,8 +195,8 @@ sub perform_gc()
 
             my $changes = $changes_by_id{$changeid};
             foreach my $change (@$changes) {
-                my $tip = $$change{tip};
-                if (defined($tip)) {
+                foreach my $tip ($$change{tip}, $$change{ptip}) {
+                    next if (!defined($tip));
                     my $tip_chg = $change_by_key{$tip};
                     next if (!defined($tip_chg));  # Not supposed to happen
                     my $tipchgid = $$tip_chg{id};

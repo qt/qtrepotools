@@ -903,9 +903,9 @@ sub save_state(;$$)
     my (@lines, @updates);
     my %ikeys = map { $_ => 1 } ('irt', 'fmt', 'dsc');
     my @fkeys = ('key', 'grp', 'id', 'base', 'tip', 'src', 'tgt',
-                 'topic', 'ver', 'irt', 'fmt', 'dsc',
+                 'topic', 'ver', 'irt', 'fmt', 'dsc', 'pbase', 'ptip',
                  'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
-    my @rkeys = ('pushed', 'rebased', 'orig', 'rorig');
+    my @rkeys = ('pushed', 'ppushed', 'rebased', 'orig', 'rorig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";
         push @fkeys, @rkeys;

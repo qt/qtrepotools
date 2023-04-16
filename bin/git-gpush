@@ -134,6 +134,10 @@ Options:
         case it is usually better to use the maximum of the joined series'
         versions, which is the default behavior.
 
+    --diff
+        In mail mode, include a range-diff to the previous version of the
+        series into its cover message or first patch.
+
     -m, --minimal
         Try to avoid creating new PatchSets for unmodified Changes even
         if they are on top of modified Changes. This avoids unnecessarily
@@ -409,6 +413,7 @@ my $list_online = 0;
 my $send_email = 0;
 my $keep_version = 0;
 my $reset_version = 0;
+my $mail_diff = 0;
 my $in_reply_to;
 my $format_opts;
 my $outdir;
@@ -455,6 +460,8 @@ sub parse_arguments(@)
             $keep_version = 1;
         } elsif ($arg eq "--reset-version") {
             $reset_version = 1;
+        } elsif ($arg eq "--diff") {
+            $mail_diff = 1;
         } elsif ($arg eq "-m" || $arg eq "--minimal") {
             $minimal = 1;
             $minimal_override = 1;
@@ -568,7 +575,8 @@ sub parse_arguments(@)
     my $gerrit_specific =
             @reviewers || @CCs || defined($remote) || $force_branch;
     my $push_specific =
-            $gerrit_specific || $force || $send_email || $keep_version;
+            $gerrit_specific || $force || $send_email || $keep_version
+            || $mail_diff;
 
     if ($mail_mode) {
         fail("Push-modifying options are incompatible with mail mode.\n")
@@ -584,6 +592,8 @@ sub parse_arguments(@)
             if ($send_email);
         fail("--keep-version/--reset-version is exclusive to mail mode.\n")
             if ($keep_version || $reset_version);
+        fail("--diff is exclusive to mail mode.\n")
+            if ($mail_diff);
         fail("--in-reply-to is exclusive to mail mode.\n")
             if (defined($in_reply_to));
         fail("-- ... is exclusive to mail mode.\n")
@@ -955,8 +965,10 @@ sub determine_version($)
         $inc_ver = $$group{have_modified} && !$keep_version;
         $ver = max(map { $$_{ver} // 0 } @{$$group{changes}});
         ++$ver if ($inc_ver || !$ver);
+        $inc_ver = 0 if ($ver == 1);
     }
     $$group{version} = $ver;
+    $$group{inc_version} = $inc_ver;
 }
 
 sub new_in_reply_to()
@@ -1045,6 +1057,45 @@ sub edit_description($)
     $desc = edit_textfile($desc);
     $desc =~ s/(^|\n)(?:(?:#[^\n]*)?\n)+$/$1/g;
     return new_prop(quote_text_prop($desc));
+}
+
+sub prepare_range_diff($)
+{
+    my ($group) = @_;
+
+    print "Preparing inter-diff for ".format_group_id($group)." ...\n"
+        if ($debug);
+    # When re-rolling a series, diff against the previous (re-)roll;
+    # save_state() will also shift the record down to the previous-but-one
+    # (PBO) slot prior to updating it to the ongoing re-roll.
+    # With --keep-version, we need to diff against the PBO slot, because
+    # we are basically pretending that the previous re-roll didn't happen.
+    # The PBO slot is not updated, either, so we could try again.
+    my ($bkey, $tkey, $pkey) = $$group{inc_version}
+            ? ("base", "tip", "pushed") : ("pbase", "ptip", "ppushed");
+    my (%base_hash, %tip_hash);
+    my $changes = $$group{changes};
+    foreach my $change (@$changes) {
+        my $base = $$change{$bkey};
+        $base_hash{$base} = 1 if (defined($base));
+        my $tip = $$change{$tkey};
+        $tip_hash{$tip} = 1 if (defined($tip));
+    }
+
+    my @bases = keys %base_hash;
+    my @tips = keys %tip_hash;
+    if (@bases != 1) {
+        print "Have no (consistent) base.\n" if ($debug);
+        return;
+    }
+    if (@tips != 1) {
+        print "Have no (consistent) tip.\n" if ($debug);
+        return;
+    }
+    my $base = $bases[0];
+    my $tip = $change_by_key{$tips[0]}{$pkey};
+
+    return (($base eq "ROOT") ? "" : $base."..").$tip;
 }
 
 sub scan_pushed_group($$)
@@ -2367,9 +2418,12 @@ sub format_patches($)
     my $dsc = $$group{desc_text};
     my $irt = $$group{irt_text};
     my $fmt_opt = $$group{fmt_opt_text};
+    my $diff_range = ($mail_diff && ($ver > 1))
+                     ? prepare_range_diff($group) : undef;
 
     my @gitopt = ('--binary');
     push @gitopt, '--reroll-count', $ver if ($ver > 1);
+    push @gitopt, '--range-diff='.$diff_range if (defined($diff_range));
     push @gitopt, '--cover-letter', '--cover-from-description=subject',
                   '--description-file='.write_textfile($dsc)
         if (defined($dsc));
@@ -2440,14 +2494,19 @@ sub update_state($)
 
     my $changes = $$group{changes};
     my $tip = $$changes[-1]{key};
-    my ($gid, $branch, $tpc, $ver, $dsc, $fmt, $base) =
+    my ($gid, $branch, $tpc, $ver, $inc_ver, $dsc, $fmt, $base) =
             ($$group{gid}, $$group{branch}, $$group{topic},
-             $$group{version}, $$group{desc},
+             $$group{version}, $$group{inc_version}, $$group{desc},
              $$group{fmt_opt}, $$group{base});
     # Setting an empty topic clears the previous topic from the server.
     $tpc = undef if (defined($tpc) && !length($tpc));
     foreach my $change (@$changes) {
         $$change{grp} = $gid;
+        if ($inc_ver) {
+            $$change{ptip} = $$change{tip};
+            $$change{pbase} = $$change{base};
+            $$change{ppushed} = $$change{pushed};
+        }
         $$change{pushed} = $$change{final}{id};
         $$change{rebased} = undef;
         $$change{topic} = $tpc;
