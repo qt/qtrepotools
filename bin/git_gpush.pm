@@ -787,8 +787,9 @@ sub save_state(;$$)
 
     print "Saving ".($new ? "new " : "")."state".($dry ? " [DRY]" : "")." ...\n" if ($debug);
     my (@lines, @updates);
-    my @fkeys = ('key', 'grp', 'id', 'src', 'tgt', 'topic', 'base',
-                 'ntgt', 'ntopic', 'nbase', 'exclude', 'hide');
+    my @fkeys = ('key', 'grp', 'id', 'base', 'src', 'tgt',
+                 'topic', 'ver',
+                 'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
     my @rkeys = ('pushed', 'rebased', 'orig', 'rorig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";

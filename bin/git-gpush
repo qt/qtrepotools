@@ -25,7 +25,7 @@ BEGIN {
 }
 use git_gpush;
 
-use List::Util qw(first any all);
+use List::Util qw(first max any all);
 use JSON;
 
 # Cannot use Pod::Usage for this file, since git on Windows will invoke its own perl version, which
@@ -120,6 +120,19 @@ Options:
         Resets the pending properties (branch, topic, base) from a
         previous grouping that was not pushed out yet.
         This option implies --group.
+
+    --keep-version
+        In mail mode, do not increase the series' version when re-rolling
+        it. This makes sense if the previous iteration was not actually
+        sent out yet.
+        This option is implied for series which are re-rolled only due to
+        use of --force.
+
+    --reset-version
+        In mail mode, reset the series' version. This may make sense
+        after significantly re-grouping the Changes, but even in this
+        case it is usually better to use the maximum of the joined series'
+        versions, which is the default behavior.
 
     -m, --minimal
         Try to avoid creating new PatchSets for unmodified Changes even
@@ -247,7 +260,9 @@ Mail mode:
 
     The benefit of this mode over plain git is the availability of
     independent series on a single branch (this concept is known as
-    "stacked branches"). Series have sticky properties.
+    "stacked branches"). Series have sticky properties. Repeated
+    "pushes" ("re-rolls") are automatically versioned; the patches'
+    subject prefixes reflect this.
 
     When --send is not used, gpush.outdir needs to be configured, and
     each series must have a topic that is a valid filepath component.
@@ -373,6 +388,8 @@ my $list_rebase = 0;
 my $list_online = 0;
 
 my $send_email = 0;
+my $keep_version = 0;
+my $reset_version = 0;
 my $outdir;
 
 my @reviewers;
@@ -409,6 +426,10 @@ sub parse_arguments(@)
         } elsif ($arg eq "-R" || $arg eq "--reset-props") {
             $group_only = 1;
             $reset_props = 1;
+        } elsif ($arg eq "--keep-version") {
+            $keep_version = 1;
+        } elsif ($arg eq "--reset-version") {
+            $reset_version = 1;
         } elsif ($arg eq "-m" || $arg eq "--minimal") {
             $minimal = 1;
             $minimal_override = 1;
@@ -510,11 +531,12 @@ sub parse_arguments(@)
     my $series_specifying =
             $commit_count || $from_base || $extend || $capture;
     my $series_modifying =
-            $series_specifying || defined($ref_to) || defined($topic);
+            $series_specifying || defined($ref_to) || defined($topic)
+            || $keep_version || $reset_version;
     my $gerrit_specific =
             @reviewers || @CCs || defined($remote) || $force_branch;
     my $push_specific =
-            $gerrit_specific || $force || $send_email;
+            $gerrit_specific || $force || $send_email || $keep_version;
 
     if ($mail_mode) {
         fail("Push-modifying options are incompatible with mail mode.\n")
@@ -528,6 +550,8 @@ sub parse_arguments(@)
     } else {
         fail("--send is exclusive to mail mode.\n")
             if ($send_email);
+        fail("--keep-version/--reset-version is exclusive to mail mode.\n")
+            if ($keep_version || $reset_version);
     }
 
     if ($group_only) {
@@ -637,6 +661,8 @@ sub caption_group($)
     my $tos = defined($to) ? " for $to" : "";
     my $tpc = $$group{topic};
     my $tpcs = length($tpc) ? ", topic '$tpc'" : "";
+    my $ver = $$group{version};
+    my $vers = length($ver) ? ", version $ver" : "";
     my ($pfx, $rmt) = $list_only
                           ? ($$group{hide_mix}
                                  ? "Partially hidden series of"
@@ -655,8 +681,8 @@ sub caption_group($)
                                     : $send_email
                                         ? ("Mailing", "")
                                         : ("Formatting", "");
-    return (sprintf("%s %d Change(s)%s%s%s:",
-                    $pfx, int(@$changes), $tos, $rmt, $tpcs),
+    return (sprintf("%s %d Change(s)%s%s%s%s:",
+                    $pfx, int(@$changes), $tos, $rmt, $tpcs, $vers),
             $changes);
 }
 
@@ -861,6 +887,20 @@ sub determine_topic($)
         fail_formatted(report_pushed_changes($group));
     }
     $$group{topic} = $tpc;
+}
+
+sub determine_version($)
+{
+    my ($group) = @_;
+
+    my $ver = 1;
+    my $inc_ver = 0;
+    if (!$reset_version) {
+        $inc_ver = $$group{have_modified} && !$keep_version;
+        $ver = max(map { $$_{ver} // 0 } @{$$group{changes}});
+        ++$ver if ($inc_ver || !$ver);
+    }
+    $$group{version} = $ver;
 }
 
 sub scan_pushed_group($$)
@@ -2148,8 +2188,10 @@ sub format_patches($)
     my $tip = $$changes[-1]{final}{id};
     my $base = $$group{base};
     my $tpc = $$group{topic};
+    my $ver = $$group{version};
 
     my @gitopt = ('--binary');
+    push @gitopt, '--reroll-count', $ver if ($ver > 1);
     # Can't use the -<n> <tip> notation, as -8 is misunderstood
     # by git send-email.
     push @gitopt, (($base eq 'ROOT') ? '--root' : '^'.$base), $tip;
@@ -2163,7 +2205,8 @@ sub format_patches($)
     } else {
         my @gitcmd = ('git', 'format-patch');
         push @gitcmd, '--quiet';  # Don't print file names
-        push @gitcmd, '-o', $outdir."/".$tpc;
+        push @gitcmd, '-o', $outdir."/".$tpc
+                            .($ver > 1 ? "-v".$ver : "");
         push @gitcmd, @gitopt;
         run_process(SOFT_FAIL | FWD_OUTPUT | DRY_RUN, @gitcmd);
     }
@@ -2188,6 +2231,8 @@ sub update_state_grouping($)
             if (defined($ref_to) || $reset_props);
         $$change{nbase} = $ref_base
             if (defined($ref_base) || $reset_props);
+        $$change{ver} = 0
+            if ($reset_version);
         $$change{exclude} = $exclude ? 1 : undef
             if ($include || $exclude);
     }
@@ -2197,8 +2242,10 @@ sub update_state($)
 {
     my ($group) = @_;
 
-    my ($gid, $branch, $tpc, $base) =
-            ($$group{gid}, $$group{branch}, $$group{topic}, $$group{base});
+    my ($gid, $branch, $tpc, $ver, $base) =
+            ($$group{gid}, $$group{branch}, $$group{topic},
+             $$group{version},
+             $$group{base});
     # Setting an empty topic clears the previous topic from the server.
     $tpc = undef if (defined($tpc) && !length($tpc));
     foreach my $change (@{$$group{changes}}) {
@@ -2207,6 +2254,7 @@ sub update_state($)
         $$change{rebased} = undef;
         $$change{topic} = $tpc;
         $$change{ntopic} = undef;
+        $$change{ver} = $ver;
         $$change{tgt} = $branch;
         $$change{ntgt} = undef;
         my $commit = $$change{local};
@@ -2326,6 +2374,7 @@ sub execute_pushing()
                     classify_changes_online($group);
                 } else {
                     classify_changes_offline_rebase($group);
+                    determine_version($group) if ($mail_mode);
                 }
             } else {
                 # We don't rebase sets of loose Changes, as this will often
