@@ -1468,7 +1468,7 @@ sub complete_pushed_series($$)
 
 sub advance_remote_series($$@)
 {
-    my ($commit, $base, $stamp, $bmap, $missing, $fails) = @_;
+    my ($commit, $base, $stamp, $missing, $fails) = @_;
 
     my ($sha1, $changeid) = ($$commit{id}, $$commit{changeid});
     my $ginfo = $gerrit_info_by_sha1{$sha1};
@@ -1486,7 +1486,7 @@ sub advance_remote_series($$@)
         return undef;
     }
     my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
-    my $nbase = $$rev{base} // $$bmap{$changeid};
+    my $nbase = $$rev{base};
     $$base = $nbase if (defined($nbase));
     return $$rev{id};
 }
@@ -1496,16 +1496,16 @@ sub advance_remote_series($$@)
 # Additionally, determine the remote group id for the series, which is
 # needed for deduce_series(); this is the reason why we always traverse down
 # to the bottom of the series even if we need only a part of it.
-sub assemble_remote_series($$$$$$$)
+sub assemble_remote_series($$$$$$)
 {
-    my ($ginfo, $base, $stamp, $bmap, $seen, $missing, $fails) = @_;
+    my ($ginfo, $base, $stamp, $seen, $missing, $fails) = @_;
 
     my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
     my $sha1 = $$rev{id};
     my $rbase = $$rev{base} // $base;
     my ($series, $anchor) = assemble_series(
             $$ginfo{id}, $sha1, $rbase, $seen, \&advance_remote_series,
-            $stamp, $bmap, $missing, $fails);
+            $stamp, $missing, $fails);
     if (!$$fails) {  # Only an optimization.
         # The first Change in the series identifies it. If we got
         # cut off, get the ID from the already seen parents.
@@ -1535,7 +1535,7 @@ sub complete_remote_series($$)
             next;
         }
         my ($series, $anchor) = assemble_remote_series(
-                $ginfo, $$change{base}, $$spec{stamp}, $$spec{bmap}, \%seen, $missing, \$fails);
+                $ginfo, $$change{base}, $$spec{stamp}, \%seen, $missing, \$fails);
         attach_series($series, $anchor, \%result) if (!$fails);
     }
     $$spec{changes} = \%result if (!$fails);
@@ -1554,7 +1554,7 @@ sub resolve_insertion_spec($$)
     # First assemble the entire series.
     my $fails = 0;
     my ($series, undef) = assemble_remote_series(
-            $tip, undef, $stamp, {}, undef, $missing, \$fails);
+            $tip, undef, $stamp, undef, $missing, \$fails);
     wfail("Range $$spec{orig} is empty.\n") if (!@$series);
     return if ($fails);
 
@@ -1851,21 +1851,21 @@ sub complete_spec_tails($)
 {
     my ($specs) = @_;
 
-    foreach my $spec (@$specs) {
-        next if ($$spec{action} != UPDATE);
+    if (!$ignore_struct && !$force_struct) {
+        foreach my $spec (@$specs) {
+            next if ($$spec{action} != UPDATE);
 
-        my (%bmap, %pmap);
-        foreach my $change (@{$$spec{range}}) {
-            my $changeid = $$change{id};
-            my $base = $$change{base};
-            $bmap{$changeid} = $base if (defined($base));
-            next if ($ignore_struct || $force_struct);
-            my $pushed = $$change{pushed};
-            $pmap{$changeid} = $pushed if (defined($pushed));
+            my (%bmap, %pmap);
+            foreach my $change (@{$$spec{range}}) {
+                my $changeid = $$change{id};
+                my $base = $$change{base};
+                $bmap{$changeid} = $base if (defined($base));
+                my $pushed = $$change{pushed};
+                $pmap{$changeid} = $pushed if (defined($pushed));
+            }
+            $$spec{bmap} = \%bmap;
+            $$spec{pmap} = \%pmap;
         }
-        $$spec{bmap} = \%bmap;
-        next if ($ignore_struct || $force_struct);
-        $$spec{pmap} = \%pmap;
     }
 
     # Now that we have the commits for the tips of all remote specifications,
