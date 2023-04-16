@@ -1384,8 +1384,7 @@ sub advance_pushed_series($$@)
         }
         # The ancestors must be younger. See below.
         $$stamp = $$rev{ts};
-        my $nbase = $$rev{base} // $$bmap{$changeid};
-        $$base = $nbase if (defined($nbase));
+        $$base = $$bmap{$changeid};
         return $nsha1;
     }
     #print "$changeid ($sha1) is only deduced.\n" if ($debug);
