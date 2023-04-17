@@ -1419,29 +1419,30 @@ sub analyze_local_branch($)
     my $raw_commits = visit_local_commits([ $tip ]);
     return if (!@$raw_commits);
 
-    # ... then sanity-check a bit ...
-    my %seen;
-    foreach my $commit (@$raw_commits) {
-        my $subject = $$commit{subject};
-        fail("Commit on ".($local_branch // "<detached HEAD>")." was meant to be squashed:\n  "
-                .format_subject($$commit{id}, $subject, -2)."\n")
-            if ($subject =~ /^(squash|fixup)! /);
-        my $changeid = $$commit{changeid};
-        my $excommit = $seen{$changeid};
-        fail("Duplicate Change-Id $changeid on ".($local_branch // "<detached HEAD>").":\n  "
-                .format_subject($$excommit{id}, $$excommit{subject}, -2)."\n  "
-                .format_subject($$commit{id}, $subject, -2)."\n")
-            if (defined($excommit));
-        $seen{$changeid} = $commit;
-    }
-
+    # Traverse along 1st parents only, unlike visit_local_commits().
     my $commits = get_commits_free($$raw_commits[-1]{id});
 
     $local_base = $$commits[0]{parents}[0];
 
-    # This needs to happen early, for parse_local_rev(), which
-    # _source_map_prepare_local() calls.
-    $changeid2local{$$_{changeid}} = $$_{id} foreach (@$commits);
+    # ... then sanity-check a bit ...
+    foreach my $commit (@$commits) {
+        my $sha1 = $$commit{id};
+        my $subject = $$commit{subject};
+        fail("Commit on ".($local_branch // "<detached HEAD>")
+                ." was meant to be squashed:\n  "
+                .format_subject($sha1, $subject, -2)."\n")
+            if ($subject =~ /^(squash|fixup)! /);
+        my $changeid = $$commit{changeid};
+        my $exsha1 = $changeid2local{$changeid};
+        fail("Duplicate Change-Id $changeid on "
+                .($local_branch // "<detached HEAD>").":\n  "
+                .format_subject($exsha1, $commit_by_id{$exsha1}{subject}, -2)
+                ."\n  ".format_subject($sha1, $subject, -2)."\n")
+            if (defined($exsha1));
+        # This both serves as a seen check, and feeds parse_local_rev(),
+        # which _source_map_prepare_local() calls.
+        $changeid2local{$changeid} = $sha1;
+    }
 
     # ... then map them to Change objects ...
     _source_map_prepare_local();
