@@ -997,7 +997,9 @@ sub map_update_spec($$$)
                     # match, but that seems too much trouble.
                     $ambiguous++;
                 } else {
-                    $$change{gerrit} = $$rslt{match};
+                    my $ginfo = $$rslt{match};
+                    $$change{gerrit} = $ginfo;
+                    $$ginfo{push_base} = $$change{base};
                 }
             }
             push @results, $rslt;
@@ -1228,9 +1230,9 @@ sub set_base_imposed($$)
     }
 }
 
-sub analyze_patchset($$)
+sub analyze_patchset($$$)
 {
-    my ($ginfo, $cat) = @_;
+    my ($ginfo, $cat, $ext_base) = @_;
 
     my $idx = $$ginfo{"${cat}_idx"};
     return if (!defined($idx) || defined($$ginfo{"${cat}_commit"}));
@@ -1238,7 +1240,7 @@ sub analyze_patchset($$)
     $$ginfo{"${cat}_idx"} = --$idx
         if ($idx == @$revs);
     my $rev = $$revs[$idx];
-    my ($rev_id, $base) = ($$rev{id}, $$rev{base});
+    my ($rev_id, $base) = ($$rev{id}, $$rev{base} // $ext_base);
     my $commit = $commit_by_id{$rev_id};
     wfail("PatchSet $$rev{ps} of Change $$ginfo{key} is apparently upstream?!\n")
         if (!$commit);
@@ -1292,8 +1294,8 @@ sub analyze_patchsets($)
         with_local_git_index(\&drop_merged_patchsets, $ginfos, \%cmt_by_id);
     }
     foreach my $ginfo (@$ginfos) {
-        analyze_patchset($ginfo, 'pick');
-        analyze_patchset($ginfo, 'push');
+        analyze_patchset($ginfo, 'pick', undef);
+        analyze_patchset($ginfo, 'push', $$ginfo{push_base});
     }
 }
 
@@ -1383,8 +1385,9 @@ sub advance_pushed_series($$@)
     # done on top of older PatchSets, but we assume that this would
     # have been done only if the grandparent was still correct, and
     # that is all we care about here.
+    my $ncommit;
     my $ginfo = $gerrit_info_by_sha1{$sha1};
-    if (!$ginfo || !$$ginfo{push_commit}) {
+    if (!$ginfo || !($ncommit = $$ginfo{push_commit})) {
         if (!$ginfo && $$commit{did_query}) {
             werr("Deduced Change $changeid ($sha1) disappeared from '$remote';"
                     ." breaking off pushed series.\n");
@@ -1397,10 +1400,8 @@ sub advance_pushed_series($$@)
         $$fails = 1;
         return undef;
     }
-    my $rev = $$ginfo{revs}[$$ginfo{push_idx}];
-    my $nbase = $$rev{base};
-    $$base = $nbase if (defined($nbase));
-    return $$rev{id};
+    $$base = $$ncommit{base};
+    return $$ncommit{id};
 }
 
 # To a given set of Changes, add any missing Changes which were part of
@@ -1456,8 +1457,10 @@ sub advance_remote_series($$@)
     my ($commit, $base, $stamp, $missing, $fails) = @_;
 
     my ($sha1, $changeid) = ($$commit{id}, $$commit{changeid});
+
+    my $ncommit;
     my $ginfo = $gerrit_info_by_sha1{$sha1};
-    if (!$ginfo || !$$ginfo{pick_commit}) {
+    if (!$ginfo || !($ncommit = $$ginfo{pick_commit})) {
         if (!$ginfo && $$commit{did_query}) {
             werr("Deduced Change $changeid ($sha1) disappeared from '$remote';"
                     ." breaking off series.\n");
@@ -1470,10 +1473,8 @@ sub advance_remote_series($$@)
         $$fails = 1;
         return undef;
     }
-    my $rev = $$ginfo{revs}[$$ginfo{pick_idx}];
-    my $nbase = $$rev{base};
-    $$base = $nbase if (defined($nbase));
-    return $$rev{id};
+    $$base = $$ncommit{base};
+    return $$ncommit{id};
 }
 
 # Assemble a remote series from its tip commit. On the way record required
