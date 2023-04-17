@@ -730,6 +730,9 @@ my $next_key = 10000;
 our %change_by_key;  # { sequence-number => change-object }
 # Same, indexed by Gerrit Change-Id. A Change can exist on multiple branches.
 our %changes_by_id;  # { gerrit-id => [ change-object, ... ] }
+# Changes on the local branch, indexed by SHA1 of previous push.
+# Note that other local branches may have gpick'd the same commits.
+our %change_by_pushed;  # { sha1 => change-object }
 
 our $next_group = 10000;
 
@@ -1301,6 +1304,8 @@ sub analyze_local_branch($)
         $$change{parent} = $prev;
         $$prev{child} = $change if ($prev);
         $prev = $change;
+        my $pushed = $$change{pushed};
+        $change_by_pushed{$pushed} = $change if (defined($pushed));
     }
 
     return 1;
@@ -2129,23 +2134,11 @@ sub _update_target_branches($)
 {
     my ($ginfos) = @_;
 
-    state %trackable_changes;
-    if (!%trackable_changes) {
-        # Changes on multiple local branches may have the same _pushed commit,
-        # so make sure to collect only the Changes on the current branch.
-        foreach my $change (values %change_by_key) {
-            next if ($$change{garbage});
-            next if (!$$change{local});
-            my $pushed = $$change{pushed};
-            $trackable_changes{$pushed} = $change if (defined($pushed));
-        }
-    }
-
     my @changed;
     my $need_save;
     foreach my $ginfo (@$ginfos) {
         foreach my $rev (@{$$ginfo{revs}}) {
-            my $change = $trackable_changes{$$rev{id}};
+            my $change = $change_by_pushed{$$rev{id}};
             next if (!$change);
             my $pbr = $$change{tgt} // "";
             my $abr = $$ginfo{branch};
