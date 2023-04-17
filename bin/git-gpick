@@ -1362,28 +1362,16 @@ sub assemble_series($$$$$@)
 
 sub advance_pushed_series($$@)
 {
-    my ($commit, $base, $stamp, $pmap, $bmap, $missing, $fails) = @_;
+    my ($commit, $base, $stamp, $pmap, $bmap, $smap, $missing, $fails) = @_;
 
     my ($sha1, $changeid) = ($$commit{id}, $$commit{changeid});
-    my $ginfo = $gerrit_info_by_sha1{$sha1};
 
     # If the Change is in the initial set, the commit is given.
     my $nsha1 = $$pmap{$changeid};
     if (defined($nsha1)) {
         #print "Deduced $changeid ($sha1) is also initial.\n" if ($debug);
-        if (!$ginfo) {
-            # The outer loop will print a proper error message.
-            print "Deduced+initial Change $changeid ($sha1) disappeared.\n" if ($debug);
-            return (undef, 1);
-        }
-        my $rev = $$ginfo{rev_by_id}{$nsha1};
-        if (!$rev) {
-            # The outer loop will print a proper error message.
-            print "PatchSet $nsha1 disappeared from deduced+initial $changeid.\n" if ($debug);
-            return (undef, 1);
-        }
         # The ancestors must be younger. See below.
-        $$stamp = $$rev{ts};
+        $$stamp = $$smap{$changeid};
         $$base = $$bmap{$changeid};
         return $nsha1;
     }
@@ -1395,6 +1383,7 @@ sub advance_pushed_series($$@)
     # done on top of older PatchSets, but we assume that this would
     # have been done only if the grandparent was still correct, and
     # that is all we care about here.
+    my $ginfo = $gerrit_info_by_sha1{$sha1};
     if (!$ginfo || !$$ginfo{push_commit}) {
         if (!$ginfo && $$commit{did_query}) {
             werr("Deduced Change $changeid ($sha1) disappeared from '$remote';"
@@ -1434,6 +1423,7 @@ sub complete_pushed_series($$)
     return if ($$spec{pushed_changes});
 
     print "Completing $$spec{orig}/pushed ...\n" if ($debug);
+    my ($pmap, $bmap, $smap) = ($$spec{pmap}, $$spec{bmap}, $$spec{smap});
     my (%result, %seen, $fails);
     foreach my $chg (reverse @{$$spec{range}}) {
         my $change;
@@ -1451,24 +1441,11 @@ sub complete_pushed_series($$)
             print "Initial $changeid not pushed.\n" if ($debug);
             next;
         }
-        my $ginfo = $gerrit_info_by_sha1{$sha1};
-        if (!$ginfo) {
-            werr("Initial Change $changeid ($sha1) disappeared from '$remote';"
-                    ." breaking off pushed series.\n");
-            next;
-        }
-        my $rev = $$ginfo{rev_by_id}{$sha1};
-        if (!$rev) {
-            # This can happen if the ginfo was queried by another SHA1 from traversal.
-            werr("PatchSet $sha1 disappeared from Change $changeid on '$remote';"
-                    ." breaking off pushed series.\n");
-            next;
-        }
-        my $stamp = $$rev{ts};
+        my $stamp = $$smap{$changeid};
         my $base = $$change{base};
         my ($series, $anchor) = assemble_series(
                 $changeid, $sha1, $base, \%seen, \&advance_pushed_series,
-                \$stamp, $$spec{pmap}, $$spec{bmap}, $missing, \$fails);
+                \$stamp, $pmap, $bmap, $smap, $missing, \$fails);
         attach_series($series, $anchor, \%result) if (!$fails);
     }
     $$spec{pushed_changes} = \%result if (!$fails);
@@ -1863,16 +1840,32 @@ sub complete_spec_tails($)
         foreach my $spec (@$specs) {
             next if ($$spec{action} != UPDATE);
 
-            my (%bmap, %pmap);
+            my (%bmap, %pmap, %smap);
             foreach my $change (@{$$spec{range}}) {
                 my $changeid = $$change{id};
                 my $base = $$change{base};
                 $bmap{$changeid} = $base if (defined($base));
                 my $pushed = $$change{pushed};
-                $pmap{$changeid} = $pushed if (defined($pushed));
+                next if (!defined($pushed));
+                $pmap{$changeid} = $pushed;
+                my $ginfo = $gerrit_info_by_sha1{$pushed};
+                if (!$ginfo) {
+                    werr("Initial Change $changeid ($pushed) disappeared from '$remote';"
+                            ." breaking off pushed series.\n");
+                    next;
+                }
+                my $rev = $$ginfo{rev_by_id}{$pushed};
+                if (!$rev) {
+                    # This can happen if the ginfo was queried by another SHA1 from traversal.
+                    werr("PatchSet $pushed disappeared from Change $changeid on '$remote';"
+                            ." breaking off pushed series.\n");
+                    next;
+                }
+                $smap{$changeid} = $$rev{ts};
             }
             $$spec{bmap} = \%bmap;
             $$spec{pmap} = \%pmap;
+            $$spec{smap} = \%smap;
         }
     }
 
