@@ -338,29 +338,14 @@ sub parse_arguments(@)
 
 sub determine_local_branch()
 {
-    my $branches = open_cmd_pipe(0, "git", "branch", "--points-at", "HEAD");
-    while (read_process($branches)) {
-        if (/^\* \(/) {
-            # Unlike in gpush, it makes no sense to work with mid-rebase states
-            # (as we are going to rewrite the branch ourselves).
-            fail("Cannot proceed, a rebase is currently in progress.\n")
-                if (/^\* \(no branch, rebasing (.*)\)$/);
-            # This does not work, because the SHA1 is truncated,
-            # and --no-abbrev appears to have no effect on that.
-            #if (/^\* \(HEAD detached at (.*)\)$/) {
-            #    # This potentially saves a `git rev-parse HEAD` call.
-            #    $local_tip = $1;
-            #}
-            last;
-        } elsif (/^\* (.*)$/) {
-            $local_branch = $1;
-            $local_tip = $local_refs{$local_branch};
-            last;
-        }
-    }
-    close_process($branches);
+    # Unlike in gpush, it makes no sense to work with mid-rebase states
+    # (as we are going to rewrite the branch ourselves).
+    fail("Cannot proceed, a rebase is currently in progress.\n")
+        if (-d $gitdir."/rebase-merge" || -d $gitdir."/rebase-apply");
 
+    $local_branch = $head_branch;
     if (defined($local_branch)) {
+        $local_branch =~ s,^refs/heads/,,;
         $upstream_branch = git_config("branch.$local_branch.merge");
         $upstream_branch =~ s,^refs/heads/,, if (defined($upstream_branch));
     }
@@ -373,15 +358,10 @@ sub determine_local_branch()
 # Get the list of local commits (which can be replaced).
 sub get_changes()
 {
-    my $commits = analyze_local_branch('HEAD');
+    my $commits = analyze_local_branch($head_commit);
     return $commits if ($commits);
-    # We get here if we have no local Changes ...
-    if (!defined($local_tip)) {
-        # ...when working on a detached HEAD.
-        $local_tip = read_cmd_line(0, 'git', 'rev-parse', 'HEAD');
-    }
-    # The tip is also the branch base.
-    $local_base = $local_tip;
+    # We have no local Changes, so the tip is also the branch base.
+    $local_base = $head_commit;
     return [];
 }
 

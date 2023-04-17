@@ -454,6 +454,10 @@ sub load_config()
 # branches & remotes #
 ######################
 
+# Info extracted from $GITDIR/HEAD.
+our $head_branch;  # May be undef.
+our $head_commit;
+
 # The name of the local branch we're working with (not necessarily the
 # current branch). May be undef.
 our $local_branch;
@@ -484,6 +488,14 @@ sub update_excludes()
         }
     }
     @upstream_excludes = map { "^$_" } keys %heads;
+}
+
+sub resolve_head($)
+{
+    my ($source) = @_;
+
+    return $source if ($source ne "HEAD");
+    return $head_branch // "";
 }
 
 sub find_gerrit_remote($)
@@ -1092,6 +1104,25 @@ sub load_refs(@)
     update_refs(0, \@updates);
 }
 
+sub load_head()
+{
+    open(my $hf, $gitdir."/HEAD") or fail("Repository has no HEAD!?\n");
+    chomp(my $hd = <$hf>);
+    close($hf);
+    if ($hd =~ s/^ref: //) {
+        $head_branch = $hd;
+        $hd =~ s,^refs/heads/,,;
+        $head_commit = $local_refs{$hd};
+        fail("HEAD points to invalid branch $head_branch.\n")
+            if (!defined($head_commit));
+        print "HEAD points to branch $head_branch, commit $head_commit.\n"
+            if ($debug);
+    } else {
+        $head_commit = $hd;
+        print "HEAD points to commit $head_commit.\n" if ($debug);
+    }
+}
+
 sub load_state($)
 {
     my ($all) = @_;
@@ -1099,6 +1130,7 @@ sub load_state($)
     print "Loading state ...\n" if ($debug);
     load_state_file();
     load_refs($all ? "refs/gpush/" : "refs/gpush/i*", "refs/heads/", "refs/remotes/");
+    load_head();
 }
 
 ##########################
@@ -1370,8 +1402,6 @@ sub visit_local_commits($;$)
 my $analyzed_local_branch = 0;
 # SHA1 of the local branch's merge base with upstream.
 our $local_base;
-# SHA1 of the local branch's tip.
-our $local_tip;
 # Mapping of Change-Ids to commits on the local branch.
 our %changeid2local;  # { change-id => SHA1 }
 
@@ -1408,11 +1438,7 @@ sub analyze_local_branch($)
         $seen{$changeid} = $commit;
     }
 
-    # Iff we have a detached HEAD, we don't know the tip yet, because
-    # we resolve only named branches. In other cases, this is a no-op.
-    $local_tip = $$raw_commits[-1]{id};
-
-    my $commits = get_commits_free($local_tip);
+    my $commits = get_commits_free($$raw_commits[-1]{id});
 
     $local_base = $$commits[0]{parents}[0];
 
@@ -1538,7 +1564,7 @@ sub _parse_local_rev_sym($$)
     my $out;
     if ($rev eq 'HEAD') {
         fail("HEAD is not valid for base revspecs.\n") if ($scope == SPEC_BASE);
-        $out = $local_tip;
+        $out = $head_commit;
     } elsif ($rev eq 'ROOT') {
         fail("ROOT is not valid for tip revspecs.\n") if ($scope == SPEC_TIP);
         return ($rev, 1);

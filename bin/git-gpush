@@ -914,23 +914,27 @@ sub determine_local_branch($)
 
     # First, try to extract a branch name directly.
     $local_branch = ($source =~ s/[~^].*$//r);
-    if ($local_branch eq "HEAD") {
-        my $sref = read_cmd_line(SOFT_FAIL, "git", "symbolic-ref", "-q", "HEAD");
-        $local_branch = $sref if (!$?);
-    }
+    $local_branch = resolve_head($local_branch);
     $local_branch =~ s,^refs/heads/,,;
-    $local_tip = $local_refs{$local_branch};
-    if (!defined($local_tip)) {
+    my $tip = $local_refs{$local_branch};
+    if (!defined($tip)) {
         # Next, try to deduce a branch from the commit.
-        ($local_branch, my $src_type) = branch_for_commit($source);
+        my ($branch, $src_type) = branch_for_commit($source);
         # Cannot use the branch's tip mid-rebase, because the
         # referenced commits may have been rewritten already.
-        $local_tip = $local_refs{$local_branch}
-            if ($src_type == SRC_BRANCH);
+        if ($src_type == SRC_BRANCH) {
+            $tip = $local_refs{$branch};
+        } elsif ($src_type == SRC_HEAD) {
+            $tip = $head_commit;
+        } else {
+            $tip = $core_source;
+        }
+        $local_branch = $branch;
     }
     setup_remotes($source);
     set_gerrit_config($remote) if (!$mail_mode);
     source_map_validate();
+    return $tip;
 }
 
 # Determine the target branch for the given series.
@@ -1167,9 +1171,9 @@ sub initialize_get_changes()
         # trying multiple branches would be expensive, potentially ambiguous
         # (as the same Change-Id can exist multiple times), and probably not
         # very useful to start with.
-        determine_local_branch('HEAD');
+        my $tip = determine_local_branch('HEAD');
         # Get the pool of Changes to search in, and later to push from.
-        analyze_local_branch('HEAD') or
+        analyze_local_branch($tip) or
             fail("No local Changes (from HEAD).\n");
         # Now try again.
         $commit = parse_local_rev_id($from, SPEC_TIP);
@@ -1177,7 +1181,7 @@ sub initialize_get_changes()
         # We did not need to visit the current branch to find the tip,
         # so determine the branch from the tip now.
         $from = "HEAD".$from if ($from =~ /^[~^]/);
-        determine_local_branch($from);
+        my $tip = determine_local_branch($from);
         # Get the pool of Changes to push from.
         # We don't limit the range and even overshoot if possible; the
         # performance impact of that should be negligible. A corner-case
@@ -1186,7 +1190,7 @@ sub initialize_get_changes()
         # of the tip, and 3) the tip is NOT specified by change-id. More
         # importantly, reverse traversal in do_determine_series() also
         # needs the full range.
-        analyze_local_branch($local_tip // ($from =~ s/[~^].*$//r)) or
+        analyze_local_branch($tip) or
             fail("No local Changes (from $from).\n");
     }
     return $commit;
