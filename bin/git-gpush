@@ -835,22 +835,28 @@ sub aggregate_indirect_property($$$)
     fail_formatted(\@reports);
 }
 
+use constant {
+    SRC_BRANCH => 0,    # Named branch, not rebasing
+    SRC_HEAD => 1,      # Detached HEAD, possibly mid-rebase
+    SRC_FLOATING => 2   # No branch, possibly due to ambiguity
+};
+
 # Find _the_ branch the specified commit lives on. This can be the current
 # branch (and other branches are ignored), or _one_ other branch.
 sub branch_for_commit($)
 {
     my ($commit) = @_;
 
-    my $in_rebase;
+    my $src_type = SRC_FLOATING;
     my $curbranch;
     my @otherbranches;
     my $branches = open_cmd_pipe(0, "git", "branch", "--contains", $commit);
     while (read_process($branches)) {
         if (/^\* \(/) {
+            $src_type = SRC_HEAD;
             # New git versions will tell us the currently rebased branch.
             if (/^\* \(no branch, rebasing (.*)\)$/) {
                 $curbranch = $1;
-                $in_rebase = 1;
                 last;
             }
             # This is the "* (HEAD detached at [...])" case.
@@ -858,6 +864,7 @@ sub branch_for_commit($)
             # detached from, so we continue here.
         } elsif (/^\* (.*)$/) {
             $curbranch = $1;
+            $src_type = SRC_BRANCH;
             last;
         } elsif (/^  (.*)$/) {
             push @otherbranches, $1;
@@ -869,6 +876,7 @@ sub branch_for_commit($)
         if (@otherbranches == 1) {
             # It's on exactly one other branch, so use that.
             $curbranch = $otherbranches[0];
+            $src_type = SRC_BRANCH;
         } else {
             # See if it is on exactly one other branch with an
             # upstream branch (so we can derive a target branch
@@ -880,10 +888,11 @@ sub branch_for_commit($)
             }
             if (@goodbranches == 1) {
                 $curbranch = $goodbranches[0];
+                $src_type = SRC_BRANCH;
             }
         }
     }
-    return ($curbranch, $in_rebase);
+    return ($curbranch, $src_type);
 }
 
 # Extract the local branch from the specified source.
@@ -912,12 +921,11 @@ sub determine_local_branch($)
     $local_tip = $local_refs{$local_branch};
     if (!defined($local_tip)) {
         # Next, try to deduce a branch from the commit.
-        my $in_rebase;
-        ($local_branch, $in_rebase) = branch_for_commit($source);
+        ($local_branch, my $src_type) = branch_for_commit($source);
         # Cannot use the branch's tip mid-rebase, because the
         # referenced commits may have been rewritten already.
         $local_tip = $local_refs{$local_branch}
-            if (defined($local_branch) && !$in_rebase);
+            if ($src_type == SRC_BRANCH);
     }
     setup_remotes($source);
     set_gerrit_config($remote) if (!$mail_mode);
