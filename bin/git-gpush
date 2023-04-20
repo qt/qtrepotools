@@ -857,6 +857,7 @@ sub branch_for_commit($)
             # New git versions will tell us the currently rebased branch.
             if (/^\* \(no branch, rebasing (.*)\)$/) {
                 $curbranch = $1;
+                $curbranch = undef if ($curbranch =~ /^detached HEAD/);
                 last;
             }
             # This is the "* (HEAD detached at [...])" case.
