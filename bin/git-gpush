@@ -533,22 +533,9 @@ sub parse_arguments(@)
         } elsif ($arg !~ /^\-/) {
             fail("Specifying multiple sources is currently not supported.\n")
                 if (defined($from));
-            # The assumption that no legitimate branch would have a purely numerical
-            # name seems reasonable, so this overloading of the syntax should be safe.
             if ($arg =~ /^(.*):(\d+)$/) {
                 $from = length($1) ? $1 : 'HEAD';
                 $commit_count = $2;
-            } elsif ($arg =~ /(.*):(.*)/) {
-                if (length($1)) {
-                    $from = $1;
-                    print STDERR "Warning: Specifying <from>: is deprecated.".
-                                 " Use just <from> instead.\n";
-                }
-                if (length($2)) {
-                    $ref_to = $2;
-                    print STDERR "Warning: Specifying :<ref-to> is deprecated.".
-                                 " Use --branch instead.\n";
-                }
             } else {
                 $from = $arg;
             }
