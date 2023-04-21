@@ -34,7 +34,7 @@ sub usage
 {
     print << "EOM";
 Usage:
-    git gpush [opts] [from] [+<reviewer>] [=<CC user>]
+    git gpush [opts] [from...] [+<reviewer>] [=<CC user>]
 
     Pushes Changes to Gerrit and adds reviewers and CC to the PatchSets.
 
@@ -67,7 +67,8 @@ Description:
     'From' may also be a range, specified as either <base>..<tip> or
     <tip>:<count>. Both <base> and <tip> may be omitted, in which case
     they default to '\@{upstream}' and 'HEAD', respectively.
-    If 'from' is not specified, 'HEAD' is used.
+    Multiple 'from's may be specified; all must be on the same branch.
+    If no 'from' is specified, 'HEAD' is used.
 
     When pushing a series for the first time, the exact range of commits
     needs to be specified. For subsequent pushes of the same series, it is
@@ -418,9 +419,7 @@ License:
 EOM
 }
 
-my $from_base;
-my $from;
-my $commit_count = 0;
+my @specs;
 my $addbase;  # default set by process_config()
 my $minimal;  # default set by process_config()
 my $extend = 0;
@@ -457,6 +456,7 @@ my @CCs;
 sub parse_arguments(@)
 {
     my $rebase = 0;
+    my $series_specifying = 0;
     my $minimal_override = 0;
     while (scalar @_) {
         my $arg = shift @_;
@@ -472,8 +472,10 @@ sub parse_arguments(@)
             $dry_run = 1;
         } elsif ($arg eq "-e" || $arg eq "--extend") {
             $extend = 1;
+            $series_specifying = 1;
         } elsif ($arg eq "-c" || $arg eq "--capture") {
             $capture = 1;
+            $series_specifying = 1;
         } elsif ($arg eq "-g" || $arg eq "--group") {
             $group_only = 1;
         } elsif ($arg eq "-x" || $arg eq "--exclude") {
@@ -557,14 +559,26 @@ sub parse_arguments(@)
         } elsif ($arg =~ /^\=(.+)/) {
             push @CCs, split(/,/, lookup_alias($1));
         } elsif ($arg !~ /^\-/) {
-            fail("Specifying multiple sources is currently not supported.\n")
-                if (defined($from));
-            if ($arg =~ /^(.*):(\d+)$/) {
-                $from = length($1) ? $1 : 'HEAD';
-                $commit_count = $2;
+            my $count;
+            if ($arg =~ s/:(\d+)$//) {
+                $count = $1;
+                $series_specifying = 1;
             } else {
-                $from = $arg;
+                $count = 0;
             }
+            my $base;
+            if ($arg =~ s/^(.*)\.\.//) {
+                fail("Specifying a commit count and a range base are mutually exclusive.\n")
+                    if ($count);
+                $base = length($1) ? $1 : '@{u}';
+                $series_specifying = 1;
+            }
+            $arg = "HEAD".$arg if ($arg =~ /^([~^]|$)/);
+            push @specs, {
+                tip => $arg,
+                base => $base,
+                count => $count
+            };
         } else {
             fail("Unrecognized option '$arg'.\n");
         }
@@ -577,24 +591,19 @@ sub parse_arguments(@)
         if (defined($ref_base) && $rebase);
     $ref_base = "-" if ($rebase);
 
-    if (!defined($from)) {
-        $from = "HEAD";
+    if (!@specs) {
+        push @specs, {
+            tip => "HEAD",
+            base => undef,
+            count => 0
+        };
         if ($list_only) {
             $push_all = 1;
         } else {
             $add_ids = -$add_ids;
         }
-    } else {
-        if ($from =~ /^(.*)\.\.(.*)$/) {
-            fail("Specifying a commit count and a range base are mutually exclusive.\n")
-                if ($commit_count);
-            ($from_base, $from) = (length($1) ? $1 : '@{u}', $2);
-        }
-        $from = "HEAD".$from if ($from =~ /^([~^]|$)/);
     }
 
-    my $series_specifying =
-            $commit_count || $from_base || $extend || $capture;
     my $series_modifying =
             $series_specifying || defined($ref_to) || defined($topic)
             || $keep_version || $reset_version || defined($in_reply_to)
@@ -646,6 +655,10 @@ sub parse_arguments(@)
     if ($push_all) {
         fail("--all is incompatible with series-specifying options.\n")
             if ($series_specifying);
+        fail("--all is incompatible with specifying multiple sources.\n")
+            if (@specs > 1);
+    }
+    if ($push_all || (@specs > 1)) {
         fail("Cannot set same topic on all series.\n")
             if (length($topic));  # Notably, resetting the topic is fine.
         # Push options are perfectly legit with --all, even if some are
@@ -985,7 +998,8 @@ sub determine_remote_branch($)
                                  sub { '  => '.$_ });
     }
     if (!defined($br)) {
-        fail("Cannot deduce source branch for $from. Please use --branch.\n")
+        fail("Cannot deduce source branch for ".$specs[0]{tip}
+                .". Please use --branch.\n")
             if (!defined($local_branch));
         $br = git_config("branch.$local_branch.merge");
         fail("$local_branch has no upstream branch. Please use --branch.\n")
@@ -1209,9 +1223,9 @@ sub scan_pushed_group($$)
         $$commits{$ocommit} = 1 if (defined($ocommit));
     }
 
-    return if ($push_all);
     my $base_chg = $$group{base_chg};
     return if (!$base_chg);
+    return if ($$base_chg{group});  # Is being pushed
     my $pcommit = $$base_chg{pushed};
     $$commits{$pcommit} = 1 if (defined($pcommit));
 }
@@ -1318,7 +1332,8 @@ sub initialize_get_changes()
     # of the tip, and 3) the tip is NOT specified by Change-Id. More
     # importantly, reverse traversal in do_determine_series() also
     # needs the full range.
-    my ($source, $core_source) = ($from, $from =~ s/^([^~^]*+).*$/$1/r);
+    my $source = $specs[0]{tip};
+    my $core_source = ($source =~ s/^([^~^]*+).*$/$1/r);
     # Try to derive the branch from the given tip.
     my ($tip, $src_type) = determine_local_branch($source, $core_source, SOFT_FAIL);
     if (!defined($tip)) {
@@ -1342,7 +1357,6 @@ sub initialize_get_changes()
         $commits = visit_local_branch($tip) if (defined($tip));
     }
     analyze_local_branch($commits);
-    return parse_local_rev($from, SPEC_TIP);
 }
 
 sub finalize_get_changes($$)
@@ -1401,9 +1415,11 @@ sub determine_series($)
 }
 
 # Get the list of local commits to push.
-sub get_changes()
+sub do_get_changes($$$)
 {
-    my $tip = initialize_get_changes();
+    my ($from, $from_base, $commit_count) = @_;
+
+    my $tip = parse_local_rev($from, SPEC_TIP);
     # Assemble the series of Changes to push from the pool.
     my ($changes, $gid);
     if (defined($from_base)) {
@@ -1433,12 +1449,23 @@ sub get_changes()
     return $group;
 }
 
+sub get_changes()
+{
+    initialize_get_changes();
+    my @groups;
+    foreach my $spec (@specs) {
+        push @groups, do_get_changes($$spec{tip}, $$spec{base}, $$spec{count});
+    }
+    return \@groups;
+}
+
 # Get the list of local commits to push when pushing all series.
 sub get_all_changes()
 {
-    my $tip = initialize_get_changes();
+    initialize_get_changes();
     my @groups;
     my $have_loose = 0;
+    my $tip = parse_local_rev($specs[0]{tip}, SPEC_TIP);
     my $change = $commit_by_id{$tip}{change};
     while (1) {
         my ($changes, $gid);
@@ -2195,7 +2222,7 @@ sub do_rebase_changes($$)
             printf("Resetting base to %s\'s latest push.\n",
                    format_id($$base_chg{id}))
                 if ($debug);
-            if ($push_all) {
+            if ($$base_chg{group}) {
                 my $commit = $$base_chg{final};
                 if (!defined($commit)) {
                     print "Rebased base Change unavailable.\n" if ($debug);
@@ -2964,7 +2991,7 @@ sub execute_grouping()
             if ($have_loose);
         $groups = [ grep { !$$_{hide} } @$all_groups ];
     } else {
-        $groups = [ get_changes() ];
+        $groups = get_changes();
     }
     # We validate a possibly specified push base early on, mostly
     # because delaying it would be a lot more complicated or costly.
@@ -3007,7 +3034,7 @@ sub execute_pushing()
         $groups = [ grep { !$$_{exclude} } @$annot_groups ];
         $annot_groups = $groups if (!$list_only);
     } else {
-        $groups = $annot_groups = $all_groups = [ get_changes() ];
+        $groups = $annot_groups = $all_groups = get_changes();
     }
     my $pushed_changes;
     if ($mail_mode) {
