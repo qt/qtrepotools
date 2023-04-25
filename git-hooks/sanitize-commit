@@ -416,6 +416,7 @@ my $inchangelog = 0;
 my $doftr = !defined($cfg{footer});
 my ($footer, $cherry) = (STS_BLANK, 0);
 my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
+my ($coverity, $cid) = (0, 0);
 my $msgline = 0;
 my %picktos = ();
 open MSG, "git cat-file -p ".$sha1." |" or die "cannot run git: $!";
@@ -518,6 +519,8 @@ while (<MSG>) {
                         }
                     }
                     complain_ln("Capitalization of \"Pick-to\" is wrong", "") if (!/^Pick-to:/);
+                } elsif (/^Coverity-Id: /) {
+                    $cid = 1;
                 }
             } elsif (/^\[change-?log\]/i) {
                 $inchangelog = 1;
@@ -556,6 +559,9 @@ while (<MSG>) {
     if (!$badurl && /$badurl_rx/o) {
         complain_ln("URL pointing to Gerrit or JIRA", "url");
     }
+    if (/\b[Cc]overity\b|\b[Cc][Ii][Dd][Ss]?:? *#?[0-9]+/) {
+        $coverity = $lineno;
+    }
     check_spelling() if ($spell_check);
     check_apple_terminology();
     styleFail("Trailing whitespace") if (s/[ \t]+\r?$//);
@@ -573,6 +579,9 @@ if ($badrev && !defined($cfg{revby})) {
 }
 if ($badsign) {
     do_complain($badsign, "Unnecessary Signed-off-by footer", "", -1);
+}
+if ($coverity && !$cid) {
+    do_complain($coverity, "Mention of Coverity without Coverity-Id footer is probably incorrect", "");
 }
 if ($with_pickbot) {
     if ($havecherry) {
