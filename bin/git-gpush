@@ -205,7 +205,7 @@ Options:
         The base-modifying options may be used with --list-rebase and
         --list-online, but their effect is not persisted in this case.
 
-    --move {new|<range>}[/<from>]
+    --move {new|all|<range>}[/<from>]
         After cherry-picking Changes to the current branch, mark the picks
         as the _only_ source for subsequent pushes of these Changes.
         The Changes on the current branch inherit all persistent properties,
@@ -215,7 +215,7 @@ Options:
         This option is necessary only when a move cannot be unambiguously
         inferred.
 
-    --copy {new|<range>}
+    --copy {new|all|<range>}
         After cherry-picking Changes to the current branch, mark the picks
         as an _additional_ source for subsequent pushes of these Changes.
         The Changes on the source branch are left alone, while those on the
@@ -223,7 +223,7 @@ Options:
         different default target branch).
         When a range is specified, the Changes are also --group'd.
 
-    --hide {new|<range>}
+    --hide {new|all|<range>}
         After cherry-picking Changes to the current branch, mark the picks
         as an _unacceptable_ source for subsequent pushes of these Changes.
         When a range is specified, the Changes are also --group'd.
@@ -231,12 +231,12 @@ Options:
         The range can be specified as <base>..<tip> (either end can be left
         off) or <tip>:<count>. When using 'new' instead of a range, all
         Changes which were previously not seen on the current branch are
-        selected, while actual ranges select Changes regardless of whether
-        they were already seen, which makes it possible to revise previous
-        decisions about the authoritative source for pushes.
-        --move, --copy, and --hide can be specified multiple times. The
-        ranges may not overlap, but will override a single also specified
-        operation which uses 'new'.
+        selected, while 'all' and actual ranges select Changes regardless
+        of whether they were already seen, which makes it possible to revise
+        previous decisions about the authoritative source for pushes.
+        --move, --copy, and --hide can be specified multiple times, except
+        with 'all'. The ranges may not overlap, but will override a single
+        also specified operation which uses 'new'.
         Note that the ranges supplied to these options do NOT imply these
         Changes getting pushed; to do so, specify them a second time as a
         regular <from> argument.

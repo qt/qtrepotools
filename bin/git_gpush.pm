@@ -1889,6 +1889,7 @@ sub parse_source_option($$\@)
     my $orig = shift @$args;
     my $tip = $orig;
     my ($base, $count);
+    my $all = 0;
     my $branch = $1 if ($tip =~ s,/(.*)$,,);
     my $rmt_id;
     if ($rmt_ok && $tip =~ /^\+(\w+)/) {
@@ -1897,11 +1898,17 @@ sub parse_source_option($$\@)
     } else {
         $base = $1 if ($tip =~ s,^(.*)\.\.,,);
         $count = $1 if ($tip =~ s,:(.*)$,,);
-        $tip = undef if ($tip eq "new");
+        if ($tip eq "new") {
+            $tip = undef;
+        } elsif ($tip eq "all") {
+            $all = 1;
+            $tip = undef;
+        }
         fail("Specifying a commit count and a range base are mutually exclusive.\n")
             if (defined($base) && defined($count));
         if (defined($base) || defined($count)) {
-            wfail("Specifying a commit count or range base is incompatible with range 'new'.\n")
+            wfail("Specifying a commit count or range base is incompatible with "
+                  ."ranges 'new' and 'all'.\n")
                 if (!defined($tip));
         } else {
             wfail("Automatic ranges are not supported with $arg."
@@ -1918,6 +1925,7 @@ sub parse_source_option($$\@)
         base => defined($base) ? length($base) ? $base : '@{u}' : undef,
         tip => defined($tip) ? length($tip) ? $tip : 'HEAD' : undef,
         count => $count,
+        all => $all,
         branch => $branch
     };
     return 1;
@@ -1941,6 +1949,8 @@ sub source_map_validate()
         my $raw_tip = $$option{tip};
         next if (defined($raw_tip));
 
+        wfail("--move, --copy, or --hide with 'all' must be the only such option.\n")
+            if ($$option{all} && @sm_options != 1);
         wfail("Only one of --move, --copy, and --hide may be specified with 'new'.\n")
             if (defined($sm_option_new));
         $sm_option_new = $option;
@@ -2130,7 +2140,8 @@ sub source_map_assign($$)
     my $new = !$change;
 
     my $option = $sm_option_by_id{$reference // $$commit{id}} // $sm_option_new;
-    my $new_only = $option && !defined($$option{tip});
+    my $want_all = $option && $$option{all};
+    my $new_only = $option && !defined($$option{tip}) && !$want_all;
     my $action = $option ? $$option{action} : _SRC_NOOP;
     if ($action == _SRC_COPY || $action == _SRC_HIDE) {
         # Note: We don't bother finding Changes which could be recycled -
@@ -2156,11 +2167,22 @@ sub source_map_assign($$)
         if (defined($sbr)) {
             $schange = $change_by_branch{$sbr};
             if (!$schange) {
+                if ($want_all) {
+                    # We don't take 'all' too literally, as that would be annoying.
+                    print "$changeid isn't on specified source branch $sbr; ignoring.\n"
+                        if ($debug);
+                    goto MAYBENEW;
+                }
                 push @sm_errors,
                     "Change $changeid does not exist on '$sbr'; cannot move.\n";
                 goto FAIL;
             }
             if ($$schange{hide}) {
+                if ($want_all) {
+                    print "$changeid is hidden on specified source branch $sbr; ignoring.\n"
+                        if ($debug);
+                    goto MAYBENEW;
+                }
                 push @sm_errors,
                     "Change $changeid is hidden on '$sbr'; cannot move.\n";
                 goto FAIL;
@@ -2191,9 +2213,7 @@ sub source_map_assign($$)
                 }
                 if (!@persisting) {
                     # This is the common case: an entirely new Change.
-                    $change = {};
-                    _init_change($change, $changeid);
-                    goto CHANGED;
+                    goto ISNEW;
                 }
                 if ($action != _SRC_MOVE) {
                     _push_failure(
@@ -2259,6 +2279,11 @@ sub source_map_assign($$)
         if ($debug);
     goto FOUND;
 
+  MAYBENEW:
+    goto CHANGED if (!$new);
+  ISNEW:
+    $change = {};
+    _init_change($change, $changeid);
   CHANGED:
     $$change{src} = $lbr;
     $sm_changed = 1;
