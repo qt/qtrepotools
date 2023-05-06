@@ -862,7 +862,7 @@ while (<DIFF>) {
                     styleFail("Leading tabs") if (/^\t+/);
                     if ($ctlkw_check) {
                         styleFail("Flow control keywords must be followed by a single space")
-                           if (/\b(if|elsif|for|foreach|Q_FOREACH|while|do|switch)(|  +)\(/);
+                           if (/\b(if|if constexpr|elsif|for|foreach|Q_FOREACH|while|do|switch)(|  +)\(/);
                     }
                 }
             }
