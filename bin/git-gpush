@@ -2125,7 +2125,7 @@ sub execute_pushing()
 {
     my $rebase = !$list_only || $list_rebase;
     my $online = !$list_only || $list_online;
-    my ($groups, $all_groups);
+    my ($groups, $annot_groups, $all_groups);
     if ($push_all) {
         my $have_loose;
         ($have_loose, $all_groups) = get_all_changes();
@@ -2136,9 +2136,11 @@ sub execute_pushing()
             fail_with_listing($all_groups,
                     "Cannot push all with any free-standing loose Changes.\n");
         }
-        $groups = [ grep { !$$_{hide} && !$$_{exclude} } @$all_groups ];
+        $annot_groups = [ grep { !$$_{hide} } @$all_groups ];
+        $groups = [ grep { !$$_{exclude} } @$annot_groups ];
+        $annot_groups = $groups if (!$list_only);
     } else {
-        $groups = $all_groups = [ get_changes() ];
+        $groups = $annot_groups = $all_groups = [ get_changes() ];
     }
     my $pushed_changes = [ map { @{$$_{changes}} } @$groups ];
     if ($online) {
@@ -2154,7 +2156,7 @@ sub execute_pushing()
         push @args, "--all-reviewers" if (@reviewers || @CCs);
         query_gerrit(\@queries, \@args) if (@queries);
     }
-    foreach my $group (@$groups) {
+    foreach my $group (@$annot_groups) {
         determine_remote_branch($group);
     }
     if ($online) {
@@ -2164,7 +2166,7 @@ sub execute_pushing()
         map_remote_changes($groups);
     }
     resolve_ref_base();
-    foreach my $group (@$groups) {
+    foreach my $group (@$annot_groups) {
         determine_topic($group);
     }
     if ($rebase) {
