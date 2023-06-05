@@ -41,6 +41,8 @@ our $verbose = 0;
 our $quiet = 0;
 our $dry_run = 0;
 
+our $mail_mode = 0;
+
 ##################
 # message output #
 ##################
@@ -439,6 +441,13 @@ sub load_config()
             $aliases{$1} = git_config($_);
         }
     }
+
+    my $mm = git_config('gpush.mailmode', 'false');
+    if ($mm eq 'true' || $mm eq 'yes') {
+        $mail_mode = 1;
+    } elsif ($mm ne 'false' && $mm ne 'no') {
+        fail("Unrecognized value for gpush.mailmode.\n");
+    }
 }
 
 ######################
@@ -468,9 +477,11 @@ sub update_excludes()
     if ($urefs) {
         $heads{$_} = 1 foreach (values %$urefs);
     }
-    my $grefs = $remote_refs{$remote};
-    if ($grefs) {
-        $heads{$_} = 1 foreach (values %$grefs);
+    if (defined($remote) && ($remote ne $upstream_remote)) {
+        my $grefs = $remote_refs{$remote};
+        if ($grefs) {
+            $heads{$_} = 1 foreach (values %$grefs);
+        }
     }
     @upstream_excludes = map { "^$_" } keys %heads;
 }
@@ -554,7 +565,8 @@ sub setup_remotes($)
         wout("Notice: $source has no upstream remote; defaulting to $upstream_remote.\n")
             if (!$quiet);
     }
-    if (defined($remote)) {
+    if ($mail_mode) {
+    } elsif (defined($remote)) {
         fail("Specified Gerrit remote '$remote' is invalid.\n")
             if (!defined($remotes{$remote}));
     } else {

@@ -38,6 +38,8 @@ Usage:
 
     Pushes Changes to Gerrit and adds reviewers and CC to the PatchSets.
 
+    Alternatively, prepares patches and optionally e-mails them.
+
 Description:
     This program is used to push PatchSets to Gerrit, and at the same
     time add reviewers and CCs to the PatchSets pushed.
@@ -80,6 +82,10 @@ Description:
 
     Note that this program can be used in the middle of an interactive
     rebase, to push out the amended commits instantly.
+
+    Alternatively, this program may operate in mail mode, to support a
+    patch-based contribution workflow as still employed by many older
+    FLOSS projects.
 
 Options:
     -a, --all
@@ -127,6 +133,9 @@ Options:
 
     -f, --force
         Push despite newer PatchSets being on Gerrit.
+
+        In mail mode, prepare (and send) patches even if nothing changed
+        since the last iteration.
 
     -r, --remote <remote>
         Specify the git remote to push to.
@@ -210,6 +219,10 @@ Options:
         Like --list-rebase, but also annotate the Changes with on-line
         state information from Gerrit.
 
+    --send
+        In mail mode, send out the patches right away using git send-email,
+        rather than merely preparing them using git format-patch.
+
     --aliases
         Report all registered aliases and quit.
 
@@ -225,6 +238,23 @@ Options:
 
     --debug
         Print debug information.
+
+Mail mode:
+    In this mode, this program operates entirely without Gerrit; you
+    need to mentally adjust the terminology to reflect that fact.
+    Most importantly, nothing is actually pushed; rather, patches are
+    prepared and optionally sent. Some options become inapplicable.
+
+    The benefit of this mode over plain git is the availability of
+    independent series on a single branch (this concept is known as
+    "stacked branches"). Series have sticky properties.
+
+    When --send is not used, gpush.outdir needs to be configured, and
+    each series must have a topic that is a valid filepath component.
+
+    To enable operation, it is still necessary to install Gerrit's
+    commit-msg hook, which appends Change-Id footers. These footers
+    are stripped out when the patches are prepared.
 
 Configuration:
     This program uses options from the git configuration. The following
@@ -256,6 +286,15 @@ Configuration:
         The git remote to assume to be the upstream if the pushed branch
         does not have a remote-tracking branch configured.
         Defaults to 'origin' or the only present remote if not configured.
+
+    gpush.mailmode
+        Enable mail mode. Defaults to false.
+
+    gpush.outdir
+        This option must be set when using mail mode without --send.
+        It specifies the output base directory for the prepared patches.
+        The prefix '~/' is understood. Relative paths are resolved
+        against the work tree's top-level directory.
 
     In addition to the git configuration (which takes precedence), the file
     .git-gpush-aliases located next to this program is also read. It may
@@ -333,6 +372,9 @@ my $list_only = 0;
 my $list_rebase = 0;
 my $list_online = 0;
 
+my $send_email = 0;
+my $outdir;
+
 my @reviewers;
 my @CCs;
 
@@ -402,6 +444,8 @@ sub parse_arguments(@)
             $list_only = 1;
             $list_rebase = 1;
             $list_online = 1;
+        } elsif ($arg eq "--send") {
+            $send_email = 1;
         } elsif ($arg eq "--aliases") {
             foreach my $key (sort(keys %aliases)) {
                 print "$key = $aliases{$key}\n";
@@ -467,9 +511,24 @@ sub parse_arguments(@)
             $commit_count || $from_base || $extend || $capture;
     my $series_modifying =
             $series_specifying || defined($ref_to) || defined($topic);
+    my $gerrit_specific =
+            @reviewers || @CCs || defined($remote) || $force_branch;
     my $push_specific =
-            @reviewers || @CCs || $force || $force_branch
-            || defined($remote);
+            $gerrit_specific || $force || $send_email;
+
+    if ($mail_mode) {
+        fail("Push-modifying options are incompatible with mail mode.\n")
+            if ($gerrit_specific || $minimal_override);
+        fail("--branch is incompatible with mail mode.\n")
+            if (defined($ref_to));
+        fail("--list-online is incompatible with mail mode.\n")
+            if ($list_online);
+        fail("Must configure gpush.outdir to use mail mode without --send, --list, or --group.\n")
+            if (!defined($outdir) && !$send_email && !$list_only && !$group_only);
+    } else {
+        fail("--send is exclusive to mail mode.\n")
+            if ($send_email);
+    }
 
     if ($group_only) {
         fail("--group and --list are mutually exclusive.\n")
@@ -508,6 +567,14 @@ use constant {
 sub process_config()
 {
     load_config();
+
+    if ($mail_mode) {
+        $minimal = 0;
+        $outdir = git_config('gpush.outdir');
+        $outdir =~ s,^~/,$ENV{HOME}/,
+            if (defined($outdir));
+        return;
+    }
 
     my $mi = git_config('gpush.minimal', 'true');
     if ($mi eq 'true' || $mi eq 'yes') {
@@ -583,7 +650,11 @@ sub caption_group($)
                              ($list_online && length($tos)) ? " on '$remote'" : "")
                           : $group_only
                                 ? ("Grouping", "")
-                                : ("Pushing", " to '$remote'");
+                                : !$mail_mode
+                                    ? ("Pushing", " to '$remote'")
+                                    : $send_email
+                                        ? ("Mailing", "")
+                                        : ("Formatting", "");
     return (sprintf("%s %d Change(s)%s%s%s:",
                     $pfx, int(@$changes), $tos, $rmt, $tpcs),
             $changes);
@@ -744,7 +815,7 @@ sub determine_local_branch($)
             if (defined($local_branch) && !$in_rebase);
     }
     setup_remotes($source);
-    set_gerrit_config($remote);
+    set_gerrit_config($remote) if (!$mail_mode);
     source_map_validate();
 }
 
@@ -782,6 +853,12 @@ sub determine_topic($)
         $tpc = aggregate_property($group, 'topic',
                                   sub { $$_{ntopic} // $$_{topic} },
                                   sub { '  /'.$_ });
+    }
+    if (!length($tpc) && $mail_mode && !$send_email && !$list_only) {
+        set_group_error($group, 'fixed',
+                        "Cannot format-patch series without a topic."
+                        ." Please specify one.\n");
+        fail_formatted(report_pushed_changes($group));
     }
     $$group{topic} = $tpc;
 }
@@ -821,7 +898,7 @@ sub visit_pushed_changes($)
         scan_pushed_group($group, \@commits);
     }
     print "Visiting pushed commits ...\n" if ($debug);
-    visit_local_commits(\@commits);
+    visit_local_commits(\@commits, $mail_mode);
 }
 
 sub initialize_get_changes()
@@ -1355,16 +1432,29 @@ sub parent_trees_equal($$)
            eq get_1st_parent_tree($orig_commit);
 }
 
-sub commits_equal($$$$)
+sub commits_equal($$$$$)
 {
-    my ($base_id, $tree, $commit, $old_commit) = @_;
+    my ($base_id, $tree, $message, $commit, $old_commit) = @_;
 
     return $old_commit
         && ($tree eq $$old_commit{tree})
         && ($base_id eq get_1st_parent($old_commit))
         && (get_more_parents($commit) eq get_more_parents($old_commit))
-        && ($$commit{message} eq $$old_commit{message})
+        && ($message eq $$old_commit{message})
         && ("@{$$commit{author}}" eq "@{$$old_commit{author}}");
+}
+
+sub rebase_commit_message($)
+{
+    my ($commit) = @_;
+
+    my $message = $$commit{message};
+    if ($mail_mode) {
+        $message =~ s/\nChange-Id: $$commit{changeid}\n/\n/;
+        $message =~ s/\n+$/\n/;
+        $message =~ s/\n{3,}/\n\n/;
+    }
+    return $message;
 }
 
 sub try_reuse_commit($$$$$$$$$)
@@ -1410,9 +1500,10 @@ sub rebase_commit($$$$$)
     my $parents = $$commit{parents};
     my $parent_id = @$parents ? $$parents[0] : 'ROOT';
 
-    if ($base_id eq $parent_id) {
+    if (($base_id eq $parent_id) && !$mail_mode) {
         # Same base, so no need to actually rebase.
-        if (commits_equal($base_id, $$commit{tree}, $commit, $old_commit)) {
+        if (commits_equal($base_id, $$commit{tree}, $$commit{message},
+                          $commit, $old_commit)) {
             # The source commit was amended, but without real change.
             # We reuse the pushed commit to reduce churn on Gerrit.
             # This causes that prior to re-pushing over a bogus PatchSet,
@@ -1469,13 +1560,14 @@ sub rebase_commit($$$$$)
         }
     }
 
-    if (commits_equal($base_id, $tree, $commit, $old_commit)) {
+    my $message = rebase_commit_message($commit);
+    if (commits_equal($base_id, $tree, $message, $commit, $old_commit)) {
         # If we produced the same contents as last time, we re-use the
         # commit we already have in the _pushed ref - that way, we save
         # some work, and any local rebasing will not affect the final SHA1.
         return ($old_commit, "re-created from $did");
     }
-    if (commits_equal($base_id, $tree, $commit, $prep_commit)) {
+    if (commits_equal($base_id, $tree, $message, $commit, $prep_commit)) {
         # Same with the _rebased ref.
         return ($prep_commit, "re-created from $did");
     }
@@ -1484,7 +1576,7 @@ sub rebase_commit($$$$$)
     # so create a new one.
     my $new_parents = ($base_id eq 'ROOT') ? [] : [ $base_id ];
     my $new_commit = create_commit(
-            $new_parents, $tree, $$commit{message},
+            $new_parents, $tree, $message,
             $$commit{author}, $$commit{committer});
     $$new_commit{changeid} = $$commit{changeid};
     $$new_commit{subject} = $$commit{subject};
@@ -1703,10 +1795,13 @@ sub classify_changes_offline($)
     }
 }
 
+my $have_modified = 0;
+
 sub classify_changes_offline_rebase($)
 {
     my ($group) = @_;
 
+    my $any_modified = 0;
     my $changes = $$group{changes};
     foreach my $change (@$changes) {
         my $commit = $$change{final};
@@ -1715,18 +1810,23 @@ sub classify_changes_offline_rebase($)
         if (defined($pushed)) {
             my $sha1 = $$commit{id};
             if ($pushed ne $sha1) {
+                $any_modified++;
                 $$change{freshness} = MODIFIED;
             } else {
                 $$change{freshness} = UNMODIFIED;
             }
         } else {
+            $any_modified++;
             $$change{freshness} = NEW;
         }
+    }
+    if ($any_modified) {
+        $$group{have_modified} = 1;
+        $have_modified = 1;
     }
 }
 
 my $have_rejected = 0;
-my $have_modified = 0;
 my $need_force = 0;
 
 sub classify_changes_online($)
@@ -2038,6 +2138,38 @@ sub update_unpushed($)
     }
 }
 
+sub format_patches($)
+{
+    my ($group) = @_;
+
+    return 1 if (!$force && !$$group{have_modified});
+
+    my $changes = $$group{changes};
+    my $tip = $$changes[-1]{final}{id};
+    my $base = $$group{base};
+    my $tpc = $$group{topic};
+
+    my @gitopt = ('--binary');
+    # Can't use the -<n> <tip> notation, as -8 is misunderstood
+    # by git send-email.
+    push @gitopt, (($base eq 'ROOT') ? '--root' : '^'.$base), $tip;
+
+    if ($send_email) {
+        my @gitcmd = ('git', 'send-email');
+        push @gitcmd, '--quiet' if (!$verbose);
+        push @gitcmd, '--dry-run' if ($dry_run);
+        push @gitcmd, @gitopt;
+        run_process(SOFT_FAIL | FWD_STDIN | FWD_OUTPUT, @gitcmd);
+    } else {
+        my @gitcmd = ('git', 'format-patch');
+        push @gitcmd, '--quiet';  # Don't print file names
+        push @gitcmd, '-o', $outdir."/".$tpc;
+        push @gitcmd, @gitopt;
+        run_process(SOFT_FAIL | FWD_OUTPUT | DRY_RUN, @gitcmd);
+    }
+    return !$?;
+}
+
 # We save the "prospective" state separately, so it remains authoritative
 # over gpick'd updates from Gerrit. However, we don't do that for the
 # series grouping, as that would lead to some unintuitive corner cases.
@@ -2127,7 +2259,7 @@ sub execute_grouping()
 sub execute_pushing()
 {
     my $rebase = !$list_only || $list_rebase;
-    my $online = !$list_only || $list_online;
+    my $online = (!$list_only || $list_online) && !$mail_mode;
     my ($groups, $annot_groups, $all_groups);
     if ($push_all) {
         my $have_loose;
@@ -2145,28 +2277,33 @@ sub execute_pushing()
     } else {
         $groups = $annot_groups = $all_groups = [ get_changes() ];
     }
-    my $pushed_changes = [ map { @{$$_{changes}} } @$groups ];
-    if ($online) {
-        my @queries = map { "change:".$$_{id} } @$pushed_changes;
-        push @queries,
-                map { "commit:".$_ }
-                # Only ones that are not upstream yet.
-                grep { $commit_by_id{$_} }
-                # Only 2nd+ parents of local commits.
-                map { @$_ > 1 ? @$_[1 .. $#$_] : () }
-                map { $$_{local}{parents} } @$pushed_changes;
-        my @args;
-        push @args, "--all-reviewers" if (@reviewers || @CCs);
-        query_gerrit(\@queries, \@args) if (@queries);
-    }
-    foreach my $group (@$annot_groups) {
-        determine_remote_branch($group);
-    }
-    if ($online) {
-        foreach my $group (@$groups) {
-            check_merges($group);
+    my $pushed_changes;
+    if ($mail_mode) {
+        $pushed_changes = [];
+    } else {
+        $pushed_changes = [ map { @{$$_{changes}} } @$groups ];
+        if ($online) {
+            my @queries = map { "change:".$$_{id} } @$pushed_changes;
+            push @queries,
+                    map { "commit:".$_ }
+                    # Only ones that are not upstream yet.
+                    grep { $commit_by_id{$_} }
+                    # Only 2nd+ parents of local commits.
+                    map { @$_ > 1 ? @$_[1 .. $#$_] : () }
+                    map { $$_{local}{parents} } @$pushed_changes;
+            my @args;
+            push @args, "--all-reviewers" if (@reviewers || @CCs);
+            query_gerrit(\@queries, \@args) if (@queries);
         }
-        map_remote_changes($groups);
+        foreach my $group (@$annot_groups) {
+            determine_remote_branch($group);
+        }
+        if ($online) {
+            foreach my $group (@$groups) {
+                check_merges($group);
+            }
+            map_remote_changes($groups);
+        }
     }
     resolve_ref_base();
     foreach my $group (@$annot_groups) {
@@ -2208,24 +2345,43 @@ sub execute_pushing()
     } else {
         print_errors($groups);
         show_changes($groups) if (!$quiet);
-        foreach my $group (@$groups) {
-            prepare_meta($group);
-        }
-        if ($have_modified) {
-            foreach my $group (@$groups) {
-                push_changes($group);
+        if ($mail_mode) {
+            if ($have_modified || $force) {
+                foreach my $group (@$groups) {
+                    if (!format_patches($group)) {
+                        save_state($dry_run);
+                        exit(1);
+                    }
+                    # Unlike when pushing to Gerrit, we cannot simply gpush again to
+                    # re-sync the state after something went wrong. Instead, we must
+                    # update each series' state right after rolling it, and save the
+                    # state even when subsequent series fail (most probably due to
+                    # the user interactively quitting git send-email).
+                    update_state($group);
+                }
+            } else {
+                print "No modified commits - nothing to do.\n" if (!$quiet);
             }
         } else {
-            print "No modified commits - nothing to push.\n" if (!$quiet);
-        }
-        foreach my $group (@$groups) {
-            update_unpushed($group);
-        }
+            foreach my $group (@$groups) {
+                prepare_meta($group);
+            }
+            if ($have_modified) {
+                foreach my $group (@$groups) {
+                    push_changes($group);
+                }
+            } else {
+                print "No modified commits - nothing to push.\n" if (!$quiet);
+            }
+            foreach my $group (@$groups) {
+                update_unpushed($group);
+            }
 
-        # This makes sense even if no modified commits are pushed
-        # (e.g., syncing state after a dumb push).
-        foreach my $group (@$groups) {
-            update_state($group);
+            # This makes sense even if no modified commits are pushed
+            # (e.g., syncing state after a dumb push).
+            foreach my $group (@$groups) {
+                update_state($group);
+            }
         }
     }
 }

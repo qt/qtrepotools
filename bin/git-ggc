@@ -132,6 +132,7 @@ sub perform_gc()
 
     print "Loading refs ...\n" if ($debug);
     my %pushed;  # { sequence-number => sha1 }
+    my %pushed_inv;  # { sha1 => sequence-number }
     my %zaps;  # { sequence-number => [ state-ref, ... ] }
     my %fzaps;  # { gerrit-number => [ patchset-number => fetched-ref, ... ] }
     my %visits;  # { sha1 => 1 }
@@ -150,6 +151,9 @@ sub perform_gc()
                 push @{$zaps{$1}}, $_;
                 if ($2 eq "pushed") {
                     $pushed{$1} = $sha1;
+                    # Collisions are possible here, but we want only the Change-Id
+                    # anyway, and that is inherently the same for all candidates.
+                    $pushed_inv{$sha1} = $1;
                     $visits{$sha1} = 1;
                 }
             } elsif (m,^g(\d+)_(\d+)$,) {
@@ -192,7 +196,7 @@ sub perform_gc()
     }
 
     print "Visiting pushed and fetched PatchSets ...\n" if ($debug);
-    visit_local_commits([ keys %visits ]);
+    visit_local_commits([ keys %visits ], $mail_mode);
 
     # Keep ancestors of pushed commits, so complete_pushed_series()
     # in gpick does not need to re-fetch them.
@@ -212,7 +216,18 @@ sub perform_gc()
             $commit = $commit_by_id{$sha1};
             next if (!$commit);  # Hit upstream
 
-            $changeid = $$commit{changeid};
+            if ($mail_mode) {
+                # In mail mode, the "pushed" commits have no Change-Ids.
+                # Mail mode doesn't use minimal mode, so the lookup by
+                # SHA1 should work reliably.
+                my $key = $pushed_inv{$sha1};
+                next if (!defined($key));  # Not supposed to happen
+                my $chg = $change_by_key{$key};
+                next if (!$chg);  # Not supposed to happen
+                $changeid = $$chg{id};
+            } else {
+                $changeid = $$commit{changeid};
+            }
 
             next if (defined($kept_changes{$changeid}));
             $kept_changes{$changeid} = "part of push";
@@ -227,7 +242,7 @@ sub perform_gc()
     my %zap_ids = map { $_ => 1 }
                   grep { !defined($kept_changes{$_}) }
                   keys %changes_by_id;
-    if (%zap_ids || %fzaps) {
+    if ((%zap_ids || %fzaps) && !$mail_mode) {
         print "Querying Gerrit for prunable Changes ...\n" if ($debug);
         get_gerrit_config();
         my $ginfos = query_gerrit_only([ map { "change:".$_ } (keys %zap_ids, keys %fzaps) ]);
