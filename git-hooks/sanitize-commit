@@ -750,6 +750,34 @@ sub flushFile()
     complain_style();
 }
 
+my $object_like_macro = qr/
+    (
+        QT_USE_NAMESPACE |
+        QT_BEGIN_INCLUDE_NAMESPACE |
+        QT_END_INCLUDE_NAMESPACE |
+        QT_BEGIN_NAMESPACE |
+        QT_END_NAMESPACE |
+        Q_OBJECT |
+        Q_GADGET |
+        QML_ELEMENT
+    );
+/x;
+
+my $function_like_macro = qr/
+    (
+        QT_FORWARD_DECLARE_CLASS |
+        QT_FORWARD_DECLARE_STRUCT |
+        Q_PROPERTY |
+        Q_DECLARE_PUBLIC |
+        Q_DECLARE_PRIVATE |
+        Q_DECLARE_PRIVATE_D |
+        Q_DISABLE_COPY |
+        Q_DISABLE_COPY_MOVE |
+        QT_MOVE_ASSIGNMENT_OPERATOR_IMPL_VIA_MOVE_AND_SWAP |
+        QT_MOVE_ASSIGNMENT_OPERATOR_IMPL_VIA_PURE_SWAP
+    )\([^)]*\);
+/x;
+
 my $merge;
 my $new_file;
 my $foreign;
@@ -887,6 +915,10 @@ while (<DIFF>) {
         }
         if (/QT_(?:DISABLE_)?DEPRECATED_/) {
             complain_ln("Deprecation adjustments already submitted?", "", -1);
+        }
+        # Check for extraneous semicolon after macros.
+        if ($_ =~ $object_like_macro || $_ =~ $function_like_macro) {
+            styleFail("Semicolon after $1");
         }
     } else {
         flushChunk() if ($chunk);
