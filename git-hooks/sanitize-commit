@@ -251,7 +251,7 @@ sub check_apple_terminology()
     if ($clike) {
         if (/\bQ_OS_MAC\b.*&&.*!.*\bQ_OS_IOS\b/) {
             complain_ln("Use of deprecated idiom 'defined(Q_OS_MAC) && !defined(Q_OS_IOS)';" .
-                        " use Q_OS_OSX instead", "terminology");
+                        " use Q_OS_MACOS instead", "terminology");
         }
 
         if (/\bQ_OS_MAC\b/) {
