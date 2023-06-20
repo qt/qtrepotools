@@ -492,7 +492,10 @@ while (<MSG>) {
                 # cherry-pick lines count as footers as well.
                 $ftr = 1;
                 $inchangelog = 0;
-            } elsif (/^(?:[A-Z][A-Za-z]+(?:-[A-Za-z][a-z]+)+|F[Ii][Xx][Ee][Ss]|C[Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg]): /) {
+            } elsif (/^(?:[A-Z][A-Za-z]+(?:-[A-Za-z][a-z]+)+|F[Ii][Xx][Ee][Ss]|C[Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg]):(.+)/) {
+                if ($1 !~ /^ /) {
+                    complain_ln("Missing space after colon in footer", "");
+                }
                 $ftr = 1;
                 $inchangelog = 0;
                 if (/^Change-?Log:/i) {
