@@ -599,58 +599,51 @@ if ($badsign) {
 if ($coverity && !$cid) {
     do_complain($coverity, "Mention of Coverity without Coverity-Id footer is probably incorrect", "");
 }
-if ($with_pickbot) {
-    if ($havecherry) {
-        if (%picktos) {
-            complain("Leftover Pick-to footer in commit message of cherry-picked change",
-                     "cherry", 1);
-        }
+if ($with_pickbot && !$havecherry) {
+    my $onDev;
+    my $masterName = $foundDev ? "dev" : "master";
+    if (defined($target)) {
+        $onDev = ($target eq $masterName) || ($target =~ m,^wip/,);
     } else {
-        my $onDev;
-        my $masterName = $foundDev ? "dev" : "master";
-        if (defined($target)) {
-            $onDev = ($target eq $masterName) || ($target =~ m,^wip/,);
-        } else {
-            my $masterRev = $allHeads{$masterName};
-            chomp(my $sha1Base = `git merge-base $sha1 $masterRev`);
-            # Catch both ancestor and descendant cases.
-            $onDev = ($sha1Base eq $sha1 || $sha1Base eq $masterRev);
-        }
-        if (!$onDev) {
-            if (%picktos) {
-                if (exists($picktos{$masterName})) {
-                    complain("Picking downward from $masterName is preferred", "", -1);
-                } else {
-                    complain("Omission of $masterName from Pick-to footer might be incorrect",
-                             "", -1);
-                }
-                if ($target =~ /(\d+\.\d+)\.\d+$/) {
-                    # Verify that the upstream stable branch is in the pick-to if the current
-                    # target is a release branch.
-                    if (!exists($picktos{$1})) {
-                        complain("Omission of $1 from the Pick-to footer is probably incorrect",
-                                 "cherry")
-                    }
-                }
+        my $masterRev = $allHeads{$masterName};
+        chomp(my $sha1Base = `git merge-base $sha1 $masterRev`);
+        # Catch both ancestor and descendant cases.
+        $onDev = ($sha1Base eq $sha1 || $sha1Base eq $masterRev);
+    }
+    if (!$onDev) {
+        if (%picktos) {
+            if (exists($picktos{$masterName})) {
+                complain("Picking downward from $masterName is preferred", "", -1);
             } else {
-                complain("Omission of Pick-to footer is probably incorrect", "cherry");
+                complain("Omission of $masterName from Pick-to footer might be incorrect",
+                            "", -1);
             }
-        } elsif (%picktos) {
-            my %majors;
-            # Populate a hash of majors with arrays of stable branches
-            foreach (keys %allHeads) {
-                if (/^(\d+)\.(\d+)$/) {
-                    push @{$majors{$1}}, $2;
+            if ($target =~ /(\d+\.\d+)\.\d+$/) {
+                # Verify that the upstream stable branch is in the pick-to if the current
+                # target is a release branch.
+                if (!exists($picktos{$1})) {
+                    complain("Omission of $1 from the Pick-to footer is probably incorrect",
+                                "cherry")
                 }
             }
-            foreach (sort keys %majors) {
-                if (@{$majors{$_}} >= 2) {
-                    my @major = sort { $a <=> $b } @{$majors{$_}};
-                    my ($latest, $previous) = ("$_.$major[-1]", "$_.$major[-2]");
-                    if (exists($picktos{$previous}) && !exists($picktos{$latest})) {
-                        complain("Omission of $latest from cherry-pick targets".
-                                 " is probably incorrect", "cherry");
-                    }
+        } else {
+            complain("Omission of Pick-to footer is probably incorrect", "cherry");
+        }
+    } elsif (%picktos) {
+        my %majors;
+        # Populate a hash of majors with arrays of stable branches
+        foreach (keys %allHeads) {
+            if (/^(\d+)\.(\d+)$/) {
+                push @{$majors{$1}}, $2;
+            }
+        }
+        foreach (sort keys %majors) {
+            if (@{$majors{$_}} >= 2) {
+                my @major = sort { $a <=> $b } @{$majors{$_}};
+                my ($latest, $previous) = ("$_.$major[-1]", "$_.$major[-2]");
+                if (exists($picktos{$previous}) && !exists($picktos{$latest})) {
+                    complain("Omission of $latest from cherry-pick targets".
+                                " is probably incorrect", "cherry");
                 }
             }
         }
