@@ -513,7 +513,15 @@ while (<MSG>) {
                 } elsif (/^Pick-to: *(.*)/i) {
                     for my $pick (split(/\s+/, $1)) {
                         $picktos{$pick} = 1;
-                        if (!defined($allHeads{$pick})) {
+                        my @pick_alternatives = ($pick, "lts-$pick", "tqtc/lts-$pick");
+                        my $valid_pick = 0;
+                        foreach my $pick_alt (@pick_alternatives) {
+                            if (defined($allHeads{$pick_alt})) {
+                                $valid_pick = 1;
+                                last;
+                            }
+                        }
+                        if (!$valid_pick) {
                             complain_ln("Pick-to entry '$pick' is not a valid branch in $repo",
                                         "pickto", 1);
                         } elsif (defined($target) && ($pick eq $target)) {
