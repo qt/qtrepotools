@@ -419,6 +419,7 @@ my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
 my ($coverity, $cid) = (0, 0);
 my $msgline = 0;
 my %picktos = ();
+my $prevline = "";
 open MSG, "git cat-file -p ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     last if ($_ eq "\n");
@@ -474,6 +475,9 @@ while (<MSG>) {
             $inchangelog = 0;
             # Empty line following footer(s).
             $footer = ($footer == STS_FOOTER) ? STS_FTR_BLNK : STS_BLANK;
+            if ($prevline eq "") {
+                complain_cln("Two trailing newlines", "log");
+            }
         } elsif ($cherry) {
             $cherry = 0 if (/\)/);
         } else {
@@ -562,6 +566,7 @@ while (<MSG>) {
                 $footer = STS_TEXT;
             }
         }
+        $prevline = $_;
     }
 
     if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
