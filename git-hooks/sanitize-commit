@@ -929,7 +929,9 @@ while (<DIFF>) {
         if (/\xe2(\x80[\xaa-\xae]|\x81[\xa6-\xa9])/ || /[\x{202A}-\x{202E}\x{2066}-\x{2069}]/) {
             complain_ln("Unicode bi-directional override characters", "bidi", 1)
         }
-        if (/QT_(?:DISABLE_)?DEPRECATED_/) {
+        # Don't grumble about the #if-ery around deprecations (or the #defines
+        # of the deprecation macros), only about the deprecations themselves.
+        if (!/^\h*#/ && /\bQT_DEPRECATED_/) {
             complain_ln("Deprecation adjustments already submitted?", "", -1);
         }
         # Check for extraneous semicolon after macros.
