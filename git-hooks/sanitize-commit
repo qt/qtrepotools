@@ -931,7 +931,7 @@ while (<DIFF>) {
         }
         # Don't grumble about the #if-ery around deprecations (or the #defines
         # of the deprecation macros), only about the deprecations themselves.
-        if (!/^\h*#/ && /\bQT_DEPRECATED_/) {
+        if (!/^\h*#/ && /\bQ(T|_DECL_ENUMERATOR)_DEPRECATED_/) {
             complain_ln("Deprecation adjustments already submitted?", "", -1);
         }
         # Check for extraneous semicolon after macros.
