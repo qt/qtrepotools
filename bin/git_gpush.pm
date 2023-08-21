@@ -619,7 +619,8 @@ sub get_1st_parent_tree($)
     # as this code aims at series which were not rebased, using the base
     # commit itself will work just as well for the series' first commit.
     my $parents = $$commit{parents};
-    my $parent_id = @$parents ? $$parents[0] : 'ROOT';
+    return 'ROOT' if (!@$parents);
+    my $parent_id = $$parents[0];
     my $parent = $commit_by_id{$parent_id};
     return $parent ? $$parent{tree} : $parent_id;
 }
