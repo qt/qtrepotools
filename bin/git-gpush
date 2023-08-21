@@ -1306,13 +1306,14 @@ sub prepare_rebase($$$)
     return;
 }
 
-sub parent_trees_equal($$$)
+sub parent_trees_equal($$)
 {
-    my ($parent, $parent_id, $orig_commit) = @_;
+    my ($parent_id, $orig_commit) = @_;
 
     # Upstream commits are not visited, so we get no tree id. However,
     # as this code aims at series which were not rebased, using the base
     # commit itself will work just as well for the series' first commit.
+    my $parent = $commit_by_id{$parent_id};
     return ($parent ? $$parent{tree} : $parent_id)
            eq get_1st_parent_tree($orig_commit);
 }
@@ -1352,7 +1353,6 @@ sub rebase_commit($$$$$)
     return if (@$parents > 1);
 
     my ($tree, $errors);
-    my $parent = $commit_by_id{$parent_id};
     if ($old_commit && ($base_id eq $old_base_id) && defined($orig_id)) {
         if ($$commit{id} eq $orig_id) {
             # We are picking the same commit to the same base, so
@@ -1361,7 +1361,7 @@ sub rebase_commit($$$$$)
         }
         my $orig_commit = $commit_by_id{$orig_id};
         if ($orig_commit && ($$commit{tree} eq $$orig_commit{tree})) {
-            if (parent_trees_equal($parent, $parent_id, $orig_commit)) {
+            if (parent_trees_equal($parent_id, $orig_commit)) {
                 if (commit_metas_equal($commit, $orig_commit)) {
                     # We are picking the same content to the same base, so
                     # we can just recycle the previously created commit.
@@ -1375,6 +1375,7 @@ sub rebase_commit($$$$$)
         }
     }
     my $base = $commit_by_id{$base_id};
+    my $parent = $commit_by_id{$parent_id};
     if ($base && $parent && ($$base{tree} eq $$parent{tree})) {
         # The parent commits differ, but their trees are the same.
         $tree = $$commit{tree};
