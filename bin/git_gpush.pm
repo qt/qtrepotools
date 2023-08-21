@@ -711,9 +711,11 @@ our %gerrit_infos_by_id;
 # - topic: Gerrit topic. Persisted only as a cache.
 # - pushed: SHA1 of the commit this Change was pushed as last time
 #   from this repository.
+# - rebased: prospective value for 'pushed'.
 # - base: SHA1 of commit on top of which the entire series which this
 #   Change is part of was pushed.
 # - orig: SHA1 of the _local_ commit 'pushed' was derived from.
+# - rorig: same for 'rebased'.
 # - nbase/ntgt/ntopic: Non-committed values of the respective
 #   attributes, used by --group mode.
 # - exclude: Flag indicating whether the Change is excluded from
@@ -775,7 +777,7 @@ sub save_state(;$$)
     my (@lines, @updates);
     my @fkeys = ('key', 'grp', 'id', 'src', 'tgt', 'topic', 'base',
                  'ntgt', 'ntopic', 'nbase', 'exclude', 'hide');
-    my @rkeys = ('pushed', 'orig');
+    my @rkeys = ('pushed', 'rebased', 'orig', 'rorig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";
         push @fkeys, @rkeys;

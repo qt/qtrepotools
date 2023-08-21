@@ -759,15 +759,19 @@ sub scan_pushed_group($$)
 
     my $changes = $$group{changes};
     foreach my $change (@$changes) {
+        my $rcommit = $$change{rebased};
         my $pcommit = $$change{pushed};
-        if (!defined($pcommit)) {
+        if (!defined($rcommit) && !defined($pcommit)) {
             # In minimal mode, any previously pushed Change can be unmodified.
             next if ($minimal);
             # We stop at the 1st not previously pushed commit, as subsequent
             # commits are obviously modified anyway.
             last;
         }
-        push @$commits, $pcommit;
+        push @$commits, $rcommit if (defined($rcommit));
+        push @$commits, $pcommit if (defined($pcommit));
+        my $rocommit = $$change{rorig};
+        push @$commits, $rocommit if (defined($rocommit));
         my $ocommit = $$change{orig};
         push @$commits, $ocommit if (defined($ocommit));
     }
@@ -1330,9 +1334,39 @@ sub commits_equal($$$$)
         && ("@{$$commit{author}}" eq "@{$$old_commit{author}}");
 }
 
+sub try_reuse_commit($$$$$$$$$)
+{
+    my ($commit, $parent_id, $base_id, $orig_id,
+        $old_commit, $old_base_id, $what, $ptree, $pdid) = @_;
+
+    return 0 if (!defined($orig_id));
+    return 0 if ($base_id ne $old_base_id);
+    if ($$commit{id} eq $orig_id) {
+        # We are picking the same commit to the same base, so
+        # we can just reuse the previously created commit.
+        $$pdid = "reused unmodified ($what)";
+        return 1;
+    }
+    my $orig_commit = $commit_by_id{$orig_id};
+    return 0 if (!$orig_commit);  # Huuh?
+    return 0 if ($$commit{tree} ne $$orig_commit{tree});
+    return 0 if (!parent_trees_equal($parent_id, $orig_commit));
+    if (commit_metas_equal($commit, $orig_commit)) {
+        # We are picking the same content to the same base, so
+        # we can just reuse the previously created commit.
+        $$pdid = "reused amended ($what)";
+        return 1;
+    }
+    # We are picking the same diff to the same base, so
+    # we can reuse the previously created tree.
+    $$ptree = $$old_commit{tree};
+    $$pdid = "reused tree ($what)";
+    return 0;
+}
+
 sub rebase_commit($$$$$)
 {
-    my ($commit, $base_id, $old_commit, $old_base_id, $orig_id) = @_;
+    my ($commit, $base_id, $old_commit, $old_base_id, $change) = @_;
 
     my $parents = $$commit{parents};
     my $parent_id = @$parents ? $$parents[0] : 'ROOT';
@@ -1341,66 +1375,81 @@ sub rebase_commit($$$$$)
         # Same base, so no need to actually rebase.
         if (commits_equal($base_id, $$commit{tree}, $commit, $old_commit)) {
             # The source commit was amended, but without real change.
-            return ($old_commit, 're-created w/o rebase');
+            # We reuse the pushed commit to reduce churn on Gerrit.
+            # This causes that prior to re-pushing over a bogus PatchSet,
+            # one has to `gpick --ignore` it first.
+            return ($old_commit, 'reused w/o rebase');
         }
         # No previously pushed commit or it does not match,
         # so use the source commit as-is.
-        return ($commit, 'verbatim');
+        # We don't use _rebased here, as it would be pointless,
+        # and it would trigger empty rebases for descendants.
+        return ($commit, 'used verbatim');
     }
 
     # Technically, it would be possible to rebase merges along the
     # first parents, but there is no point in supporting this here.
     return if (@$parents > 1);
 
-    my ($tree, $errors);
-    if ($old_commit && ($base_id eq $old_base_id) && defined($orig_id)) {
-        if ($$commit{id} eq $orig_id) {
-            # We are picking the same commit to the same base, so
-            # we can just recycle the previously created commit.
-            return ($old_commit, 'recycled unmodified');
-        }
-        my $orig_commit = $commit_by_id{$orig_id};
-        if ($orig_commit && ($$commit{tree} eq $$orig_commit{tree})) {
-            if (parent_trees_equal($parent_id, $orig_commit)) {
-                if (commit_metas_equal($commit, $orig_commit)) {
-                    # We are picking the same content to the same base, so
-                    # we can just recycle the previously created commit.
-                    return ($old_commit, 'recycled amended');
-                }
-                # We are picking the same diff to the same base, so
-                # we can recycle the previously created tree.
-                $tree = $$old_commit{tree};
-                goto COMMIT;
-            }
-        }
+    my ($tree, $did);
+    return ($old_commit, $did)
+        if ($old_commit && try_reuse_commit(
+                $commit, $parent_id, $base_id, $$change{orig},
+                $old_commit, $old_base_id, "pushed",
+                \$tree, \$did));
+
+    # For the purposes of this function, old_commit is only a cache,
+    # so we can use other equivalent commits as well. We do that if
+    # we have a newer commit that wasn't actually pushed yet.
+    # While it is very unlikely that a once modified commit gets
+    # restored to the state of the last push, an accidental change
+    # and subsequent restoration of the base is realistic. Therefore,
+    # we try to use both commits, rather than only the newer one.
+    my $prep_commit;
+    my $rebased_id = $$change{rebased};
+    if (defined($rebased_id)) {
+        $prep_commit = $commit_by_id{$rebased_id};
+        return ($prep_commit, $did)
+            if ($prep_commit && try_reuse_commit(
+                    $commit, $parent_id, $base_id, $$change{rorig},
+                    $prep_commit, get_1st_parent($prep_commit), "rebased",
+                    \$tree, \$did));
     }
-    my $base = $commit_by_id{$base_id};
-    my $parent = $commit_by_id{$parent_id};
-    if ($base && $parent && ($$base{tree} eq $$parent{tree})) {
-        # The parent commits differ, but their trees are the same.
-        $tree = $$commit{tree};
-    } else {
-        ($tree, $errors) = apply_diff($commit, $base_id, USE_STDERR);
-        return (undef, undef, $errors) if (!defined($tree));
+
+    if (!defined($tree)) {
+        my $base = $commit_by_id{$base_id};
+        my $parent = $commit_by_id{$parent_id};
+        if ($base && $parent && ($$base{tree} eq $$parent{tree})) {
+            # The parent commits differ, but their trees are the same.
+            $tree = $$commit{tree};
+            $did = "verbatim tree";
+        } else {
+            ($tree, my $errors) = apply_diff($commit, $base_id, USE_STDERR);
+            return (undef, undef, $errors) if (!defined($tree));
+            $did = "fresh tree";
+        }
     }
 
     if (commits_equal($base_id, $tree, $commit, $old_commit)) {
         # If we produced the same contents as last time, we re-use the
         # commit we already have in the _pushed ref - that way, we save
         # some work, and any local rebasing will not affect the final SHA1.
-        return ($old_commit, 're-created w/rebase');
+        return ($old_commit, "re-created from $did");
+    }
+    if (commits_equal($base_id, $tree, $commit, $prep_commit)) {
+        # Same with the _rebased ref.
+        return ($prep_commit, "re-created from $did");
     }
 
     # No previously pushed commit or it does not match,
     # so create a new one.
-  COMMIT:
     my $new_parents = ($base_id eq 'ROOT') ? [] : [ $base_id ];
     my $new_commit = create_commit(
             $new_parents, $tree, $$commit{message},
             $$commit{author}, $$commit{committer});
     $$new_commit{changeid} = $$commit{changeid};
     $$new_commit{subject} = $$commit{subject};
-    return ($new_commit, 'fresh');
+    return ($new_commit, "fresh from $did");
 }
 
 my $have_conflicts = 0;
@@ -1470,7 +1519,7 @@ sub do_rebase_changes($$)
             next;
         }
         my ($new_commit, $did, $errors) =
-                rebase_commit($commit, $new_base, $old_commit, $old_base, $$change{orig});
+                rebase_commit($commit, $new_base, $old_commit, $old_base, $change);
         if (!$new_commit) {
             if (!defined($errors)) {
                 set_change_error($change, 'oneline',
@@ -1566,6 +1615,35 @@ sub rebase_groups($$)
     my ($groups, $upstreamed_changes) = @_;
 
     with_local_git_index(\&do_rebase_groups, $groups, $upstreamed_changes);
+}
+
+# Complementary to update_state()
+sub do_update_rebase_cache($)
+{
+    my ($group) = @_;
+
+    foreach my $change (@{$$group{changes}}) {
+        my $commit = $$change{final};
+        next if (!$commit);
+        my $sha1 = $$commit{id};
+        my $pushed = $$change{pushed};
+        if (defined($pushed) && ($sha1 eq $pushed)) {
+            # Final commit is the same, but source may have been amended.
+            $$change{orig} = $$change{local}{id};
+        } else {
+            $$change{rebased} = $sha1;
+            $$change{rorig} = $$change{local}{id};
+        }
+    }
+}
+
+sub update_rebase_cache($)
+{
+    my ($groups) = @_;
+
+    foreach my $group (@$groups) {
+        do_update_rebase_cache($group);
+    }
 }
 
 sub classify_changes_offline($)
@@ -1705,13 +1783,22 @@ sub show_changes($)
     print format_reports(make_listing($groups));
 }
 
-sub fail_push($@)
+sub fail_with_listing($@)
 {
     my ($groups, @msgs) = @_;
 
     my $reports = make_listing($groups);
     report_fixed($reports, @msgs);
     fail_formatted($reports);
+}
+
+sub fail_push($@)
+{
+    my ($groups, @msgs) = @_;
+
+    update_rebase_cache($groups);
+    save_state($dry_run);
+    fail_with_listing($groups, @msgs);
 }
 
 sub print_errors($)
@@ -1917,12 +2004,14 @@ sub update_state($)
     foreach my $change (@{$$group{changes}}) {
         $$change{grp} = $gid;
         $$change{pushed} = $$change{final}{id};
+        $$change{rebased} = undef;
         $$change{topic} = $tpc;
         $$change{ntopic} = undef;
         $$change{tgt} = $branch;
         $$change{ntgt} = undef;
         my $commit = $$change{local};
         $$change{orig} = $$commit{id};
+        $$change{rorig} = undef;
         # --rebase would be required after redoing a merge with a different
         # 1st parent anyway, so just don't save the base for merges.
         # Regular commits on top of merges are auto-rebased as well.
@@ -1964,7 +2053,8 @@ sub execute_pushing()
             foreach my $group (@$all_groups) {
                 classify_changes_offline($group);
             }
-            fail_push($all_groups, "Cannot push all with any free-standing loose Changes.\n");
+            fail_with_listing($all_groups,
+                    "Cannot push all with any free-standing loose Changes.\n");
         }
         $groups = [ grep { !$$_{hide} && !$$_{exclude} } @$all_groups ];
     } else {
@@ -2025,6 +2115,7 @@ sub execute_pushing()
     if ($list_only) {
         show_changes($all_groups);
         print "Not pushing - list mode.\n" if ($debug);
+        update_rebase_cache($groups) if ($online);
     } else {
         print_errors($groups);
         show_changes($groups) if (!$quiet);
