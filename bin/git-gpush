@@ -1340,8 +1340,7 @@ sub try_reuse_commit($$$$$$$$$)
         $old_commit, $old_base_id, $what, $ptree, $pdid) = @_;
 
     return 0 if (!defined($orig_id));
-    return 0 if ($base_id ne $old_base_id);
-    if ($$commit{id} eq $orig_id) {
+    if (($$commit{id} eq $orig_id) && ($base_id eq $old_base_id)) {
         # We are picking the same commit to the same base, so
         # we can just reuse the previously created commit.
         $$pdid = "reused unmodified ($what)";
@@ -1351,11 +1350,18 @@ sub try_reuse_commit($$$$$$$$$)
     return 0 if (!$orig_commit);  # Huuh?
     return 0 if ($$commit{tree} ne $$orig_commit{tree});
     return 0 if (!parent_trees_equal($parent_id, $orig_commit));
-    if (commit_metas_equal($commit, $orig_commit)) {
-        # We are picking the same content to the same base, so
-        # we can just reuse the previously created commit.
-        $$pdid = "reused amended ($what)";
-        return 1;
+    if ($base_id eq $old_base_id) {
+        if (commit_metas_equal($commit, $orig_commit)) {
+            # We are picking the same content to the same base, so
+            # we can just reuse the previously created commit.
+            $$pdid = "reused amended ($what)";
+            return 1;
+        }
+    } else {
+        my $base = $commit_by_id{$base_id};
+        my $old_base = $commit_by_id{$old_base_id};
+        return 0 if (!$base || !$old_base);
+        return 0 if ($$base{tree} ne $$old_base{tree});
     }
     # We are picking the same diff to the same base, so
     # we can reuse the previously created tree.
