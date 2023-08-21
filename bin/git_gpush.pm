@@ -596,13 +596,6 @@ sub changes_from_commits($)
     return [ map { $$_{change} } @$commits ];
 }
 
-sub get_1st_commit($)
-{
-    my ($parents) = @_;
-
-    return @$parents ? $$parents[0] : 'ROOT';
-}
-
 sub get_1st_parent($)
 {
     my ($commit) = @_;

@@ -1334,7 +1334,7 @@ sub rebase_commit($$$$$)
     my ($commit, $base_id, $old_commit, $old_base_id, $orig_id) = @_;
 
     my $parents = $$commit{parents};
-    my $parent_id = get_1st_commit($parents);
+    my $parent_id = @$parents ? $$parents[0] : 'ROOT';
 
     if ($base_id eq $parent_id) {
         # Same base, so no need to actually rebase.
