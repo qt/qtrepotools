@@ -80,6 +80,15 @@ def gerrit_link_maker(config: Config, change: Union[GerritChange.GerritChange, R
     return f"({mini_sha}) {subject[:70]}{'...' if len(subject) > 70 else ''}", url
 
 
+def set_round_topic(config: Config):
+    """Set the round topic"""
+    if config.state_data.get(config.args.repo_prefix+'qtbase').proposal.merged_ref:
+        print("Dependency Round Topic:",
+              f"dependency_round_{config.state_data.get(config.args.repo_prefix+'qtbase').proposal.merged_ref[:10]}")
+        for repo in config.state_data.values():
+            repo.topic = f"dependency_round_{config.state_data.get(config.args.repo_prefix+'qtbase').proposal.merged_ref[:10]}"
+
+
 def get_repos(config: Config, repos_override: list[str] = None, non_blocking_override: Union[list[str], None] = []) -> dict[str, Repo]:
     """Create a dict of initialized Repo objects. If repos_override is not specified,
     repos from the application's config/arguments are initialized alongside qt5 submodules
@@ -117,7 +126,7 @@ def get_repos(config: Config, repos_override: list[str] = None, non_blocking_ove
         else:
             # Initialize the new repo
             repo.deps_yaml, repo.branch = get_dependencies_yaml(config, repo)
-            repo.original_ref = get_head(config, repo)
+            repo.original_ref, repo.original_message = get_head(config, repo)
             retdict[repo.id] = repo
     if not config.args.update_default_repos and not config.args.use_head:
         for repo in retdict.keys():
@@ -243,26 +252,27 @@ def get_head(config: Config, repo: Union[Repo, str], pull_head: bool = False) ->
     saved ref from state if the repo progress is >= PROGRESS.DONE.
     Override state refs and pull remote branch HEAD with pull_head=True"""
     gerrit = config.datasources.gerrit_client
+    real_branch = repo.branch if type(repo) is Repo else config.args.branch
     if type(repo) == str:
         repo = search_for_repo(config, repo)
     if (not pull_head and repo.id in config.state_data.keys()
             and config.state_data[repo.id].progress >= PROGRESS.DONE):
         if config.state_data[repo.id].proposal.merged_ref:
-            return config.state_data[repo.id].proposal.merged_ref
+            return config.state_data[repo.id].proposal.merged_ref, ""
         else:
-            return config.state_data[repo.id].original_ref
+            return config.state_data[repo.id].original_ref, config.state_data[repo.id].original_message
     if repo.id in config.qt5_default.keys() and not config.args.use_head:
         r = gerrit.projects.get(config.args.repo_prefix + 'qt5').branches.get(
-            'refs/heads/' + config.args.branch).get_file_content(repo.name)
-        return bytes.decode(base64.b64decode(r), "utf-8")
+            'refs/heads/' + real_branch).get_file_content(repo.name)
+        return bytes.decode(base64.b64decode(r), "utf-8"), ""
     else:
-        branches = [config.args.branch, "dev", "master"]
+        branches = [real_branch, "dev", "master"]
         branch_head = None
         for branch in branches:
             try:
                 branch_head = gerrit.projects.get(repo.id).branches.get(f"refs/heads/{branch}")
-                if branch != config.args.branch and not config.suppress_warn:
-                    print(f"INFO: Using {branch} instead of {config.args.branch} "
+                if branch != real_branch and not config.suppress_warn:
+                    print(f"INFO: Using {branch} instead of {real_branch} "
                           f"as the reference for {repo}")
                 break
             except GerritExceptions.UnknownBranch:
@@ -270,9 +280,11 @@ def get_head(config: Config, repo: Union[Repo, str], pull_head: bool = False) ->
         if not branch_head:
             if not config.suppress_warn:
                 print(f"Exhausted branch options for {repo}! Tried {branches}")
-                return ""
+                return "", ""
         else:
-            return branch_head.revision
+            # Fetch the commit details for the branch head
+            branch_head = gerrit.projects.get(repo.id).get_commit(branch_head.revision)
+            return branch_head.commit, branch_head.subject
 
 
 def get_top_integration_sha(config, repo: Repo) -> str:
@@ -298,22 +310,26 @@ def get_top_integration_sha(config, repo: Repo) -> str:
                     integration_id = url.split("/")[-1]  # Get just the integration ID
                     break
             break
+    sha = ""
+    print(f"Looking for integration sha for {repo.proposal.change_id} from {repo.id}")
     if integration_id:
-        r = requests.get(f"https://testresults.qt.io/coin/api/integration/{repo.id}/tasks/{integration_id}")
+        r = requests.get(f"https://testresults.qt.io/coin/api/taskDetail?id={integration_id}")
         if r.status_code == 200:
-            sha = json.loads(r.text)[4]["1"]["rec"]["6"]["str"]
-            print(f"Found integration sha {sha} from Integration ID: {integration_id}")
-            return sha
-        else:
-            # Fallback to internal COIN if available. The task probably hadn't replicated to
-            # testresults yet.
-            try:
-                r = requests.get(f"http://{config.INTERNAL_COIN_HOST}/coin/api/integration/"
-                                 f"{repo.id}/tasks/{integration_id}")
-            except requests.exceptions.ConnectionError:
-                pass
-            if r.status_code == 200:
-                sha = json.loads(r.text)[4]["1"]["rec"]["6"]["str"]
+            data = json.loads(r.text)
+            tasks = data.get("tasks")
+            if tasks and len(tasks) > 0:
+                sha = data["tasks"].pop()["final_sha"]
+                print(f"Found integration sha {sha} from Integration ID: {integration_id}")
+                return sha
+
+        # Fallback to internal COIN if available. The task probably hadn't replicated to
+        # testresults yet.
+        r = requests.get(f"{config.COIN_INTERNAL_HOST}/coin/api/taskDetail?id={integration_id}")  # Update to use config variable
+        if r.status_code == 200:
+            data = json.loads(r.text)
+            tasks = data.get("tasks")
+            if tasks and len(tasks) > 0:
+                sha = data["tasks"].pop()["final_sha"]
                 print(f"Found integration sha {sha} from Integration ID: {integration_id}")
                 return sha
         print(f"ERROR: Failed to retrieve integration sha from testresults/coin for integration ID"
@@ -478,7 +494,7 @@ def get_dependencies_yaml(config, repo: Repo, fetch_head: bool = False) -> tuple
         if repo.id in config.state_data.keys():
             print(f"Using state data for {repo.id}")
             return config.state_data[repo.id].deps_yaml, config.state_data[repo.id].branch
-        qt5_repo_sha = get_head(config, repo)
+        qt5_repo_sha = get_head(config, repo)[0]
         try:
             r = gerrit.projects.get(repo.id).get_commit(qt5_repo_sha).get_file_content(
                 'dependencies.yaml')
@@ -723,7 +739,8 @@ def push_submodule_update(config: Config, repo: Repo, retry: bool = False) -> Pr
 
     current_head_deps, _ = get_dependencies_yaml(config, repo, fetch_head=True)
     if current_head_deps == repo.proposal.proposed_yaml:
-        repo.proposal.merged_ref = get_head(config, repo, pull_head=True)
+        repo.proposal.merged_ref, repo.proposal.original_message = get_head(config, repo,
+                                                                            pull_head=True)
         repo.proposal.change_id = ""
         repo.proposal.change_number = ""
         print(f"Branch head for {repo.id} is already up-to-date! Not pushing an update!")
@@ -758,7 +775,7 @@ def push_submodule_update(config: Config, repo: Repo, retry: bool = False) -> Pr
         print(f"Rebased change {change.change_id}")
     except GerritExceptions.ConflictError:
         if (not change.get_revision("current").get_commit().parents[0]["commit"]
-                == get_head(config, repo, True)):
+                == get_head(config, repo, True)[0]):
             print("WARN: Failed to rebase change due to conflicts."
                   " Abandoning and recreating the change.")
             # Failed to rebase because of conflicts
@@ -901,7 +918,7 @@ def push_supermodule_update(config: Config, retry: bool = False) -> Repo:
         print(f"Rebased change {change.change_id}")
     except GerritExceptions.ConflictError:
         if (not change.get_revision("current").get_commit().parents[0]["commit"]
-                == get_head(config, qt5_repo, True)):
+                == get_head(config, qt5_repo, True)[0]):
             print("WARN: Failed to rebase change due to conflicts."
                   " Abandoning and recreating the change.")
             # Failed to rebase because of conflicts
@@ -1034,7 +1051,7 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
                     pinned_submodule_sha = search_pinned_submodule(config, module_repo,
                                                                    submodule_repo)
                 if not pinned_submodule_sha:
-                    print(f"Couldn't find a submodule named {submodule_repo.id}"
+                    print(f"Couldn't find a submodule named {repo_name_maybe_submodule}"
                           f' in {module_repo.id}. Trying raw submodule name: "{submodule_name}"')
                     pinned_submodule_sha = search_pinned_submodule(config, module_repo,
                                                                    submodule_name)
@@ -1050,7 +1067,7 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
             module_name = repo_name_maybe_submodule
         module_repo = search_for_repo(config, module_name)
         if not module_repo.original_ref:
-            module_repo.original_ref = get_head(config, module_repo)
+            module_repo.original_ref, module_repo.original_message = get_head(config, module_repo)
         if pinned_submodule_sha:
             file_lines[i] = line.replace(sha, f'"{pinned_submodule_sha}"')
         else:
@@ -1099,7 +1116,7 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
         change.get_revision("current").rebase({"base": ""})
         print(f"Rebased change {change.change_id}")
     except GerritExceptions.ConflictError:
-        if not change.get_revision("current").get_commit().parents[0]["commit"] == get_head(config, yocto_repo, True):
+        if not change.get_revision("current").get_commit().parents[0]["commit"] == get_head(config, yocto_repo, True)[0]:
             print("WARN: Failed to rebase change due to conflicts."
                   " Abandoning and recreating the change.")
             # Failed to rebase because of conflicts
@@ -1166,7 +1183,8 @@ def acquire_change_edit(config: Config,
             "project": repo.id,
             "subject": subject,
             "branch": repo.branch,
-            "status": "NEW"
+            "status": "NEW",
+            "topic": repo.topic
         })
         print(f"Created new change for {repo.id}: {change.change_id}")
         repo.proposal.change_id = change.change_id
@@ -1230,7 +1248,7 @@ def reset_module_properties(config: Config, repo: Repo) -> Repo:
     repo.stage_count = 0
     repo.retry_count = 0
     repo.to_stage = list()
-    repo.original_ref = get_head(config, repo, True)
+    repo.original_ref, repo.original_message = get_head(config, repo, True)
     return repo
 
 

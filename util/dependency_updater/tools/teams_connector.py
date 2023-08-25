@@ -3,6 +3,7 @@
 
 import pymsteams as msteams
 import yaml
+import json
 from gerrit.changes import change as GerritChange
 from .repo import Repo, PROGRESS
 from typing import Union

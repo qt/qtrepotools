@@ -67,7 +67,7 @@ def retrieve_or_generate_proposal(config: Config, repo) -> Proposal:
         for dep in repo.deps_yaml.get("dependencies"):
             prefix, dep_name = toolbox.strip_prefix(dep)
             full_name = [n for n in repo.dep_list if dep_name in n].pop()
-            proposal["dependencies"][dep]["ref"] = toolbox.get_head(config, full_name)
+            proposal["dependencies"][dep]["ref"] = toolbox.get_head(config, full_name)[0]
     if proposal == repo.deps_yaml:
         print(f"{repo.id} dependencies are already up-to-date")
     else:
@@ -210,7 +210,10 @@ def determine_ready(config: Config, repo: Repo) -> tuple[PROGRESS, bool, Union[l
     if repo.progress < PROGRESS.IN_PROGRESS \
             or repo.progress == PROGRESS.DONE_FAILED_DEPENDENCY:
         for dependency in repo.dep_list:
-            dep_repo = config.state_data[dependency]
+            try:
+                dep_repo = config.state_data[dependency]
+            except Exception as e:
+                print(f"{repo.id} requested nonexistent dependency: {dependency}")
             if dependency in config.state_data.keys():
                 # Recurse and update the progress in the case that we're trying
                 # to rewind with many previously failed dependencies.

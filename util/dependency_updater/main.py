@@ -4,10 +4,19 @@
 import argparse
 import os
 import sys
-
 import yaml
+import json
 
-from tools import Namespace, config as Config, state, toolbox, dependency_resolver, repo as Repo
+from tools import Namespace, Proposal, config as Config, state, toolbox, dependency_resolver, repo as Repo
+
+
+class ProposalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Proposal):
+            return obj.__dict__
+        elif isinstance(obj, set):
+            return list(obj)
+        return json.JSONEncoder.default(self, obj)
 
 
 def parse_args(print_help: bool = False) -> Namespace:
@@ -99,6 +108,12 @@ def clear():
         os.system('clear')
 
 
+def printJsonDump(config):
+    print("=+=+=+ JSON DUMP +=+=+=")
+    print(json.dumps([repo.__dict__ for repo in config.state_data.values()], cls=ProposalEncoder))
+    print("=+=+=+ END JSON DUMP +=+=+=")
+
+
 def main():
     # Initial setup
     config = Config._load_config("config.yaml", parse_args())
@@ -106,9 +121,11 @@ def main():
     config.state_repo = state.check_create_local_repo(config)
     if config.args.prune_and_keep:
         print(config.args.prune_and_keep)
+        printJsonDump(config)
         state.clear_state(config, config.args.prune_and_keep)
         exit()
     if config.args.reset:
+        printJsonDump(config)
         state.clear_state(config)
         exit()
     if config.args.update_default_repos:
@@ -147,6 +164,9 @@ def main():
             changes_since_last_run = True
             print(f"{repo.id} moved from {progress.name} to {repo.progress.name}.")
 
+    # Try to set the round topic, but qtbase may not be ready yet.
+    toolbox.set_round_topic(config)
+
     # Check to see if we should abort as finished-failed
     if config.state_data.get("pause_on_finish_fail"):
         # If none of the retry conditions are met, print the help and exit.
@@ -158,6 +178,7 @@ def main():
                 " --rewind, or --retry_failed, or manually integrate any of the"
                 " failed changes below.")
             print(toolbox.state_printer(config))
+            printJsonDump(config)
             parse_args(print_help=True)
             exit()
         # Continue the round and try again.
@@ -204,9 +225,11 @@ def main():
                   f" {config.state_data[config.rewind_module.id].dep_list}")
         else:
             config.state_data[config.rewind_module.id].proposal.change_id = ""
-            new_sha = toolbox.get_head(config, config.state_data[config.rewind_module.id], True)
+            new_sha, message = toolbox.get_head(config, config.state_data[config.rewind_module.id],
+                                                True)
             print(f"\nRewinding round to {config.rewind_module.id} @ {new_sha}\n")
             config.state_data[config.rewind_module.id].original_ref = new_sha
+            config.state_data[config.rewind_module.id].original_message = message
             config.state_data[config.rewind_module.id].proposal.merged_ref = new_sha
             config.state_data[config.rewind_module.id].progress = Repo.PROGRESS.DONE_NO_UPDATE
             config.teams_connector.send_teams_webhook_basic(
@@ -257,6 +280,9 @@ def main():
             config.teams_connector.send_teams_webhook_module_failed(repo,
                                                                     test_failures=toolbox.parse_failed_integration_log(
                                                                         config, repo))
+        # bump the progress of the repo that has restaged.
+        repo.progress, repo.proposal.merged_ref, repo.proposal.gerrit_status = \
+            toolbox.get_check_progress(config, repo)
 
     # Check and see if we're ready to push a supermodule update if all the blocking repos
     # Have finished updating successfully.
@@ -277,6 +303,9 @@ def main():
 
     # Create new dependencies.yaml proposals for all PROGRESS.READY modules.
     config.state_data = dependency_resolver.recursive_prepare_updates(config)
+
+    # Try to set the round topic again. Qtbase should have been prepared now.
+    toolbox.set_round_topic(config)
 
     for repo in [r for r in config.state_data.values() if r.progress == Repo.PROGRESS.READY]:
         print(f"Proposed update to {repo.id}:")
@@ -312,6 +341,8 @@ def main():
         print("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\n")
     else:
         print("No updates pushed this round. Nothing else to do this run.")
+
+    printJsonDump(config)
 
     # Determine how to exit
     clear_state = False

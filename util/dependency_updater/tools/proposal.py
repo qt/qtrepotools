@@ -1,19 +1,16 @@
 # Copyright (C) 2020 The Qt Company Ltd.
 # SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
-class Proposal:
-    proposed_yaml: dict
-    change_id: str
-    change_number: str
-    gerrit_status: str = ""
-    merged_ref: str = ""
-    inconsistent_set: dict
+from types import SimpleNamespace
 
+class Proposal(SimpleNamespace):
     def __init__(self, proposed_yaml: dict = None,
                  change_id: str = None, change_number: str = None, inconsistent_set: dict = None):
         self.proposed_yaml = proposed_yaml
         self.change_id = change_id
         self.change_number = change_number
+        self.gerrit_status = ""
+        self.merged_ref = ""
         self.inconsistent_set = inconsistent_set
 
     def __setattr__(self, key, value):

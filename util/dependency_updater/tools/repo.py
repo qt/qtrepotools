@@ -25,6 +25,9 @@ class PROGRESS(IntEnum):
     DONE_FAILED_DEPENDENCY = 11
     IGNORE_IS_META = 12
 
+    def __repr__(self):
+        return f"{self.name}"
+
 
 class Repo(Namespace):
     """Base information about a repository/submodule"""
@@ -32,10 +35,12 @@ class Repo(Namespace):
     prefix: str = ""  # Bare prefix such as qt/ or qt/tqtc-
     name: str = ""  # Bare name such as qtbase
     original_ref: str = ""  # Ref to associate with this repo. This value should never be changed.
+    original_message: str = ""  # Commit message subject of the parent. This value should never be changed.
     branch: str = ""  # Branch where dependencies.yaml was found. May differ from the specified branch.
     deps_yaml: yaml = dict()
     dep_list: list[str]
     proposal: Proposal = Proposal()
+    topic: str = ""
     to_stage: list[str]
     progress: PROGRESS = PROGRESS.UNSPECIFIED
     failed_dependencies: list[str]
@@ -56,6 +61,7 @@ class Repo(Namespace):
         self.prefix = prefix
         self.name = id.removeprefix(prefix)
         self.proposal = proposal or Proposal()
+        self.topic = ""
         if to_stage is not None:
             self.to_stage = to_stage
         if proposal and proposal.change_id not in self.to_stage:
