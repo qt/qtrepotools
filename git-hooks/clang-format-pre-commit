@@ -30,9 +30,8 @@ fi
 if test -n "$CLANG_FORMAT_DIFF"; then
     echo "clang-format output:"
     echo "$CLANG_FORMAT_DIFF"
-    echo "clang-format detected change in format, please run:"
-    echo "  git clang-format"
-    echo "and amend the change."
-    exit 1
+    echo "clang-format suggests changes in the format. You can run:"
+    echo "  git clang-format HEAD~1"
+    echo "and amend the commit with those changes that you agree with."
+    exit 0
 fi
-
