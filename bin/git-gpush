@@ -191,8 +191,15 @@ Options:
 
     -o, --onto, --base <base>
         Specify the commit to rebase the pushed series onto. It is possible
-        to specify upstream commits, commits pushed for review, or 'ROOT' to
-        orphan the series.
+        to specify upstream commits, commits pushed for review, Changes on
+        the local branch, or 'ROOT' to orphan the series. A single '\@' sign
+        signifies the Change which immediately precedes the series.
+        If <base> corresponds to a Change on the local branch, the series
+        which contains that Change becomes the push parent, and its last
+        Change's latest pushed PatchSet is used as the base. Note that the
+        pushed series will NOT be automatically rebased when the parent
+        series is re-pushed, nor will the parent series be automatically
+        pushed. See --rebase-chained below.
         Except for merge commits and their children, once chosen, the base
         will persist through subsequent pushes until overridden, even when
         the series grows.
@@ -201,6 +208,17 @@ Options:
     --rebase
         Reset the base of a previously pushed series to the local branch's
         base. Typically used after a conflicted pull.
+
+    --rebase-chained
+        Reset the base of a previously pushed series to its parent series'
+        last Change's latest pushed PatchSet. This is necessary when the
+        pushed series depends on recent modifications in the parent series.
+        Note that it may be necessary to rebase and re-push the parent
+        series first. Also, the parent series may need to be re-pushed
+        with --not-minimal.
+        This option takes precedence over --rebase and --onto for series
+        which do in fact have a parent series, and is a no-op for ones
+        that do not.
 
         When the base-modifying options are used with --group, the
         resolution of bases which relate to the local branch is delayed
@@ -407,6 +425,8 @@ my $addbase;  # default set by process_config()
 my $minimal;  # default set by process_config()
 my $extend = 0;
 my $capture = 0;
+my $rebase_chained = 0;
+my $base_group_id;
 my $ref_base;
 my $ref_to;
 my $force_branch = 0;
@@ -502,6 +522,8 @@ sub parse_arguments(@)
             $ref_base = shift @_;
         } elsif ($arg eq "--rebase") {
             $rebase = 1;
+        } elsif ($arg eq "--rebase-chained") {
+            $rebase_chained = 1;
         } elsif ($arg eq "-a" || $arg eq "--all") {
             $push_all = 1;
         } elsif ($arg eq "-l" || $arg eq "--list") {
@@ -553,7 +575,7 @@ sub parse_arguments(@)
 
     fail("--base and --rebase are mutually exclusive.\n")
         if (defined($ref_base) && $rebase);
-    $ref_base = "" if ($rebase);
+    $ref_base = "-" if ($rebase);
 
     if (!defined($from)) {
         $from = "HEAD";
@@ -618,7 +640,7 @@ sub parse_arguments(@)
         fail("--list/--list-rebase/--list-online is incompatible with push-modifying options.\n")
             if ($push_specific || (!$list_rebase && $minimal_override));
         fail("--list is incompatible with base-modifying options.\n")
-            if (defined($ref_base) && !$list_rebase);
+            if ((defined($ref_base) || $rebase_chained) && !$list_rebase);
     }
 
     if ($push_all) {
@@ -708,6 +730,8 @@ sub caption_group($)
     }
     my $to = $$group{branch};
     my $tos = defined($to) ? " for $to" : "";
+    my $bchg = $$group{base_chg};
+    my $bgrps = $bchg ? ", base ".format_id($$bchg{id}) : "";
     my $tpc = $$group{topic};
     my $tpcs = length($tpc) ? ", topic '$tpc'" : "";
     my $ver = $$group{version};
@@ -730,8 +754,8 @@ sub caption_group($)
                                     : $send_email
                                         ? ("Mailing", "")
                                         : ("Formatting", "");
-    return (sprintf("%s %d Change(s)%s%s%s%s:",
-                    $pfx, int(@$changes), $tos, $rmt, $tpcs, $vers),
+    return (sprintf("%s %d Change(s)%s%s%s%s%s:",
+                    $pfx, int(@$changes), $tos, $rmt, $bgrps, $tpcs, $vers),
             $changes);
 }
 
@@ -1061,6 +1085,15 @@ sub determine_format_options($)
     $$group{fmt_opt_text} = $fmt_opt_text;
 }
 
+sub append_extra($$)
+{
+    my ($str, $app) = @_;
+
+    $$str .= "\n" if ($$str !~ /\n$/);
+    $$str .= "\n" if ($$str !~ /\n[^\n]*\n/);
+    $$str .= $app;
+}
+
 sub determine_description($)
 {
     my ($group) = @_;
@@ -1071,6 +1104,25 @@ sub determine_description($)
                   ." Use --edit-description to rectify.\n" });
     my $dsc_text = defined($dsc) ? unquote_text_prop($prop_by_key{$dsc}) : undef;
     $$group{desc} = $dsc;
+    $$group{desc_text_raw} = $dsc_text;
+
+    my $base_chg = $$group{base_chg};
+    if ($base_chg) {
+        # We do this in addition to supplying --base= to git-format-patch,
+        # as base-commit and prerequisite-patch-id lines aren't very human-
+        # readable (but are necessary for auto-builders, for example).
+        my $changes = $$group{changes};
+        my $what = (@$changes > 1) ? " series" : "";
+        my $subj = $$base_chg{local}{subject};
+        my $txt = "---\n"
+                .wrap_mail("This patch$what needs to be applied on top of"
+                           ." the patch titled \"$subj\".\n");
+        if (defined($dsc)) {
+            append_extra(\$dsc_text, $txt);
+        } else {
+            $$changes[0]{local}{append} = $txt;
+        }
+    }
     $$group{desc_text} = $dsc_text;
 }
 
@@ -1149,13 +1201,19 @@ sub scan_pushed_group($$)
             # commits are obviously modified anyway.
             last;
         }
-        push @$commits, $rcommit if (defined($rcommit));
-        push @$commits, $pcommit if (defined($pcommit));
+        $$commits{$rcommit} = 1 if (defined($rcommit));
+        $$commits{$pcommit} = 1 if (defined($pcommit));
         my $rocommit = $$change{rorig};
-        push @$commits, $rocommit if (defined($rocommit));
+        $$commits{$rocommit} = 1 if (defined($rocommit));
         my $ocommit = $$change{orig};
-        push @$commits, $ocommit if (defined($ocommit));
+        $$commits{$ocommit} = 1 if (defined($ocommit));
     }
+
+    return if ($push_all);
+    my $base_chg = $$group{base_chg};
+    return if (!$base_chg);
+    my $pcommit = $$base_chg{pushed};
+    $$commits{$pcommit} = 1 if (defined($pcommit));
 }
 
 # Retrieve metadata for commits corresponding with previous pushes
@@ -1164,12 +1222,12 @@ sub visit_pushed_changes($)
 {
     my ($groups) = @_;
 
-    my @commits;
+    my %commits;
     foreach my $group (@$groups) {
-        scan_pushed_group($group, \@commits);
+        scan_pushed_group($group, \%commits);
     }
     print "Visiting pushed commits ...\n" if ($debug);
-    visit_local_commits(\@commits, $mail_mode);
+    visit_local_commits([ sort keys %commits ], $mail_mode);
 }
 
 sub do_add_change_ids($)
@@ -1536,43 +1594,124 @@ use constant {
     OUTDATED => 'OUTDATED',
     MERGED => 'MERGED',
     REJECTED => 'REJECTED',
+    BASE_FAILED => 'BASE FAILED',
     FAILED => 'FAILED'
 };
 
 sub resolve_ref_base()
 {
-    return if (!length($ref_base) || ($ref_base eq "ROOT"));
-    print "Resolving specified push base ...\n" if ($debug);
-    # Make sure we don't get confusing errors later.
-    # Also, we need a full SHA1 we can compare.
-    $ref_base = read_cmd_line(SOFT_FAIL, "git", "rev-parse", "--verify", $ref_base."^{commit}");
-    fail("... while resolving --base commit.\n")
-        if ($?);
-    visit_local_commits([ $ref_base ]);
-    if (!$commit_by_id{$ref_base}) {
-        print "--base is upstream.\n" if ($debug);
-        return;
+    if (!defined($ref_base)) {
+        print "No push base specified.\n" if ($debug);
+        goto NOTSET;
     }
-    my $base_change = $change_by_pushed{$ref_base};
+    if ($ref_base =~ /^(ROOT|\@|-)$/) {
+        print "Specified push base is symbolic.\n" if ($debug);
+        goto NOTLOCAL;
+    }
+    print "Resolving specified push base ...\n" if ($debug);
+    $ref_base = parse_local_rev($ref_base, SPEC_BASE);
+    visit_local_commits([ $ref_base ]);
+    my $base_commit = $commit_by_id{$ref_base};
+    if (!$base_commit) {
+        print "--base is upstream.\n" if ($debug);
+        goto NOTLOCAL;
+    }
+    my $base_change = $$base_commit{change};
+    if ($base_change) {
+        print "--base is a local commit.\n" if ($debug);
+        goto ISLOCAL;
+    }
+    $base_change = $change_by_pushed{$ref_base};
     if ($base_change) {
         print "--base is a pushed commit.\n" if ($debug);
-        return;
+        goto ISLOCAL;
     }
     # Fallback for pushed commits whose Changes have already been rebased out.
     foreach my $chg (values %change_by_key) {
         if (($$chg{pushed} // "") eq $ref_base) {
             print "--base is an old pushed commit.\n" if ($debug);
-            return;
+            goto NOTLOCAL;
         }
     }
     fail("Specified --base commit is not acceptable.\n");
+
+  ISLOCAL:
+    $base_group_id = $$base_change{grp};
+    fail("Specified --base commit needs to be grouped first.\n")
+        if (!defined($base_group_id));
+    # One of them would have to be based on itself.
+    fail("--onto <local> and --all are mutually exclusive.\n")
+        if ($push_all);
+    # The --all case it caught above, and for individually specified
+    # commits the combo makes no sense. So reject it, so we can sort
+    # of overload the flag.
+    fail("--onto <local> and --rebase-chained are mutually exclusive.\n")
+        if ($rebase_chained);
+    $ref_base = "=";
+    return;
+
+  NOTLOCAL:
+    # Break old chains if --rebase-chained was not used as well.
+    $base_group_id = 0 if (!$rebase_chained);
+  NOTSET:
+    # We fold this into the same variable, so it's easy to
+    # postpone and aggregate it.
+    $ref_base .= "=" if ($rebase_chained);
+}
+
+sub get_base_change($$)
+{
+    my ($group, $gid) = @_;
+
+    # Ancestry traversal looks for a legitimate base
+    my $change = $$group{changes}[0];
+    while (1) {
+        $change = $$change{parent};
+        last if (!$change);
+        return $change if (($$change{grp} // -1) == $gid);
+    }
+    # Descendant traversal looks for an invalid base
+    $change = $$group{changes}[-1];
+    while (1) {
+        return ($change, 1) if (($$change{grp} // -1) == $gid);
+        $change = $$change{child};
+        return if (!$change);
+    }
+}
+
+sub format_base_change($)
+{
+    my ($group) = @_;
+
+    return "<reset>" if ($_ eq '0');
+    my ($change, $inval) = get_base_change($group, $_);
+    return "<invalid>" if ($inval);
+    return "<gone>" if (!$change);
+    return substr($$change{id}, 0, 9);
+}
+
+sub format_base_option()
+{
+    if (s/=$//) {
+        return "<chain>" if ($_ eq '');
+        return "<chn/pnt>" if ($_ eq '@');
+        return "<chn/rst>" if ($_ eq '-');
+        return "<chn>/".substr($_, 0, 8);
+    }
+    return "<parent>" if ($_ eq '@');
+    return "<reset>" if ($_ eq '-');
+    return substr($_, 0, 8);
 }
 
 sub determine_base($)
 {
     my ($group) = @_;
 
-    my $base = $ref_base;
+    # Base-modifying options may have been passed in this run ("instant")
+    # or in a previous run together with --group ("deferred"). Instant
+    # overrides take precedence over deferred ones, which in turn take
+    # precedence over saved values from previous pushes.
+    my $base = $ref_base;  # Instant
     if (!defined($base)) {
         # We have no base yet, so deduce it from the previous push(es).
         # The simple approach would be using the merge-base(s) of the
@@ -1593,7 +1732,7 @@ sub determine_base($)
         # subsequently dropping some Changes locally.
         $base = aggregate_property($group, 'base',
                                    sub { $$_{nbase} // $$_{base} },
-                                   sub { '  @'.($_ ? substr($_, 0, 8) : "<reset>") });
+                                   sub { '  @'.format_base_option() });
         # Technically, we should re-validate the base before each push,
         # because pending PatchSets (or entire Changes) can be deleted,
         # and upstream commits can disappear due to forced pushes.
@@ -1603,11 +1742,113 @@ sub determine_base($)
         # if we wanted to catch forced pushes reliably.
         # This all doesn't appear to be worth it ...
     }
-    if (!length($base)) {
-        printf("Basing series %s on local branch's base.\n", format_group_id($group))
-            if ($verbose);
+    my $base_chg;
+    my $base_gid = 0;  # Zero suppresses lookup
+    my $rb_chained = 0;
+    if (!defined($base)) {
+        # Not pushed yet and no override, so use local branch base.
+    } elsif (!length($base)) {
+        # Legacy deferred --rebase.
+        $base = undef;
+    } else {
+        $base_gid = $base_group_id;  # From instant --onto/--rebase.
+        $rb_chained = ($base =~ s/=$//);
+        if ($base eq '@') {
+            # Base on preceding series.
+            # $base_gid is zero if instant without --rebase-chained,
+            # else undefined (use nbgrp).
+            # $base_chg ends up being undef for the 1st series, thus
+            # effectively --rebase'ing it. We accept this, so deferred
+            # `--all --onto @` works.
+            $base_chg = $$group{changes}[0]{parent};
+            $base = undef;
+        } elsif ($base eq "-") {
+            # Explicit reset to local branch base (--rebase).
+            # $base_gid as for `@`.
+            $base = undef;
+        } else {
+            # Remaining cases:
+            # * $base is empty
+            #   * instant or deferred --rebase-chained, no --onto:
+            #     $base_gid is undefined (use bgrp).
+            #   * --onto <local>: implied --rebase-chained;
+            #     * instant: $base_gid is positive.
+            #     * deferred: $base_gid is undefined (use nbgrp).
+            # * $base contains a SHA1 or "ROOT".
+            #   * previously pushed Changes and no base override:
+            #     $base_gid is undefined (use bgrp).
+            #   * --onto <upstream>, no --rebase-chained:
+            #     * instant: $base_gid is zero;
+            #     * deferred: $base_gid is undefined (use nbgrp,
+            #       which is zero),
+            #   * instant or deferred --onto <upstream> & --rebase-chained:
+            #     $base_gid is undefined (use bgrp).
+        }
+    }
+    $base_gid = aggregate_property($group, 'base series',
+                                   sub { $$_{nbgrp} // $$_{bgrp} },
+                                   sub { '  @'.format_base_change($group) })
+        if (!defined($base_gid));
+    if ($base_gid) {
+        # We actually have a Change we're chained to.
+        ($base_chg, my $inval) = get_base_change($group, $base_gid);
+        wfail("Error: Base Change ".format_id($$base_chg{id})." of "
+                .format_group_id($group)." is not an ancestor.\n")
+            if ($inval);
+        printf("Notice: Base series of %s disappeared.\n",
+               format_group_id($group))
+            if (!$base_chg && !$quiet);
+        # The lookup of the actual SHA1 is delayed, so we use
+        # the parent's latest PatchSet also in --all mode.
+        $base = undef if ($rb_chained);
+    } elsif ($rb_chained) {
+        # If the series is not based on a local Change, then
+        # --rebase-chained is a no-op. This is useful in
+        # conjunction with --all.
+        my $obase = aggregate_property($group, 'base',
+                                       sub { $$_{base} },
+                                       sub { '  @'.substr($_, 0, 8) });
+        if (defined($obase)) {
+            # Migrate legacy chains. This cannot be the primary
+            # mechanism, as parent Changes which have been re-pushed
+            # meanwhile are not recognized anymore.
+            # Don't clobber $base_chg set by `--onto @`.
+            my $chg = $change_by_pushed{$obase};
+            if ($chg) {
+                $base_chg = $chg;
+                $base = undef;
+            } elsif (defined($base) && !length($base)) {
+                $base = $obase;
+            }
+        } elsif (defined($base) && !length($base)) {
+            $base = undef;
+        }
+    }
+    if (!defined($base) && $verbose) {
+        if ($base_chg) {
+            printf("Basing series %s on %s\'s latest push.\n",
+                   format_group_id($group), format_id($$base_chg{id}));
+        } else {
+            printf("Basing series %s on local branch's base.\n",
+                   format_group_id($group));
+        }
     }
     $$group{base} = $base;
+    $$group{base_chg} = $base_chg;
+}
+
+sub determine_branch_base($)
+{
+    my ($group) = @_;
+
+    return if (!$$group{base_chg});
+    my $base = $$group{base};
+    while (1) {
+        my $commit = $commit_by_id{$base};
+        last if (!$commit);
+        $base = get_1st_parent($commit);
+    }
+    $$group{branch_base} = $base;
 }
 
 # Get a set of Changes which were part of the previous push of each
@@ -1806,6 +2047,9 @@ sub rebase_commit_message($)
         $message =~ s/\nChange-Id: $$commit{changeid}\n/\n/;
         $message =~ s/\n+$/\n/;
         $message =~ s/\n{3,}/\n\n/;
+
+        my $append = $$commit{append};
+        append_extra(\$message, $append) if (defined($append));
     }
     return $message;
 }
@@ -1816,7 +2060,9 @@ sub try_reuse_commit($$$$$$$$$)
         $old_commit, $old_base_id, $what, $ptree, $pdid) = @_;
 
     return 0 if (!defined($orig_id));
-    if (($$commit{id} eq $orig_id) && ($base_id eq $old_base_id)) {
+    # We don't know whether $$commit{append} changed, so disable
+    # the shortcut in mail mode. Re-creation may still work.
+    if (!$mail_mode && ($$commit{id} eq $orig_id) && ($base_id eq $old_base_id)) {
         # We are picking the same commit to the same base, so
         # we can just reuse the previously created commit.
         $$pdid = "reused unmodified ($what)";
@@ -1827,7 +2073,7 @@ sub try_reuse_commit($$$$$$$$$)
     return 0 if ($$commit{tree} ne $$orig_commit{tree});
     return 0 if (!parent_trees_equal($parent_id, $orig_commit));
     if ($base_id eq $old_base_id) {
-        if (commit_metas_equal($commit, $orig_commit)) {
+        if (!$mail_mode && commit_metas_equal($commit, $orig_commit)) {
             # We are picking the same content to the same base, so
             # we can just reuse the previously created commit.
             $$pdid = "reused amended ($what)";
@@ -1943,9 +2189,30 @@ sub do_rebase_changes($$)
     my ($group, $upstreamed_changes) = @_;
     my ($base, $changes) = ($$group{base}, $$group{changes});
 
-    if (!length($base)) {
-        print "Resetting base to local branch's base.\n" if ($debug);
-        $base = $local_base;
+    if (!defined($base)) {
+        my $base_chg = $$group{base_chg};
+        if ($base_chg) {
+            printf("Resetting base to %s\'s latest push.\n",
+                   format_id($$base_chg{id}))
+                if ($debug);
+            if ($push_all) {
+                my $commit = $$base_chg{final};
+                if (!defined($commit)) {
+                    print "Rebased base Change unavailable.\n" if ($debug);
+                    $$changes[0]{freshness} = BASE_FAILED;
+                    return;
+                }
+                $base = $$commit{id};
+            } else {
+                $base = $$base_chg{pushed};
+                wfail("Series' ".format_group_id($group)." base Change "
+                      .format_id($$base_chg{id})." needs to be pushed first.\n")
+                    if (!defined($base));
+            }
+        } else {
+            print "Resetting base to local branch's base.\n" if ($debug);
+            $base = $local_base;
+        }
         $$group{base} = $base;
     }
 
@@ -2328,7 +2595,7 @@ sub annotate_group($$)
         push @annot, "> Format options: ".format_cmd(@$fmt_opt)."\n"
             if ($fmt_opt);
 
-        my $dsc = $$group{desc_text};
+        my $dsc = $$group{desc_text_raw};
         if (defined($dsc)) {
             if ($verbose) {
                 push @annot, ",----- Description ------\n";
@@ -2384,7 +2651,7 @@ sub print_errors($)
 {
     my ($groups) = @_;
 
-    fail_push($groups, "Please use --rebase or specify "
+    fail_push($groups, "Please use --rebase, --rebase-chained, or specify "
                       .($have_conflicts > 1 ? "different bases.\n" : "a different base.\n"))
         if ($have_conflicts);
     fail_push($groups, "Giving up - push is going to be rejected.\n")
@@ -2562,6 +2829,7 @@ sub format_patches($)
     my $changes = $$group{changes};
     my $tip = $$changes[-1]{final}{id};
     my $base = $$group{base};
+    my $branch_base = $$group{branch_base};
     my $tpc = $$group{topic};
     my $ver = $$group{version};
     my $dsc = $$group{desc_text};
@@ -2572,6 +2840,7 @@ sub format_patches($)
 
     my @gitopt = ('--binary');
     push @gitopt, '--reroll-count', $ver if ($ver > 1);
+    push @gitopt, '--base='.$branch_base if (defined($branch_base));
     push @gitopt, '--range-diff='.$diff_range if (defined($diff_range));
     push @gitopt, '--cover-letter', '--cover-from-description=subject',
                   '--description-file='.write_textfile($dsc)
@@ -2622,8 +2891,10 @@ sub update_state_grouping($)
             if (defined($topic) || $reset_props);
         $$change{ntgt} = $ref_to
             if (defined($ref_to) || $reset_props);
-        $$change{nbase} = $ref_base
-            if (defined($ref_base) || $reset_props);
+        if (defined($ref_base) || $reset_props) {
+            $$change{nbase} = $ref_base;
+            $$change{nbgrp} = $base_group_id;
+        }
         $$change{ver} = 0
             if ($reset_version);
         $$change{dsc} = $dsc
@@ -2643,10 +2914,11 @@ sub update_state($)
 
     my $changes = $$group{changes};
     my $tip = $$changes[-1]{key};
-    my ($gid, $branch, $tpc, $ver, $inc_ver, $dsc, $fmt, $base) =
+    my ($gid, $branch, $tpc, $ver, $inc_ver, $dsc, $fmt, $base_chg, $base) =
             ($$group{gid}, $$group{branch}, $$group{topic},
              $$group{version}, $$group{inc_version}, $$group{desc},
-             $$group{fmt_opt}, $$group{base});
+             $$group{fmt_opt}, $$group{base_chg}, $$group{base});
+    my $base_gid = $base_chg && $$base_chg{grp};
     # Setting an empty topic clears the previous topic from the server.
     $tpc = undef if (defined($tpc) && !length($tpc));
     foreach my $change (@$changes) {
@@ -2675,6 +2947,8 @@ sub update_state($)
         $base = undef if (@{$$commit{parents}} > 1);
         $$change{base} = $base;
         $$change{nbase} = undef;
+        $$change{bgrp} = $base_gid;
+        $$change{nbgrp} = undef;
         $$change{tip} = $tip;
         $$change{exclude} = undef;
     }
@@ -2765,21 +3039,15 @@ sub execute_pushing()
     }
     resolve_ref_base();
     foreach my $group (@$annot_groups) {
+        determine_base($group) if (defined($$group{gid}));
         determine_topic($group);
         if ($mail_mode) {
-            determine_description($group);
+            determine_description($group);  # Uses base
             determine_in_reply_to($group);
             determine_format_options($group);
         }
     }
     if ($rebase) {
-        # Rebasing may take a while, so make sure all base determination
-        # errors are reported before we start.
-        foreach my $group (@$groups) {
-            if (defined($$group{gid})) {
-                determine_base($group);
-            }
-        }
         visit_pushed_changes($groups);
         my $upstreamed_changes = get_upstreamed_changes($pushed_changes);
         rebase_groups($groups, $upstreamed_changes);
@@ -2812,6 +3080,7 @@ sub execute_pushing()
         if ($mail_mode) {
             if ($have_modified || $force) {
                 foreach my $group (@$groups) {
+                    determine_branch_base($group);
                     if (!format_patches($group)) {
                         save_state($dry_run);
                         exit(1);

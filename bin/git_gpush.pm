@@ -105,6 +105,12 @@ sub fail($)
     exit(1);
 }
 
+sub wrap_mail($)
+{
+    $Text::Wrap::columns = 72;  # This is also the default
+    return wrap("", "", $_[0]);
+}
+
 #######################
 # subprocess handling #
 #######################
@@ -914,9 +920,9 @@ sub save_state(;$$)
     my %prop_hash;
     my (@lines, @updates);
     my %ikeys = map { $_ => 1 } ('irt', 'fmt', 'dsc');
-    my @fkeys = ('key', 'grp', 'id', 'base', 'tip', 'src', 'tgt',
+    my @fkeys = ('key', 'grp', 'id', 'bgrp', 'base', 'tip', 'src', 'tgt',
                  'topic', 'ver', 'irt', 'fmt', 'dsc', 'pbase', 'ptip',
-                 'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
+                 'nbgrp', 'nbase', 'ntgt', 'ntopic', 'exclude', 'hide');
     my @rkeys = ('pushed', 'ppushed', 'rebased', 'orig', 'rorig');
     if ($new) {
         push @lines, "verify $new", "updater $state_updater";
