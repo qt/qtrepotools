@@ -824,7 +824,7 @@ while (<DIFF>) {
         if ($no_copyright && /Copyright/) {
             $no_copyright = 0;
         }
-        if ($check_gen && /All changes made in this file will be lost|This file is auto(?:matically )?generated|DO NOT (?:EDIT|CHANGE)|DO NOT delete this file|[Gg]enerated by|uicgenerated|produced by gperf|made by GNU Bison/) {
+        if ($check_gen && /All changes made in this file will be lost|This file (?:is|was) (?:auto(?:matically |-)?)?generated|DO NOT (?:EDIT|CHANGE)|DO NOT delete this file|[Gg]enerated by|uicgenerated|produced by gperf|made by GNU Bison/) {
             complain("Adding generated file (inferred from line ".($lineno + 1).")", "generated")
                 if ($new_file && !defined($cfg{generated}));
             $ws_check = 0;
