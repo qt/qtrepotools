@@ -835,18 +835,23 @@ while (<DIFF>) {
         if (/^\+\+\+ /) {
             # This indicates a text file; binary files have "Binary files ... and ... differ" instead.
             $maybe_bin = 0;
-            if ($file =~ /(~|\.(old|bak))$/i) {
-                complain("Adding backup file", "backup") if ($new_file && !defined($cfg{backup}));
-                $ws_check = 0;
-            } elsif ($file =~ m,^tests/.*/(perf|test)?data[/_-],) {
-                $ws_check = $eof_check = $apple_check = $no_copyright = 0;
-            } elsif ($file =~ /\.(prl|la|pc|ilk)$/i) {
+
+            if ($file =~ /\.(prl|la|pc|ilk)$/i) {
                 complain("Adding build artifact", "generated") if ($new_file && !defined($cfg{generated}));
                 $ws_check = 0;
-            } elsif ($file =~ /\.(hpp|ch|h\+\+|hh|hxx)$/i) {
-                complain("Adding header file with a non-.h extension", "extension") if ($new_file && !$foreign && !defined($cfg{extension}));
-            } elsif ($file !~ /\.qmltypes$/i) {
-                $check_gen = 1;
+            } else {
+                if ($file !~ /\.qmltypes$/i) {
+                    $check_gen = 1;
+                }
+                if ($file =~ m,^tests/.*/(perf|test)?data[/_-],) {
+                    $ws_check = $eof_check = $apple_check = $no_copyright = 0;
+                    # Additional logic for test data goes here...
+                } elsif ($file =~ /(~|\.(old|bak))$/i) {
+                    complain("Adding backup file", "backup") if ($new_file && !defined($cfg{backup}));
+                    $ws_check = 0;
+                } elsif ($file =~ /\.(hpp|ch|h\+\+|hh|hxx)$/i) {
+                    complain("Adding header file with a non-.h extension", "extension") if ($new_file && !$foreign && !defined($cfg{extension}));
+                }
             }
             next;
         }
