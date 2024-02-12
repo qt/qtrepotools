@@ -1066,6 +1066,8 @@ def push_yocto_update(config: Config, retry: bool = False) -> Repo:
         else:  # Expected to be just a regular module
             module_name = repo_name_maybe_submodule
         module_repo = search_for_repo(config, module_name)
+        if not module_repo.branch:
+            module_repo.branch = config.args.branch
         if not module_repo.original_ref:
             module_repo.original_ref, module_repo.original_message = get_head(config, module_repo)
         if pinned_submodule_sha:
