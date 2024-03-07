@@ -420,6 +420,7 @@ my ($coverity, $cid) = (0, 0);
 my $msgline = 0;
 my %picktos = ();
 my $prevline = "";
+my $changelog3rdparty = 0;
 open MSG, "git cat-file -p ".$sha1." |" or die "cannot run git: $!";
 while (<MSG>) {
     last if ($_ eq "\n");
@@ -547,6 +548,8 @@ while (<MSG>) {
                 $inchangelog = 1;
                 if (!/^\[ChangeLog\]/ && !defined($cfg{changelog})) {
                     complain_ln("Bad form of [ChangeLog] tag", "changelog");
+                } elsif (/\[ChangeLog\]\[Third-Party Code\]/) {
+                    $changelog3rdparty = 1;
                 }
             } elsif (/^\[[A-Z][- \w]+\]/) {
                 complain_ln("Likely change-log entry without [ChangeLog] tag", "", -1);
@@ -813,6 +816,7 @@ my $eof_check;
 my $ctlkw_check;
 my $apple_check;
 my $notobjc_check;
+my $attribution_changed;
 open DIFF, "git diff-tree --minimal --no-commit-id --diff-filter=ACMR --ignore-submodules " .
     "--src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -C -l1000 " .
     "--root ".$sha1." |" or die "cannot run git: $!";
@@ -969,6 +973,12 @@ while (<DIFF>) {
             }
             $file = $1;
             #print "*** got file ".$file.".\n";
+            if ($file =~ /qt_attribution\.json$/) {
+                $attribution_changed = 1;
+                if (!$changelog3rdparty) {
+                    complain("qt_attribution.json changed without [ChangeLog][Third-Party Code] in the commit message", "changelog");
+                }
+            }
             $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|qdoc|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
             $qmake = ($file =~ /\.pr[filo]$/i);
             $is_bin = ($file =~ /\.(ps|pdf)$/);
@@ -1082,6 +1092,11 @@ while (<DIFF>) {
 close DIFF;
 printerr;
 flushFile();
+
+if ($changelog3rdparty && !$attribution_changed) {
+    complain("[ChangeLog][Third-Party Code] entry without change to qt_attribution.json", "changelog");
+}
+
 if ($mixws_check) {
     flushChunk() if ($chunk);
     if ($nonws and $ws) {
