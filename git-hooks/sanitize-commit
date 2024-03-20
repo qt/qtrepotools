@@ -548,8 +548,12 @@ while (<MSG>) {
                 $inchangelog = 1;
                 if (!/^\[ChangeLog\]/ && !defined($cfg{changelog})) {
                     complain_ln("Bad form of [ChangeLog] tag", "changelog");
-                } elsif (/\[ChangeLog\]\[Third-Party Code\]/) {
-                    $changelog3rdparty = 1;
+                }
+                if (/\[(?:third|3rd)[ _-]*party[ _-]*code\]/i) {
+                    $changelog3rdparty = $lineno;
+                    if (!/\[Third-Party Code\]/) {
+                        complain_ln("Bad form of [Third-Party Code] tag", "changelog");
+                    }
                 }
             } elsif (/^\[[A-Z][- \w]+\]/) {
                 complain_ln("Likely change-log entry without [ChangeLog] tag", "", -1);
@@ -1094,7 +1098,10 @@ printerr;
 flushFile();
 
 if ($changelog3rdparty && !$attribution_changed) {
-    complain("[ChangeLog][Third-Party Code] entry without change to qt_attribution.json", "changelog");
+    $file = "!!!!!";
+    do_complain($changelog3rdparty,
+        "[ChangeLog][Third-Party Code] entry without change to qt_attribution.json",
+        "changelog");
 }
 
 if ($mixws_check) {
