@@ -497,7 +497,7 @@ while (<MSG>) {
                 # cherry-pick lines count as footers as well.
                 $ftr = 1;
                 $inchangelog = 0;
-            } elsif (/^(?:[A-Z][A-Za-z]+(?:-[A-Za-z][a-z]+)+|F[Ii][Xx][Ee][Ss]|C[Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg]):(.+)/) {
+            } elsif (/^(?:[A-Z][A-Za-z]+(?:-[A-Za-z][a-z]+)+|Fixes|C[Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg]):(.+)/) {
                 if ($1 !~ /^ /) {
                     complain_ln("Missing space after colon in footer", "");
                 }
@@ -512,9 +512,8 @@ while (<MSG>) {
                 } elsif (/^Task-number: *(.*)/i) {
                     complain_ln("Multiple tasks in one footer", "") if ($1 =~ /[ ,]/);
                     complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
-                } elsif (/^Fixes: *(.*)/i) {
+                } elsif (/^Fixes: *(.*)/) {
                     complain_ln("Multiple tasks in one footer", "") if ($1 =~ /[ ,]/);
-                    complain_ln("Capitalization of \"Fixes\" is wrong", "") if (!/^Fixes:/);
                 } elsif (/^Pick-to: *(.*)/i) {
                     for my $pick (split(/\s+/, $1)) {
                         $picktos{$pick} = 1;
