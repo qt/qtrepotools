@@ -1779,7 +1779,7 @@ sub complete_spec_heads($)
                 }
                 my $tip = $$change{tip};
                 if (defined($tip)) {
-                    my $tip_sha1 = $$change_by_key{$tip}{pushed};
+                    my $tip_sha1 = $change_by_key{$tip}{pushed};
                     $visits{$tip_sha1} = 1;
                     push @queried, $tip_sha1;
                 }
