@@ -2086,7 +2086,8 @@ sub source_map_traverse()
             # branch. Also, it's potentially more work.
             my $urefs = $remote_refs{$upstream_remote};
             if ($urefs) {
-                my %utiph = map { $_ => 1 } grep { $_ } map { $$urefs{$$_{tgt}} } @changes;
+                my %utiph = map { $_ => 1 } grep { $_ } map { $$urefs{$_} } \
+                        grep { $_ } map { $$_{tgt} } @changes;
                 $utips = [ keys %utiph ];
             }
         }
