@@ -1935,8 +1935,10 @@ sub changify_remote_specs($)
             my $changes = changify_remote_series($commits, $$spec{new_range_reference});
             if ($changes) {
                 $$spec{new_range} = $changes;
-                my $tip = $$changes[-1]{key};
-                $$_{tip} = $tip foreach (@$commits);
+                if (@$changes) {
+                    my $tip = $$changes[-1]{key};
+                    $$_{tip} = $tip foreach (@$commits);
+                }
                 delete $$spec{new_range_commits};
             }
         }
