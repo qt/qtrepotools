@@ -377,8 +377,8 @@ sub get_changes()
 # assigned to their previous series, unless they lie between Changes
 # which are claimed by separate remote series.
 #
-# The algorithm sequentially interates through all Changes passed to it.
-# The "prefix" state prepresents a local series which may still overlap
+# The algorithm sequentially iterates through all Changes passed to it.
+# The "prefix" state represents a local series which may still overlap
 # with a remote series. The "suffix" state represents a local series
 # which extends beyond an overlap with a remote series. A "hold" state
 # is entered from the respective "plain" state when the local series
@@ -531,7 +531,7 @@ sub deduce_series($;$)
         last if (!$change);
 
         if (length($curr_rmt_grp)) {
-            print "... comitting Change to $curr_rmt_grp.\n" if ($debug);
+            print "... committing Change to $curr_rmt_grp.\n" if ($debug);
             push @{$groups{$curr_rmt_grp}}, $change;
         } else {
             print "... backlogging Change.\n" if ($debug);
@@ -1677,7 +1677,7 @@ sub sort_series($$$$$)
                 # For remote series, prepare for execution below.
                 push @{$levels[$lvl]}, $commit;
             } else {
-                # For pushed series, execute immediately, using to the
+                # For pushed series, execute immediately, using the
                 # threshold previously established for the remote series,
                 # so the divergences are minimized.
                 $exclude{$changeid} = $status

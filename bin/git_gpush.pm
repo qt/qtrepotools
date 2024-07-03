@@ -860,7 +860,7 @@ my $next_group = 10000;
 
 my $next_prop = 10000;
 # Indirect Change properties, which are shared to save space.
-# An alternative would be group poperties, but this would require
+# An alternative would be group properties, but this would require
 # resolving inconsistencies at inopportune times; in particular,
 # we do not want to concern gpick with this at all.
 our %prop_by_key;
