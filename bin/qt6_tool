@@ -448,6 +448,11 @@ def read_acceleration_config():
 def read_config_modules_argument():
     value = read_list_config(MODULES_KEY)
     if len(value) > 1:
+        value_set = set(value)
+        if len(value_set) < len(value):
+            for set_entry in value_set:
+                value.remove(set_entry)
+            raise ValueError('Duplicate entries in module list: ' + ' '.join(value))
         return value
     # Special keywords
     if len(value) == 1 and value[0] == 'all':
