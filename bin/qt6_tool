@@ -253,15 +253,15 @@ def git_checkout_branch(dir, desired_branch):
 def is_available_module(dir_entry, filter_buildable=False):
     """Check whether a directory is an available Qt module (under git)"""
     if dir_entry == 'qtqa':
-        return False;
+        return False
     path = os.path.join(qt_dir, dir_entry)
     git_config = os.path.join(path, '.git')
     if not os.path.isdir(path) or not os.path.exists(git_config):
-        return False;
+        return False
     if filter_buildable:
         cmake_list = os.path.join(path, 'CMakeLists.txt')
         if not os.path.isfile(cmake_list):
-            return False;
+            return False
     return True
 
 
@@ -706,8 +706,8 @@ def init_repository(dir):
     execute_in_dir([git, 'clone', 'git://code.qt.io/qt/qt5.git', target],
                    os.path.dirname(dir))
 
-    init_cmd = ['perl', 'init-repository'] if PLATFORM == Platform.WINDOWS \
-               else ['./init-repository']
+    init_cmd = (['perl', 'init-repository'] if PLATFORM == Platform.WINDOWS
+                else ['./init-repository'])
     init_arguments_value = read_config(INIT_ARGUMENTS_KEY)
     if init_arguments_value:
         init_cmd.extend(init_arguments_value.split(' '))
@@ -754,7 +754,7 @@ if __name__ == '__main__':
         build_mode = BuildMode.RECONFIGURE
 
     if build_mode == BuildMode.NONE and not (options.init or options.branch
-        or options.clean or options.pull or options.test or options.reset):
+       or options.clean or options.pull or options.test or options.reset):
         argument_parser.print_help()
         sys.exit(0)
 
@@ -797,7 +797,7 @@ if __name__ == '__main__':
     use_default_modules = not sorted_modules
     if use_default_modules and (build_mode != BuildMode.NONE or options.test):
         sorted_modules = sort_by_dependencies(read_config_modules_argument(),
-                                           modules_dependencies())
+                                              modules_dependencies())
 
     if build_mode != BuildMode.NONE:
         build(sorted_modules, use_default_modules)
