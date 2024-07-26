@@ -1,7 +1,0 @@
-GERRIT_HOST: codereview.qt-project.org
-GERRIT_STATE_PATH: playground/tqtc-personal-projects
-GERRIT_USERNAME: ''
-GERRIT_PASSWORD: ''
-COIN_INTERNAL_HOST: ''
-MS_TEAMS_NOTIFY_URL: ''
-REPOS: []
