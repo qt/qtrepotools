@@ -40,7 +40,7 @@ my $STATUS=0;
 my $UPDATE=0;
 my $TEST=0;
 my $optDryRun;
-my $optEditConfig;
+my $optEditConfig=0;
 my $optGerritModule;
 my $optIncredibuild;
 my $optGitHooks;
@@ -389,7 +389,7 @@ sub expandReferences
 sub readConfigFile
 {
     my ($fileName) = @_;
-    my $f = new IO::File('<' . $fileName) or die ('Cannot open ' . $fileName . ': ' . $1);
+    my $f = new IO::File('<' . $fileName) or die ('Cannot open ' . $fileName . ': ' . $!);
     my $result = {};
     while (my $line = <$f>) {
         chomp($line);
