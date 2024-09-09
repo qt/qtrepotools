@@ -12,7 +12,7 @@ use warnings;
 use Config;
 use Cwd;
 use Encode;
-use File::Spec qw(path);
+use File::Spec;
 use List::Util qw(first any);
 
 if ($#ARGV < 0 or $#ARGV > 3 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit-rest)$/)) {
