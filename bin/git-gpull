@@ -29,7 +29,7 @@ sub usage()
 {
     print << "EOM";
 Usage:
-    git gpull [<git-pull options>]
+    git gpull [-- <git-pull options>]
 
     This command should be used instead of 'git pull --rebase'
     when git-gpush is being used.
@@ -59,6 +59,9 @@ while (@ARGV) {
     } elsif ($arg eq "-?" || $arg eq "--?" || $arg eq "-h" || $arg eq "--help") {
         usage();
         exit;
+    } elsif ($arg eq "--") {
+        shift @ARGV;
+        last;
     } else {
         fail("Unrecognized command line argument '$arg'.\n");
     }
