@@ -108,7 +108,8 @@ GENERATORS = {'Ninja': Generator.NINJA,
               'MinGW Makefiles': Generator.MAKE,
               'NMake Makefiles': Generator.NMAKE,
               'NMake Makefiles JOM': Generator.JOM}
-GIT_IGNORE_FOR_BRANCHES = ['qtcanvas3d', 'qtrepotools', 'qtqa']
+GIT_IGNORE_FOR_BRANCHES = ['qtcanvas3d']
+GIT_SPECIAL_BRANCHES = {'qtrepotools': 'master'}
 
 # Config file keys
 ACCELERATION_KEY = 'Acceleration'
@@ -252,7 +253,7 @@ def git_checkout_branch(dir, desired_branch):
 
 def is_available_module(dir_entry, filter_buildable=False):
     """Check whether a directory is an available Qt module (under git)"""
-    if dir_entry == 'qtqa':
+    if filter_buildable and dir_entry == 'qtqa':
         return False
     path = os.path.join(qt_dir, dir_entry)
     git_config = os.path.join(path, '.git')
@@ -353,8 +354,10 @@ def checkout_branch(branch):
     git_checkout_branch(qt_dir, branch)
     for module in available_modules():
         if module not in GIT_IGNORE_FOR_BRANCHES:
+            special_branch = GIT_SPECIAL_BRANCHES.get(module)
+            module_branch = special_branch if special_branch else branch
             dir = os.path.join(qt_dir, module)
-            git_checkout_branch(dir, branch)
+            git_checkout_branch(dir, module_branch)
 
 
 def run_git(args):
