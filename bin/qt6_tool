@@ -711,8 +711,11 @@ def init_repository(dir):
     execute_in_dir([git, 'clone', 'git://code.qt.io/qt/qt5.git', target],
                    os.path.dirname(dir))
 
-    init_cmd = (['perl', 'init-repository'] if PLATFORM == Platform.WINDOWS
-                else ['./init-repository'])
+    if PLATFORM == Platform.WINDOWS:
+        cmd = os.environ.get("COMSPEC")
+        init_cmd = [cmd, '/c', 'init-repository.bat']
+    else:
+        init_cmd = ['sh', 'init-repository']
     init_arguments_value = read_config(INIT_ARGUMENTS_KEY)
     if init_arguments_value:
         init_cmd.extend(init_arguments_value.split(' '))
