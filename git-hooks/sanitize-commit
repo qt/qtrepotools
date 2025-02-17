@@ -239,9 +239,9 @@ sub check_email($$$$)
     # - have single letters not followed by a dot or apostrophe
     if (!defined($good_names{$real}) && ($real !~ / / || $real =~ /\b(?!da|de|du|d'|la|van|von)\p{Ll}|\b\pL([^.'\pL]|$)/)) {
         if ($gerrit_rest) {
-            do_complain($line, "Suspicious real name", "email");
+            do_complain($line, "Real Name has an unexpected form", "email");
         } else {
-            do_complain(-1, "Suspicious $label real name", "email");
+            do_complain(-1, ucfirst($label)." real name has an unexpected form", "email");
         }
     }
 }
