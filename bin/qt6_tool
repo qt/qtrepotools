@@ -577,7 +577,9 @@ def configure_arguments():
 
     result = [cmake(), f'-DCMAKE_INSTALL_PREFIX={install_dir}',
               f'-G{generator}']
-
+    # Prevent mis-detection of clang/g++ when in path by coincidence
+    if PLATFORM == Platform.WINDOWS and os.environ.get('VCINSTALLDIR'):
+        result.append('-DCMAKE_CXX_COMPILER=cl.exe')
     if not build_tests:
         result.append('-DQT_BUILD_TESTS=OFF')
     if not build_examples:
