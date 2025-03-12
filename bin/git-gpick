@@ -1810,7 +1810,7 @@ sub complete_spec_heads($)
     fetch_patchsets(\@fetches, \%visits) if (@fetches);
 
     print "Visiting fetched and pushed PatchSets ...\n" if ($debug);
-    visit_local_commits([ keys %visits ]);
+    visit_local_commits([ keys %visits ], 1);
 
     # We queried the pushed commits implicitly (by Change-Id),
     # so mark them as such.
@@ -1916,7 +1916,7 @@ sub complete_spec_tails($)
         fetch_patchsets(\@fetches, \%visits, "deduced ") if (@fetches);
 
         print "Visiting deduced fetched and pushed PatchSets ...\n" if ($debug);
-        visit_local_commits([ keys %visits ]);
+        visit_local_commits([ keys %visits ], 1);
 
         $$_{did_query} = 1 foreach (grep { $_ } map { $commit_by_id{$_} } @sha1s);
 

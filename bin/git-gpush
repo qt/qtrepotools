@@ -1241,7 +1241,7 @@ sub visit_pushed_changes($)
         scan_pushed_group($group, \%commits);
     }
     print "Visiting pushed commits ...\n" if ($debug);
-    visit_local_commits([ sort keys %commits ], $mail_mode);
+    visit_local_commits([ sort keys %commits ], 1);
 }
 
 sub do_add_change_ids($)

@@ -208,7 +208,7 @@ sub perform_gc()
     }
 
     print "Visiting pushed and fetched PatchSets ...\n" if ($debug);
-    visit_local_commits([ keys %visits ], $mail_mode);
+    visit_local_commits([ keys %visits ], 1);
 
     # Keep ancestors of pushed commits, so complete_pushed_series()
     # in gpick does not need to re-fetch them.
