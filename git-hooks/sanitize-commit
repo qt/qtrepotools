@@ -544,6 +544,11 @@ while (<MSG>) {
                         }
                     }
                     complain_ln("Capitalization of \"Pick-to\" is wrong", "") if (!/^Pick-to:/);
+                } elsif (/^QUIP: *(.*)/i) {
+                    my $quip = $1;
+                    complain_ln("Multiple QUIPs in one footer", "") if ($quip =~ /[ ,]/);
+                    complain_ln("Non-numeric QUIP identifier", "") if ($quip =~ /^[^0-9]/);
+                    complain_ln("Capitalization of \"QUIP\" is wrong", "") if (!/^QUIP:/);
                 } elsif (/^Coverity-Id: /) {
                     $cid = 1;
                 }
