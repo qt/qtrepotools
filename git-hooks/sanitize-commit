@@ -549,8 +549,13 @@ while (<MSG>) {
                     complain_ln("Multiple QUIPs in one footer", "") if ($quip =~ /[ ,]/);
                     complain_ln("Non-numeric QUIP identifier", "") if ($quip =~ /^[^0-9]/);
                     complain_ln("Capitalization of \"QUIP\" is wrong", "") if (!/^QUIP:/);
-                } elsif (/^Coverity-Id: /) {
+                } elsif (/^Coverity-Id: *(.*)/i) {
                     $cid = 1;
+                    my $cidval = $1;
+                    complain_ln("Multiple CIDs in one footer", "") if ($cidval =~ /[ ,]/);
+                    complain_ln("Non-numeric CID", "") if ($cidval =~ /[^0-9 ,]/);  # [ ,]: already checked above
+                    complain_ln("Leading zero", "") if ($cidval =~ /^0/);
+                    complain_ln("Capitalization of \"Coverity-Id\" is wrong", "") if (!/^Coverity-Id:/);
                 }
             } elsif (/^\[change-?log\]/i) {
                 $inchangelog = 1;
