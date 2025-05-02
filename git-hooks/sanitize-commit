@@ -939,6 +939,9 @@ while (<DIFF>) {
         if ($clike && /\bQ_CLANG_QDOC\b/) {
             complain_ln("Using deprecated define Q_CLANG_QDOC; use Q_QDOC instead", "qdoc");
         }
+        if ($clike && /\bqWait\s*\(.*?\)/) {
+            complain_ln("Usage of qWait() is discouraged", "", -1);
+        }
         # Check for Unicode Bi-directional Override exploit characters.
         # See https://trojansource.codes/
         # NB: data has been UTF-8 encoded by the time it gets here,
