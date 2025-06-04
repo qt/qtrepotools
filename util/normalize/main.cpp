@@ -114,11 +114,46 @@ void check(const QString &fileName)
 
 void traverse(const QString &path)
 {
+    auto needsChecking = [] (QStringView path) {
+        // list of file extensions that
+        constexpr char extensions[][5] = {
+            // C++ impl files:
+            "C", // will also match .c (because we're matching case-insensitively, but ¯\_(ツ)_/¯
+            "cpp",
+            "cxx",
+            "c++",
+            // header files:
+            "h",
+            "hpp",
+            "hxx",
+            // Obj-C++ impl:
+            "mm",
+            // Parser generators:
+            "g",
+            // documentation may also include SIGNAL/SLOT macros:
+            "qdoc",
+        };
+
+        // treat .in files like the underlying file
+        if (path.endsWith(QLatin1StringView{".in"}, Qt::CaseInsensitive))
+            path = path.chopped(3);
+
+        for (const char *extension : extensions) {
+            const QLatin1StringView ext{extension};
+            if (path.endsWith(ext, Qt::CaseInsensitive) &&
+                path.chopped(ext.size()).endsWith(u'.'))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
     QDirIterator dirIterator(path, QDir::NoDotAndDotDot | QDir::Dirs | QDir::Files | QDir::NoSymLinks);
 
     while (dirIterator.hasNext()) {
         QString filePath = dirIterator.next();
-        if (filePath.endsWith(".cpp"))
+        if (needsChecking(filePath))
             check(filePath);
         else if (QFileInfo(filePath).isDir())
             traverse(filePath); // recurse
@@ -141,7 +176,7 @@ int main(int argc, char *argv[])
     parser.addOption(modifyOption);
 
     parser.addPositionalArgument(QStringLiteral("path"),
-                                 QStringLiteral("can be a single file or a directory (in which case, look for *.cpp recursively)"));
+                                 QStringLiteral("can be a single file or a directory (in which case, look for file types that may contain SIGNALs and SLOTs recursively)"));
 
     parser.process(app);
 
