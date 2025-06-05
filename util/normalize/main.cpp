@@ -95,7 +95,7 @@ void check(const QString &fileName)
     QStringList lines;
     bool found = false;
     while (true) {
-        QByteArray bline = file.readLine(16384);
+        QByteArray bline = file.readLine();
         if (bline.isEmpty())
             break;
         QString line = QString::fromLocal8Bit(bline);
