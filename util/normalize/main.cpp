@@ -17,33 +17,33 @@
 static bool printFilename = true;
 static bool modify = false;
 
-QString signature(const QString &line, int pos)
+static QByteArray signature(const QByteArray &line, int pos)
 {
     int start = pos;
     // find first open parentheses
-    while (start < line.length() && line.at(start) != QLatin1Char('('))
+    while (start < line.length() && line.at(start) != '(')
         ++start;
     int i = ++start;
     int par = 1;
     // find matching closing parentheses
     while (i < line.length() && par > 0) {
-        if (line.at(i) == QLatin1Char('('))
+        if (line.at(i) == '(')
             ++par;
-        else if (line.at(i) == QLatin1Char(')'))
+        else if (line.at(i) == ')')
             --par;
         ++i;
     }
     if (par == 0)
         return line.mid(start, i - start - 1);
-    return QString();
+    return QByteArray();
 }
 
-bool isValidIdentifierChar(const QChar c)
+static bool isValidIdentifierChar(char c)
 {
-    return c == QLatin1Char('_') || c.isLetterOrNumber();
+    return c == '_' || QChar::isLetterOrNumber(uchar(c));
 }
 
-bool checkSignature(const QString &fileName, QString &line, const char *sig)
+static bool checkSignature(const QString &fileName, QByteArray &line, const char *sig)
 {
     static QStringList fileList;
 
@@ -56,7 +56,7 @@ bool checkSignature(const QString &fileName, QString &line, const char *sig)
         int endIdx = idx + siglen;
         if (endIdx < line.length() && isValidIdentifierChar(line.at(endIdx)))
             continue;
-        const QByteArray sl(signature(line, idx).toLocal8Bit());
+        const QByteArray sl = signature(line, idx);
         QByteArray nsl(QMetaObject::normalizedSignature(sl.constData()));
         if (sl != nsl) {
             found = true;
@@ -95,10 +95,9 @@ void check(const QString &fileName)
     QStringList lines;
     bool found = false;
     while (true) {
-        QByteArray bline = file.readLine();
-        if (bline.isEmpty())
+        QByteArray line = file.readLine();
+        if (line.isEmpty())
             break;
-        QString line = QString::fromLocal8Bit(bline);
         found |= checkSignature(fileName, line, "SLOT");
         found |= checkSignature(fileName, line, "SIGNAL");
         if (modify)
