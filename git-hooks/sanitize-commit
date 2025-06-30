@@ -398,7 +398,7 @@ sub check_cherry_pick($)
     chomp(my $origBase = `git merge-base $orig @allHds 2> /dev/null`);
     if ($origBase ne $orig) {
         # Most likely not integrated yet, but may also be a wip/ branch.
-        complain_ln("Cherry-pick's source is not an upstream commit", "cherry", 1);
+        complain_ln("Cherry-pick's source is not a valid merged commit", "cherry");
     } elsif ($handleLts) {
         complain("Cherry-pick will be subsequently merged with its source branch", "cherry");
     }
