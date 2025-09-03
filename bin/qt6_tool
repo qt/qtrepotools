@@ -565,11 +565,15 @@ def remove_dir_recursively(dir):
         shutil.rmtree(dir, ignore_errors=True)
 
 
+def cmake_bool_value(value):
+    return "ON" if value else "OFF"
+
+
 def configure_arguments():
     generator = read_generator_config()
     build_type = read_config(BUILD_TYPE_KEY)
-    build_examples = read_bool_config(BUILD_EXAMPLES_KEY)
-    build_tests = read_bool_config(BUILD_TESTS_KEY)
+    build_examples = cmake_bool_value(read_bool_config(BUILD_EXAMPLES_KEY))
+    build_tests = cmake_bool_value(read_bool_config(BUILD_TESTS_KEY))
     build_statically = read_bool_config(STATIC_KEY)
     unity_build = read_bool_config(UNITY_KEY)
     arguments = read_config(CONFIGURE_ARGUMENTS_KEY)
@@ -580,10 +584,8 @@ def configure_arguments():
     # Prevent mis-detection of clang/g++ when in path by coincidence
     if PLATFORM == Platform.WINDOWS and os.environ.get('VCINSTALLDIR'):
         result.append('-DCMAKE_CXX_COMPILER=cl.exe')
-    if not build_tests:
-        result.append('-DQT_BUILD_TESTS=OFF')
-    if not build_examples:
-        result.append('-DQT_BUILD_EXAMPLES=OFF')
+    result.append(f'-DQT_BUILD_TESTS={build_tests}')
+    result.append(f'-DQT_BUILD_EXAMPLES={build_examples}')
     if build_statically:
         result.append('-DBUILD_SHARED_LIBS=OFF')
     if unity_build:
