@@ -670,7 +670,11 @@ if ($with_pickbot && !$havecherry) {
     my $onDev;
     my $masterName = $foundDev ? "dev" : "master";
     if (defined($target)) {
-        $onDev = ($target eq $masterName) || ($target =~ m,^wip/,);
+        # Only the wip/ bypass takes the optional tqtc/ prefix: a tqtc- repo
+        # mirrors public branches under their plain names, so its dev is "dev".
+        # A tqtc/dev, where present, is a separate line alongside it - and
+        # $masterName is also the Pick-to token suggested below.
+        $onDev = ($target eq $masterName) || ($target =~ m,^(?:tqtc/)?wip/,);
     } else {
         my $masterRev = $allHeads{$masterName};
         chomp(my $sha1Base = `git merge-base $sha1 $masterRev`);
