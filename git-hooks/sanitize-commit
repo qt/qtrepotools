@@ -577,7 +577,7 @@ while (<MSG>) {
                         }
                         if (!$valid_pick) {
                             complain_ln("Pick-to entry '$pick' is not a valid branch in $repo",
-                                        "pickto", 1);
+                                        "pickto");
                         } elsif (defined($target) && ($pick eq $target)) {
                             complain_ln("Pick-to entry '$pick' equals source branch",
                                         "pickto", 1)
