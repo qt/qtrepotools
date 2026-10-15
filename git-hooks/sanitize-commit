@@ -373,7 +373,7 @@ while (<HEADS>) {
             push(@{$nonDevHeads{''}}, $rev);
             last;
         }
-    } elsif ($name !~ m,/master$,) {
+    } elsif ($name !~ m,/(?:master|main)$,) {
         next;
     }
     $name =~ s,^[^/]+/,,;  # Strip heads/ or origin/
@@ -668,7 +668,10 @@ if ($coverity && !$cid) {
 }
 if ($with_pickbot && !$havecherry) {
     my $onDev;
-    my $masterName = $foundDev ? "dev" : "master";
+    # The development branch: dev, else master, else main.
+    my $masterName = $foundDev ? "dev"
+                   : (defined($allHeads{master}) || !defined($allHeads{main})) ? "master"
+                   : "main";
     if (defined($target)) {
         # Only the wip/ bypass takes the optional tqtc/ prefix: a tqtc- repo
         # mirrors public branches under their plain names, so its dev is "dev".
