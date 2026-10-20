@@ -110,6 +110,8 @@ GENERATORS = {'Ninja': Generator.NINJA,
               'NMake Makefiles JOM': Generator.JOM}
 GIT_IGNORE_FOR_BRANCHES = ['qtcanvas3d']
 GIT_SPECIAL_BRANCHES = {'qtrepotools': 'master'}
+WEBENGINE_DEFAULT_BRANCH = "6.140"
+WEBENGINE_BRANCHES = {"6.12": "6.140", "6.12.0": "6.140.0"}
 
 # Config file keys
 ACCELERATION_KEY = 'Acceleration'
@@ -135,6 +137,15 @@ UNITY_BATCH_SIZE_KEY = 'UnityBatchSize'
 DOCUMENTATION_CMAKE_OPTS = ["-DQT_NO_PACKAGE_VERSION_CHECK=TRUE",
                             "-DQT_NO_PACKAGE_VERSION_INCOMPATIBLE_WARNING=TRUE",
                             "-DQT_ALLOW_SYMLINK_IN_PATHS=TRUE"]
+
+
+def special_branch(module, branch):
+    """Return branch for modules with special handling."""
+    if special_branch := GIT_SPECIAL_BRANCHES.get(module):
+        return special_branch
+    if module == "qtwebengine":
+        return WEBENGINE_BRANCHES.get(branch, WEBENGINE_DEFAULT_BRANCH)
+    return branch
 
 
 def default_config_file():
@@ -379,10 +390,8 @@ def checkout_branch(branch):
     git_checkout_branch(qt_dir, branch)
     for module in available_modules():
         if module not in GIT_IGNORE_FOR_BRANCHES:
-            special_branch = GIT_SPECIAL_BRANCHES.get(module)
-            module_branch = special_branch if special_branch else branch
             dir = os.path.join(qt_dir, module)
-            git_checkout_branch(dir, module_branch)
+            git_checkout_branch(dir, special_branch(module, branch))
 
 
 def run_git(args):
